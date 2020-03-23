@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch"
-	"github.com/toolkits/slice"
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
@@ -178,12 +177,22 @@ func validatePatch(i Instance, patch jsonpatch.Patch) *gomerr.ApplicationError {
 			return gomerr.BadRequest("Patch operation has a missing or invalid 'path'.")
 		}
 
-		if !slice.ContainsString(patchPaths, path) {
+		if !containsString(patchPaths, path) {
 			return gomerr.Forbidden(fmt.Sprintf("Caller cannot applyPatch '%s'.", path))
 		}
 	}
 
 	return nil
+}
+
+func containsString(sl []string, v string) bool {
+	for _, vv := range sl {
+		if vv == v {
+			return true
+		}
+	}
+
+	return false
 }
 
 func applyPatch(i Instance, patch jsonpatch.Patch) *gomerr.ApplicationError {
