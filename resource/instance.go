@@ -8,7 +8,6 @@ import (
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/toolkits/slice"
-	"gopkg.in/go-playground/validator.v9"
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
@@ -16,7 +15,7 @@ import (
 	"github.com/jt0/gomer/logs"
 )
 
-var validate = validator.New()
+//var validate = validator.New()
 
 type Instance interface {
 	resource
@@ -74,9 +73,9 @@ func DoCreate(i Instance) (interface{}, *gomerr.ApplicationError) {
 		return nil, ae
 	}
 
-	if err := validate.Struct(i); err != nil {
-		return nil, gomerr.ValidationFailure(err)
-	}
+	//if err := validate.Struct(i); err != nil {
+	//	return nil, gomerr.ValidationFailure(err)
+	//}
 
 	if ae := i.metadata().dataStore.Create(i); ae != nil {
 		return nil, ae
@@ -161,7 +160,7 @@ func validatePatch(i Instance, patch jsonpatch.Patch) *gomerr.ApplicationError {
 	for _, field := range metadata.fields {
 		if field.writable(i.Subject().Principal(FieldAccess)) {
 			// TODO: handle nested/embedded structs
-			patchPaths = append(patchPaths, "/" + field.externalName)
+			patchPaths = append(patchPaths, "/"+field.externalName)
 		}
 	}
 

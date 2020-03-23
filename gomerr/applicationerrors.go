@@ -3,10 +3,6 @@ package gomerr
 import (
 	"fmt"
 	"strings"
-
-	"gopkg.in/go-playground/validator.v9"
-
-	"github.com/jt0/gomer/logs"
 )
 
 type applicationErrorType string
@@ -108,40 +104,40 @@ func InternalServerError(message string, details ...interface{}) *ApplicationErr
 	return &ApplicationError{InternalServerErrorType, message, details}
 }
 
-func ValidationFailure(err error) *ApplicationError {
-	// this check is only needed when your code could produce
-	// an invalid value for validation such as interface with nil
-	// value most including myself do not usually have code like this.
-	if _, ok := err.(*validator.InvalidValidationError); ok {
-		logs.Error.Print(err)
-
-		return InternalServerError("Error while validating input")
-	}
-
-	var details []interface{}
-
-	for _, err := range err.(validator.ValidationErrors) {
-		//fmt.Println(err.Namespace())
-		//fmt.Println(err.Field())
-		//fmt.Println(err.StructNamespace()) // can differ when a custom TagNameFunc is registered or
-		//fmt.Println(err.StructField())     // by passing alt name to ReportError like below
-		//fmt.Println(err.Tag())
-		//fmt.Println(err.ActualTag())
-		//fmt.Println(err.Kind())
-		//fmt.Println(err.Type())
-		//fmt.Println(err.Value())
-		//fmt.Println(err.Param())
-
-		if err.Tag() == "required" {
-			details = append(details, fmt.Sprintf("Validation error: missing %s attribute", err.Field()))
-		} else {
-			details = append(details, fmt.Sprintf("Validation error: %s %s %s", err.Field(), err.Value(), err.Tag()))
-		}
-	}
-
-	if len(details) == 0 {
-		return nil
-	}
-
-	return &ApplicationError{BadRequestType, "Validation errors in request.", details}
-}
+//func ValidationFailure(err error) *ApplicationError {
+//	// this check is only needed when your code could produce
+//	// an invalid value for validation such as interface with nil
+//	// value most including myself do not usually have code like this.
+//	if _, ok := err.(*validator.InvalidValidationError); ok {
+//		logs.Error.Print(err)
+//
+//		return InternalServerError("Error while validating input")
+//	}
+//
+//	var details []interface{}
+//
+//	for _, err := range err.(validator.ValidationErrors) {
+//		//fmt.Println(err.Namespace())
+//		//fmt.Println(err.Field())
+//		//fmt.Println(err.StructNamespace()) // can differ when a custom TagNameFunc is registered or
+//		//fmt.Println(err.StructField())     // by passing alt name to ReportError like below
+//		//fmt.Println(err.Tag())
+//		//fmt.Println(err.ActualTag())
+//		//fmt.Println(err.Kind())
+//		//fmt.Println(err.Type())
+//		//fmt.Println(err.Value())
+//		//fmt.Println(err.Param())
+//
+//		if err.Tag() == "required" {
+//			details = append(details, fmt.Sprintf("Validation error: missing %s attribute", err.Field()))
+//		} else {
+//			details = append(details, fmt.Sprintf("Validation error: %s %s %s", err.Field(), err.Value(), err.Tag()))
+//		}
+//	}
+//
+//	if len(details) == 0 {
+//		return nil
+//	}
+//
+//	return &ApplicationError{BadRequestType, "Validation errors in request.", details}
+//}
