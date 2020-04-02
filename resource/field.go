@@ -15,9 +15,9 @@ type FieldAccessPrincipal string
 const (
 	FieldAccess auth.PrincipalType = "FieldAccess"
 
-	ReadWriteAll     FieldAccessPrincipal = "ReadWriteAll"
-	ReadAll          FieldAccessPrincipal = "ReadAll"
-	NoAccess         FieldAccessPrincipal = "NoAccess"
+	ReadWriteAll FieldAccessPrincipal = "ReadWriteAll"
+	ReadAll      FieldAccessPrincipal = "ReadAll"
+	NoAccess     FieldAccessPrincipal = "NoAccess"
 )
 
 func (f FieldAccessPrincipal) Id() string {
@@ -46,12 +46,25 @@ type FieldDefaultFunction func() interface{}
 type FieldDefaultFunctions func(name string) func(subject auth.Subject) interface{}
 
 func RegisterFieldDefaultFunctions(functions map[string]FieldDefaultFunction) {
+	for k, _ := range functions {
+		if k[:1] != "$" {
+			panic("Default functions must start with a '$' symbol")
+		}
+
+		if k[1:2] == "_" {
+			panic("Default function names must not begin with an underscore")
+		}
+	}
+
 	fieldDefaultFunctions = functions
 }
 
 var (
-	bitsLocationForPrincipal = make(map[auth.Principal]uint)
-	fieldDefaultFunctions    map[string]FieldDefaultFunction
+	bitsLocationForPrincipal      = make(map[auth.Principal]uint)
+	fieldDefaultFunctions         map[string]FieldDefaultFunction
+	internalFieldDefaultFunctions = map[string]FieldDefaultFunction{
+		"$_emptyStringToIntMap": func() interface{} { return make(map[string]int) },
+	}
 )
 
 func fillFieldMetadata(fieldType reflect.Type, metadata *metadata, fieldPrefix string) {
@@ -100,7 +113,7 @@ func handleAccessTag(access string) fieldAccessBits {
 		panic("'access' tag too long.  Can only support up to 8 access pairs (16 bits)")
 	}
 
-	if len(access) % 2 != 0 {
+	if len(access)%2 != 0 {
 		panic("expected 'access' must have two values for each field access principal")
 	}
 
@@ -139,6 +152,10 @@ func handleDefaultTag(defaultTag string, field *field) {
 			field.defaultValueFunction = fn
 
 			return
+		} else if fn, ok := internalFieldDefaultFunctions[defaultTag]; ok {
+			field.defaultValueFunction = fn
+
+			return
 		}
 	}
 
@@ -166,10 +183,10 @@ func (f field) readable(fieldAccessPrincipal auth.Principal) bool {
 		return false
 	}
 
-	readBitLocationForRole := 2 * bitsLocation + 1
+	readBitLocationForRole := 2*bitsLocation + 1
 	readBitForRole := fieldAccessBits(1 << readBitLocationForRole)
 
-	return f.access & readBitForRole != 0
+	return f.access&readBitForRole != 0
 }
 
 func (f field) writable(fieldAccessPrincipal auth.Principal) bool {
@@ -187,12 +204,12 @@ func (f field) writable(fieldAccessPrincipal auth.Principal) bool {
 	writeBitLocationForRole := 2 * bitsLocation
 	writeBitForRole := fieldAccessBits(1 << writeBitLocationForRole)
 
-	return f.access & writeBitForRole != 0
+	return f.access&writeBitForRole != 0
 }
 
 func applyFieldDefaults(i Instance) *gomerr.ApplicationError {
 	metadata := i.metadata()
-	resource := reflect.ValueOf(i).Elem()   // Support non-pointer types?
+	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
 
 	// TODO: handle nested/embedded structs
 	for name, field := range metadata.fields {
@@ -332,7 +349,7 @@ func scopedResult(i Instance) (interface{}, *gomerr.ApplicationError) {
 
 func extractFields(i Instance) map[string]interface{} {
 	metadata := i.metadata()
-	resource := reflect.ValueOf(i).Elem()   // Support non-pointer types?
+	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
 	resourceView := make(map[string]interface{})
 
 	for name, field := range metadata.fields {

@@ -22,6 +22,8 @@ type Instance interface {
 
 	PreCreate() *gomerr.ApplicationError
 	PostCreate() *gomerr.ApplicationError
+	PreGet() *gomerr.ApplicationError
+	PostGet() *gomerr.ApplicationError
 	PrePatch(patch jsonpatch.Patch) *gomerr.ApplicationError
 	PostPatch(patch jsonpatch.Patch) *gomerr.ApplicationError
 	PreDelete() *gomerr.ApplicationError
@@ -65,8 +67,50 @@ func SaveInstance(i Instance) *gomerr.ApplicationError {
 	return nil
 }
 
-func DoCreate(i Instance) (interface{}, *gomerr.ApplicationError) {
+func DoCreate(i Instance) (result interface{}, ae *gomerr.ApplicationError) {
 	applyFieldDefaults(i)
+
+	limited, ok := i.(Limited)
+	if ok {
+		limiter, ae := limited.Limiter()
+		if ae != nil {
+			return nil, ae
+		}
+
+		limiterInstance, ok := limiter.(Instance)
+		if !ok {
+			return nil, gomerr.InternalServerError("Expected limiter to be an instance")
+		}
+
+		// If the metadata isn't set, then this is a pre-loaded object.  No need to read and no need to update.
+		if limiterInstance.metadata() == nil {
+			resourceType := lowerCaseTypeName(reflect.TypeOf(limiter))
+			metadata, ok := resourceMetadata[resourceType]
+			if !ok {
+				return nil, gomerr.BadRequest("Unknown type: " + resourceType)
+			}
+
+			limiterInstance.setMetadata(metadata)
+			limiterInstance.setSubject(i.Subject())
+
+			// TODO: cache in case needed by more than one resource...
+			// TODO: need an optimistic lock mechanism to avoid overwriting
+			// TODO: check to see if should not be read...
+			if ae := limiterInstance.metadata().dataStore.Read(limiterInstance); ae != nil {
+				return nil, ae
+			}
+
+			defer func() {
+				if ae == nil {
+					limiterInstance.metadata().dataStore.Update(limiterInstance)
+				}
+			}()
+		}
+
+		if ae := checkAndIncrement(limiter, limited); ae != nil {
+			return nil, ae
+		}
+	}
 
 	if ae := i.PreCreate(); ae != nil {
 		return nil, ae
@@ -134,6 +178,48 @@ func DoPatch(i Instance, patch jsonpatch.Patch) (interface{}, *gomerr.Applicatio
 }
 
 func DoDelete(i Instance) (interface{}, *gomerr.ApplicationError) {
+	limited, ok := i.(Limited)
+	if ok {
+		limiter, ae := limited.Limiter()
+		if ae != nil {
+			return nil, ae
+		}
+
+		limiterInstance, ok := limiter.(Instance)
+		if !ok {
+			return nil, gomerr.InternalServerError("Expected limiter to be an instance")
+		}
+
+		// If the metadata isn't set, then this is a pre-loaded object.  No need to read and no need to update.
+		if limiterInstance.metadata() == nil {
+			resourceType := lowerCaseTypeName(reflect.TypeOf(limiter))
+			metadata, ok := resourceMetadata[resourceType]
+			if !ok {
+				return nil, gomerr.BadRequest("Unknown type: " + resourceType)
+			}
+
+			limiterInstance.setMetadata(metadata)
+			limiterInstance.setSubject(i.Subject())
+
+			// TODO: cache in case needed by more than one resource...
+			// TODO: need an optimistic lock mechanism to avoid overwriting
+			// TODO: check to see if should not be read...
+			if ae := limiterInstance.metadata().dataStore.Read(limiterInstance); ae != nil {
+				return nil, ae
+			}
+
+			defer func() {
+				if ae == nil {
+					limiterInstance.metadata().dataStore.Update(limiterInstance)
+				}
+			}()
+		}
+
+		if ae := decrement(limiter, limited); ae != nil {
+			return nil, ae
+		}
+	}
+
 	if ae := i.PreDelete(); ae != nil {
 		return nil, ae
 	}
@@ -225,6 +311,14 @@ func (b *BaseInstance) PreCreate() *gomerr.ApplicationError {
 }
 
 func (b *BaseInstance) PostCreate() *gomerr.ApplicationError {
+	return nil
+}
+
+func (b *BaseInstance) PreGet() *gomerr.ApplicationError {
+	return nil
+}
+
+func (b *BaseInstance) PostGet() *gomerr.ApplicationError {
 	return nil
 }
 

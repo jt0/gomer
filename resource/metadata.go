@@ -16,7 +16,11 @@ type Metadata interface {
 	// ListQueryKeys
 }
 
-func Register(instance Instance, collection Collection, parentMetadata Metadata, dataStore data.Store) Metadata {
+func Register(instance Instance, collection Collection, dataStore data.Store, parentMetadata Metadata) Metadata {
+	if instance == nil {
+		panic("A resource requires an Instance type")
+	}
+
 	it := reflect.TypeOf(instance)
 	instanceName := lowerCaseTypeName(it)
 
@@ -84,7 +88,7 @@ type metadata struct {
 	idFields       []field
 	dataStore      data.Store
 	parent         *metadata
-	children       []Metadata  // Using interface type since we aren't currently using child attributes
+	children       []Metadata // Using interface type since we aren't currently using child attributes
 }
 
 func (m *metadata) InstanceName() string {
