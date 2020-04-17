@@ -63,33 +63,41 @@ var (
 	bitsLocationForPrincipal      = make(map[auth.Principal]uint)
 	fieldDefaultFunctions         map[string]FieldDefaultFunction
 	internalFieldDefaultFunctions = map[string]FieldDefaultFunction{
-		"$_emptyStringToIntMap": func() interface{} { return make(map[string]int) },
+		//"$_emptyStringToIntMap": func() interface{} { return make(map[string]int) },
 	}
 )
 
-func fillFieldMetadata(fieldType reflect.Type, metadata *metadata, fieldPrefix string) {
-	for i := 0; i < fieldType.NumField(); i++ {
-		structField := fieldType.Field(i)
+func fieldMetadata(structType reflect.Type) map[string]field {
+	fields := make(map[string]field)
+
+	for i := 0; i < structType.NumField(); i++ {
+		structField := structType.Field(i)
 		structFieldName := structField.Name
 
 		if unicode.IsLower([]rune(structFieldName)[0]) {
 			continue
 		}
 
-		if structField.Type.Kind() == reflect.Struct && structField.Anonymous {
-			fillFieldMetadata(structField.Type, metadata, "")
+		if structField.Type.Kind() == reflect.Struct {
+			nestedFields := fieldMetadata(structField.Type)
+
+			for k, v := range nestedFields {
+				fields[k] = v
+			}
 		} else {
 			field := field{
-				name:         fieldPrefix + structFieldName,
+				name:         structFieldName,
 				externalName: handleExtnameTag(structField.Tag.Get("extname"), structFieldName),
 				access:       handleAccessTag(structField.Tag.Get("access")),
 			}
 
 			handleDefaultTag(structField.Tag.Get("default"), &field)
 
-			metadata.fields[fieldPrefix+structFieldName] = field
+			fields[structFieldName] = field
 		}
 	}
+
+	return fields
 }
 
 func handleExtnameTag(extname, fieldName string) string {
@@ -378,6 +386,9 @@ func isEmptyValue(v reflect.Value) bool {
 		return v.Float() == 0
 	case reflect.Interface, reflect.Ptr:
 		return v.IsNil()
+	case reflect.Invalid:
+		// TODO: log?
+		return true
 	}
 	return false
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jt0/gomer/data"
+	"github.com/jt0/gomer/util"
 )
 
 type Metadata interface {
@@ -22,7 +23,7 @@ func Register(instance Instance, collection Collection, dataStore data.Store, pa
 	}
 
 	it := reflect.TypeOf(instance)
-	instanceName := lowerCaseTypeName(it)
+	instanceName := strings.ToLower(util.UnqualifiedTypeName(it))
 
 	if metadata, ok := resourceMetadata[instanceName]; ok {
 		return metadata
@@ -45,14 +46,12 @@ func Register(instance Instance, collection Collection, dataStore data.Store, pa
 		instanceType:   it,
 		instanceName:   instanceName,
 		collectionType: ct,
-		collectionName: lowerCaseTypeName(ct),
-		fields:         make(map[string]field),
+		collectionName: strings.ToLower(util.UnqualifiedTypeName(ct)),
+		fields:         fieldMetadata(structType),
 		dataStore:      dataStore,
 		parent:         nilSafeParentMetadata,
 		children:       make([]Metadata, 0),
 	}
-
-	fillFieldMetadata(structType, metadata, "")
 
 	resourceMetadata[instanceName] = metadata
 	if nilSafeParentMetadata != nil {
@@ -60,21 +59,6 @@ func Register(instance Instance, collection Collection, dataStore data.Store, pa
 	}
 
 	return metadata
-}
-
-func lowerCaseTypeName(t reflect.Type) string {
-	return strings.ToLower(typeName(t))
-}
-
-func typeName(t reflect.Type) string {
-	if t == nil {
-		return ""
-	}
-
-	s := t.String()
-	dotIndex := strings.Index(s, ".")
-
-	return s[dotIndex+1:]
 }
 
 var resourceMetadata = make(map[string]*metadata)

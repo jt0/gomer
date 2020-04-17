@@ -6,10 +6,10 @@ import (
 
 type resource interface {
 	Subject() auth.Subject
+	SetSubject(auth.Subject)
 
 	metadata() *metadata
 	setMetadata(*metadata)
-	setSubject(auth.Subject)
 }
 
 type BaseResource struct {
@@ -21,6 +21,10 @@ func (b *BaseResource) Subject() auth.Subject {
 	return b.sub
 }
 
+func (b *BaseResource) SetSubject(subject auth.Subject) {
+	b.sub = subject
+}
+
 func (b *BaseResource) metadata() *metadata {
 	return b.md
 }
@@ -28,8 +32,3 @@ func (b *BaseResource) metadata() *metadata {
 func (b *BaseResource) setMetadata(metadata *metadata) {
 	b.md = metadata
 }
-
-func (b *BaseResource) setSubject(subject auth.Subject) {
-	b.sub = subject
-}
-

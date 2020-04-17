@@ -29,7 +29,7 @@ func NewCollection(resourceType string, subject auth.Subject) (Collection, *gome
 	// Future: could support non-Elem() types, but not sure if it's worth it
 	collection := reflect.New(metadata.collectionType.Elem()).Interface().(Collection)
 	collection.setMetadata(metadata)
-	collection.setSubject(subject)
+	collection.SetSubject(subject)
 
 	return collection, nil
 }
@@ -76,7 +76,7 @@ func DoQuery(c Collection) (*QueryResult, *gomerr.ApplicationError) {
 	iv := reflect.ValueOf(items).Elem()
 	for i := 0; i < iv.Len(); i++ {
 		instance := iv.Index(i).Interface().(Instance)
-		instance.setSubject(c.Subject())
+		instance.SetSubject(c.Subject())
 		instance.setMetadata(c.metadata())
 		scoped, ae := scopedResult(instance)
 		if ae != nil {
@@ -94,6 +94,8 @@ func DoQuery(c Collection) (*QueryResult, *gomerr.ApplicationError) {
 }
 
 type BaseCollection struct {
+	BaseResource
+
 	Next     *string `json:"NextToken"`
 	MaxItems *int64  `json:"MaxResults,omitempty"`
 }

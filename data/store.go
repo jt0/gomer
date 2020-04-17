@@ -14,7 +14,7 @@ type Store interface {
 
 type Persistable interface {
 	Id() string
-	KeyValues() []interface{}
+	TypeName() string
 }
 
 type Queryable interface {
