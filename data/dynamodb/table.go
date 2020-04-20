@@ -19,17 +19,16 @@ import (
 )
 
 type table struct {
-	ddb                  *dynamodb.DynamoDB
-	name                 *string
-	defaultLimit         *int64
-	maxLimit             *int64
-	defaultConsistent    *bool
-	pk                   *key
-	sk                   *key
-	indexes              map[string]*index
-	indexByFields        map[string]map[string]*index
-	persistableFieldData map[string]*fieldData
-	keyValueSeparator    string
+	ddb               *dynamodb.DynamoDB
+	name              *string
+	defaultLimit      *int64
+	maxLimit          *int64
+	defaultConsistent *bool
+	pk                *key
+	sk                *key
+	indexes           map[string]*index
+	persistableData   map[string]*persistableData
+	valueSeparator    string
 }
 
 type index struct {
@@ -41,27 +40,22 @@ type index struct {
 }
 
 type key struct {
-	name                 string
-	attributeType        string
-	persistableKeyFields map[string][]string
+	name           string
+	attributeType  string
+	compositeParts map[string][]string
 }
 
-type fieldData struct {
-	uniques []unique
-	dbNames map[string]string
-}
-
-type unique struct {
-	fieldName string
-	indexName string
+type persistableData struct {
+	uniquenessConstraints map[string]string // fieldName -> indexName
+	dbNames               map[string]string // persistable name -> storage name
 }
 
 type Configuration struct {
-	DynamoDb          *dynamodb.DynamoDB
-	DefaultMaxResults int
-	MaxMaxResults     int
-	ConsistentRead    bool
-	KeyValueSeparator string
+	DynamoDb                *dynamodb.DynamoDB
+	DefaultMaxResults       int
+	MaxMaxResults           int
+	ConsistentRead          bool
+	CompositeValueSeparator string
 }
 
 func Store(tableName string, config *Configuration, persistablesForStore ...data.Persistable) data.Store {
@@ -75,8 +69,7 @@ func Store(tableName string, config *Configuration, persistablesForStore ...data
 		maxLimit:          &maxLimit,
 		defaultConsistent: &config.ConsistentRead,
 		indexes:           make(map[string]*index),
-		indexByFields:     make(map[string]map[string]*index),
-		keyValueSeparator: config.KeyValueSeparator,
+		valueSeparator:    config.CompositeValueSeparator,
 	}
 
 	table.prepare(persistablesForStore)
@@ -94,9 +87,9 @@ func (t *table) Update(p data.Persistable) *gomerr.ApplicationError {
 }
 
 func (t *table) put(p data.Persistable, ensureUniqueId bool) *gomerr.ApplicationError {
-	fd := t.persistableFieldData[p.TypeName()]
+	pd := t.persistableData[p.TypeName()]
 
-	if ae := t.checkUniques(p, fd); ae != nil {
+	if ae := t.checkUniquenessConstraints(p, pd); ae != nil {
 		return ae
 	}
 
@@ -108,22 +101,30 @@ func (t *table) put(p data.Persistable, ensureUniqueId bool) *gomerr.Application
 		return gomerr.InternalServerError("Unable to construct persistable form.")
 	}
 
-	convertFieldNamesToDbNames(&av, fd)
+	convertFieldNamesToDbNames(&av, pd)
 
 	t.populateKeyValues(av, p, t)
 	for _, idx := range t.indexes {
 		t.populateKeyValues(av, p, idx)
 	}
 
-	// TODO: replace reserved words as needed
-	// TODO:p1 add id protection expression
+	// TODO: here we could compare the current av map w/ one we stashed into the object somewhere
+
+	var uniqueIdConditionExpresion *string
 	if ensureUniqueId {
+		expression := fmt.Sprintf("attribute_not_exists(%s)", t.pk.name)
+		if t.sk != nil {
+			expression += fmt.Sprintf(" AND attribute_not_exists(%s)", t.sk.name)
+		}
+		uniqueIdConditionExpresion = &expression
 	}
+
 	// TODO:p1 optimistic locking
 
 	input := &dynamodb.PutItemInput{
-		Item:      av,
-		TableName: t.name,
+		Item:                av,
+		TableName:           t.name,
+		ConditionExpression: uniqueIdConditionExpresion,
 	}
 	_, err = t.ddb.PutItem(input) // TODO:p3 look at result data to track capacity or other info?
 	if err != nil {
@@ -147,13 +148,13 @@ func (t *table) put(p data.Persistable, ensureUniqueId bool) *gomerr.Application
 	return nil
 }
 
-func (t *table) checkUniques(p data.Persistable, fd *fieldData) *gomerr.ApplicationError {
-	if fd == nil {
+func (t *table) checkUniquenessConstraints(p data.Persistable, pd *persistableData) *gomerr.ApplicationError {
+	if pd == nil {
 		return nil
 	}
 
-	for _, unique := range fd.uniques {
-		if ae := t.checkUnique(unique, p); ae != nil {
+	for fieldName, indexName := range pd.uniquenessConstraints {
+		if ae := t.checkUniqueness(fieldName, indexName, p); ae != nil {
 			return ae
 		}
 	}
@@ -161,20 +162,20 @@ func (t *table) checkUniques(p data.Persistable, fd *fieldData) *gomerr.Applicat
 	return nil
 }
 
-var uniqueCheckLimit = int64(2)
+var uniqueCheckLimit = int64(1)
 
-func (t *table) checkUnique(unique unique, p data.Persistable) *gomerr.ApplicationError {
-	idx, ok := t.indexes[unique.indexName]
+func (t *table) checkUniqueness(fieldName string, indexName string, p data.Persistable) *gomerr.ApplicationError {
+	idx, ok := t.indexes[indexName]
 	if !ok {
-		return gomerr.InternalServerError("Unable to determine attribute uniqueness")
+		return gomerr.InternalServerError("Unable to find uniqueness index")
 	}
 
 	keys := make(map[string]*dynamodb.AttributeValue, 2)
 	t.populateKeyValues(keys, p, idx)
 
 	expressionAttributeNames := make(map[string]*string)
-	expressionAttributeValues := map[string]*dynamodb.AttributeValue{":pk": keys[idx.pk.name]}
 	keyConditionExpresion := safeName(idx.pk.name, expressionAttributeNames) + "=:pk"
+	expressionAttributeValues := map[string]*dynamodb.AttributeValue{":pk": keys[idx.pk.name]}
 
 	if idx.sk != nil {
 		keyConditionExpresion += " AND " + safeName(idx.sk.name, expressionAttributeNames) + "=:sk"
@@ -213,7 +214,7 @@ func (t *table) checkUnique(unique unique, p data.Persistable) *gomerr.Applicati
 		}
 
 		if len(output.Items) > 0 {
-			return gomerr.ConflictException("A resource exists with a duplicate attribute", map[string]string{"Attribute": unique.fieldName, "Resource": p.TypeName()})
+			return gomerr.ConflictException("A resource exists with a duplicate attribute", map[string]string{"Attribute": fieldName, "Resource": p.TypeName()})
 		}
 
 		if output.LastEvaluatedKey == nil {
@@ -237,14 +238,14 @@ func safeName(fieldName string, expressionAttributeNames map[string]*string) str
 	return fieldName
 }
 
-func convertFieldNamesToDbNames(av *map[string]*dynamodb.AttributeValue, fd *fieldData) {
-	if len(fd.dbNames) == 0 {
+func convertFieldNamesToDbNames(av *map[string]*dynamodb.AttributeValue, pd *persistableData) {
+	if len(pd.dbNames) == 0 {
 		return
 	}
 
 	cv := make(map[string]*dynamodb.AttributeValue, len(*av))
 	for k, v := range *av {
-		if dbName, ok := fd.dbNames[k]; ok {
+		if dbName, ok := pd.dbNames[k]; ok {
 			if dbName != "-" {
 				cv[dbName] = v
 			}
@@ -252,6 +253,7 @@ func convertFieldNamesToDbNames(av *map[string]*dynamodb.AttributeValue, fd *fie
 			cv[k] = v
 		}
 	}
+
 	*av = cv
 }
 
@@ -271,20 +273,21 @@ func (t *table) populateKeyValues(av map[string]*dynamodb.AttributeValue, p data
 func (t *table) buildKeyValue(p data.Persistable, key *key) string {
 	pv := reflect.ValueOf(p).Elem()
 
-	keyFields, ok := key.persistableKeyFields[p.TypeName()]
-	if !ok || len(keyFields) == 0 {
+	compositeParts, ok := key.compositeParts[p.TypeName()]
+	if !ok || len(compositeParts) == 0 {
 		return fmt.Sprint(pv.FieldByName(key.name).Interface())
 	}
 
-	valueParts := make([]string, len(keyFields))
-	for i, keyField := range keyFields {
-		if keyField[:1] == "'" {
-			valueParts[i] = keyField
+	compositeValues := make([]string, len(compositeParts))
+	for i, compositePart := range compositeParts {
+		if compositePart[:1] == "'" {
+			compositeValues[i] = compositePart[1 : len(compositePart)-1]
 		} else {
-			valueParts[i] = fmt.Sprint(pv.FieldByName(keyField).Interface())
+			compositeValues[i] = fmt.Sprint(pv.FieldByName(compositePart).Interface())
 		}
 	}
-	return strings.Join(valueParts, t.keyValueSeparator)
+
+	return strings.Join(compositeValues, t.valueSeparator)
 }
 
 type ConsistentRead interface {
@@ -492,21 +495,23 @@ func (t *table) index(queryKeys []data.QueryKey) (*index, *gomerr.ApplicationErr
 		return nil, gomerr.InternalServerError("Invalid query keys")
 	}
 
-	var second string
-	switch len(queryKeys) {
-	case 1:
-		second = ""
-	case 2:
-		second = queryKeys[1].Name
-	}
+	//var second string
+	//switch len(queryKeys) {
+	//case 1:
+	//	second = ""
+	//case 2:
+	//	second = queryKeys[1].Name
+	//}
 
-	if index, ok := t.indexByFields[queryKeys[0].Name][second]; !ok {
-		logs.Error.Printf("No index for '%s' and '%s'", queryKeys[0].Name, second)
+	//if index, ok := t.indexByFields[queryKeys[0].Name][second]; !ok {
+	//	logs.Error.Printf("No index for '%s' and '%s'", queryKeys[0].Name, second)
+	//
+	//	return nil, gomerr.InternalServerError("No index for query keys")
+	//} else {
+	//	return index, nil
+	//}
 
-		return nil, gomerr.InternalServerError("No index for query keys")
-	} else {
-		return index, nil
-	}
+	return nil, nil
 }
 
 func (t *table) limit(maxResults *int64) *int64 {
@@ -550,7 +555,7 @@ func (t *table) prepare(persistablesForStore []data.Persistable) *table {
 		attributeTypes[*at.AttributeName] = *at.AttributeType
 	}
 
-	prepareKeySchema(t, output.Table.KeySchema, attributeTypes)
+	addKeyDetails(t, output.Table.KeySchema, attributeTypes) // Add key details for the table itself
 	t.processLocalIndexes(output.Table.LocalSecondaryIndexes, attributeTypes)
 	t.processGlobalIndexes(output.Table.GlobalSecondaryIndexes, attributeTypes)
 	t.processPersistables(persistablesForStore)
@@ -558,14 +563,34 @@ func (t *table) prepare(persistablesForStore []data.Persistable) *table {
 	return t
 }
 
-func prepareKeySchema(k keyable, keySchemas []*dynamodb.KeySchemaElement, attributeTypes map[string]string) {
-	for _, ks := range keySchemas {
+func (t *table) processLocalIndexes(lsids []*dynamodb.LocalSecondaryIndexDescription, attributeTypes map[string]string) {
+	for _, lsid := range lsids {
+		lsi := &index{name: lsid.IndexName, lsi: true}
+		addKeyDetails(lsi, lsid.KeySchema[1:], attributeTypes)
+
+		lsi.pk = t.pk
+
+		t.indexes[*lsid.IndexName] = lsi
+	}
+}
+
+func (t *table) processGlobalIndexes(gsids []*dynamodb.GlobalSecondaryIndexDescription, attributeTypes map[string]string) {
+	for _, gsid := range gsids {
+		gsi := &index{name: gsid.IndexName, lsi: false}
+		addKeyDetails(gsi, gsid.KeySchema, attributeTypes)
+
+		t.indexes[*gsid.IndexName] = gsi
+	}
+}
+
+func addKeyDetails(k keyable, keySchemaElements []*dynamodb.KeySchemaElement, attributeTypes map[string]string) {
+	for _, keySchemaElement := range keySchemaElements {
 		key := &key{
-			name:                 *ks.AttributeName,
-			attributeType:        attributeTypes[*ks.AttributeName],
-			persistableKeyFields: make(map[string][]string),
+			name:           *keySchemaElement.AttributeName,
+			attributeType:  attributeTypes[*keySchemaElement.AttributeName],
+			compositeParts: make(map[string][]string),
 		}
-		switch *ks.KeyType {
+		switch *keySchemaElement.KeyType {
 		case dynamodb.KeyTypeHash:
 			k.setPk(key)
 		case dynamodb.KeyTypeRange:
@@ -574,109 +599,67 @@ func prepareKeySchema(k keyable, keySchemas []*dynamodb.KeySchemaElement, attrib
 	}
 }
 
-func (t *table) processLocalIndexes(lsids []*dynamodb.LocalSecondaryIndexDescription, attributeTypes map[string]string) {
-	localIndexes := make(map[string]*index, len(lsids)+2)
-
-	mainIndex := &index{name: nil, pk: t.pk, sk: t.sk}
-	if t.sk != nil {
-		localIndexes[t.sk.name] = mainIndex
-	}
-	localIndexes[""] = mainIndex
-	t.indexes[""] = mainIndex
-
-	for _, lsid := range lsids {
-		lsi := &index{name: lsid.IndexName, lsi: true}
-		prepareKeySchema(lsi, lsid.KeySchema, attributeTypes)
-
-		if lsi.sk != nil {
-			localIndexes[lsi.sk.name] = lsi
-		} // this may not require an if check since this would be a useless LSI.
-
-		t.indexes[*lsid.IndexName] = lsi
-	}
-
-	t.indexByFields[t.pk.name] = localIndexes
-}
-
-func (t *table) processGlobalIndexes(gsids []*dynamodb.GlobalSecondaryIndexDescription, attributeTypes map[string]string) {
-	for _, gsid := range gsids {
-		gsi := &index{name: gsid.IndexName, lsi: false}
-		prepareKeySchema(gsi, gsid.KeySchema, attributeTypes)
-
-		gsiPkIndexes, ok := t.indexByFields[gsi.pk.name]
-		if !ok {
-			gsiPkIndexes = make(map[string]*index)
-		}
-
-		if gsi.sk != nil {
-			gsiPkIndexes[gsi.sk.name] = gsi
-		}
-
-		t.indexes[*gsid.IndexName] = gsi
-		t.indexByFields[gsi.pk.name] = gsiPkIndexes
-	}
-}
-
 func (t *table) processPersistables(persistablesForStore []data.Persistable) {
-	t.persistableFieldData = make(map[string]*fieldData, len(persistablesForStore))
+	t.persistableData = make(map[string]*persistableData, len(persistablesForStore))
 	for _, p := range persistablesForStore {
-		fd := &fieldData{
-			uniques: []unique{},
-			dbNames: make(map[string]string),
+		pd := &persistableData{
+			uniquenessConstraints: make(map[string]string),
+			dbNames:               make(map[string]string),
 		}
 
 		pt := reflect.TypeOf(p)
 		ptName := strings.ToLower(util.UnqualifiedTypeName(pt))
 
-		t.processFields(ptName, pt.Elem(), fd)
+		t.processFields(ptName, pt.Elem(), pd)
 
 		// Validate that each key has fully defined key fields for this persistable type
 		for _, key := range t.keys() {
 			if key == nil {
 				continue
 			}
-			if keyFields, ok := key.persistableKeyFields[ptName]; ok {
-				for i, keyField := range keyFields {
-					if keyField == "" {
-						panic(fmt.Sprintf("%s's keyField #%d for key '%s' is missing", ptName, i, key.name))
+
+			if compositeParts, ok := key.compositeParts[ptName]; ok {
+				for i, compositePart := range compositeParts {
+					if compositePart == "" {
+						panic(fmt.Sprintf("%s's compositePart #%d for key '%s' is missing", ptName, i, key.name))
 					}
 				}
 			}
 		}
 
-		t.persistableFieldData[ptName] = fd
+		t.persistableData[ptName] = pd
 	}
 }
 
 func (t *table) keys() []*key {
 	keys := append(make([]*key, 0, 2*len(t.indexes)+2), t.pk, t.sk)
+
 	for _, v := range t.indexes {
 		keys = append(keys, v.pk, v.sk)
 	}
+
 	return keys
 }
 
-func (t *table) processFields(persistableName string, persistableType reflect.Type, fd *fieldData) {
+func (t *table) processFields(persistableName string, persistableType reflect.Type, pd *persistableData) {
 	for i := 0; i < persistableType.NumField(); i++ {
 		field := persistableType.Field(i)
 		fieldName := field.Name
 
-		if unicode.IsLower([]rune(fieldName)[0]) {
+		if field.Type.Kind() == reflect.Struct && field.Anonymous {
+			t.processFields(persistableName, field.Type, pd)
+		} else if unicode.IsLower([]rune(fieldName)[0]) {
 			continue
-		}
-
-		if field.Type.Kind() == reflect.Struct {
-			t.processFields("", field.Type, fd)
 		} else {
-			t.processDataTag(field.Tag.Get("data"), fieldName, fd)
-			t.processDdbKeysTag(field.Tag.Get("data.ddb.keys"), fieldName, persistableName)
+			t.processDataTag(field.Tag.Get("data"), fieldName, pd)
+			t.processDdbKeysTag(field.Tag.Get("ddb.keys"), fieldName, persistableName)
 		}
 	}
 }
 
-var dataTagRegex = regexp.MustCompile(`(\w*)?(,unique\(([\w-.]+)\))?`)
+var dataTagRegex = regexp.MustCompile(`(-|\w*)?(,unique\(([\w-.]+)\))?`)
 
-func (t *table) processDataTag(dataTag string, fieldName string, fd *fieldData) {
+func (t *table) processDataTag(dataTag string, fieldName string, pd *persistableData) {
 	if dataTag == "" {
 		return
 	}
@@ -687,11 +670,16 @@ func (t *table) processDataTag(dataTag string, fieldName string, fd *fieldData) 
 	}
 
 	if groups[1] != "" {
-		fd.dbNames[fieldName] = groups[1]
+		pd.dbNames[fieldName] = groups[1]
 	}
 
-	if groups[3] != "" {
-		fd.uniques = append(fd.uniques, unique{fieldName: fieldName, indexName: groups[3]})
+	if groups[2] != "" {
+		_, ok := t.indexes[groups[3]]
+		if !ok {
+			panic(fmt.Sprintf("No index found with name %s for unique field %s", groups[3], fieldName))
+		}
+
+		pd.uniquenessConstraints[fieldName] = groups[3]
 	}
 }
 
@@ -699,10 +687,6 @@ func (t *table) processDataTag(dataTag string, fieldName string, fd *fieldData) 
 func (t *table) processDdbKeysTag(ddbKeyTag string, fieldName string, persistableName string) {
 	if ddbKeyTag == "" {
 		return
-	}
-
-	if persistableName == "" {
-		panic("only top-level persistable attributes should have data.ddb.keys tag")
 	}
 
 	for _, keyStatement := range strings.Split(ddbKeyTag, ",") {
@@ -717,10 +701,10 @@ func (t *table) processDdbKeysTag(ddbKeyTag string, fieldName string, persistabl
 
 var ddbKeyStatementRegex = regexp.MustCompile(`(([\w-.]+):)?(pk|sk)(.(\d+))?(=('\w+'))?`)
 
-func (t *table) processDdbKeyStatement(persistableName string, keyStatement string, fieldName string) {
+func (t *table) processDdbKeyStatement(persistableName string, keyStatement string, compositePart string) {
 	groups := ddbKeyStatementRegex.FindStringSubmatch(keyStatement)
 	if groups == nil {
-		panic("Improperly formatted data.ddb.keys element: " + keyStatement)
+		panic("Improperly formatted ddb.keys element: " + keyStatement)
 	}
 
 	var keyable keyable
@@ -742,39 +726,48 @@ func (t *table) processDdbKeyStatement(persistableName string, keyStatement stri
 		key = keyable.getSk()
 	}
 
-	var index int
-	if groups[5] == "" {
-		index = 0
-	} else {
-		index, _ = strconv.Atoi(groups[5])
+	index, err := strconv.Atoi(groups[5])
+	if err != nil {
+		panic("expected an index value for ddb.keys element: " + keyStatement)
 	}
 
-	keyFields, ok := key.persistableKeyFields[persistableName]
+	if groups[7] != "" { // True means a static value for this composite part. Replace w/ the value.
+		compositePart = groups[7]
+	}
+
+	key.insertCompositePartAtIndex(persistableName, compositePart, index)
+}
+
+func (key *key) insertCompositePartAtIndex(persistableName string, compositePart string, index int) {
+	compositeParts, ok := key.compositeParts[persistableName]
 	if !ok {
-		keyFields = []string{""}
+		compositeParts = make([]string, 0, index+1)
 	}
 
-	lenKeyFields := len(keyFields)
-	capKeyFields := cap(keyFields)
-	if index < lenKeyFields {
-		if keyFields[index] != "" {
-			panic("already found a value at the index for this key statement: " + keyStatement)
+	lenCompositeParts := len(compositeParts)
+	capCompositeParts := cap(compositeParts)
+	if index < lenCompositeParts {
+		if compositeParts[index] != "" {
+			panic(fmt.Sprintf("already found key part '%s' at index %d for key %s ", compositeParts[index], index, key.name))
 		}
-	} else if index < capKeyFields {
-		keyFields = keyFields[0 : index+1]
+	} else if index < capCompositeParts {
+		compositeParts = compositeParts[0 : index+1]
 	} else {
-		keyFields = append(keyFields, make([]string, index+1-capKeyFields)...)
+		compositeParts = append(compositeParts, make([]string, index+1-capCompositeParts)...)
 	}
 
-	if groups[7] == "" {
-		keyFields[index] = fieldName
-	} else {
-		keyFields[index] = groups[7]
+	compositeParts[index] = compositePart
+	key.compositeParts[persistableName] = compositeParts
+}
+
+func (t *table) keyables() []keyable {
+	keyables := append(make([]keyable, 0, len(t.indexes)+1), t)
+
+	for _, v := range t.indexes {
+		keyables = append(keyables, v)
 	}
 
-	key.persistableKeyFields[persistableName] = keyFields
-
-	// TODO: check after all calls that each index and t.pk/t.sk have values for each section
+	return keyables
 }
 
 type keyable interface {
