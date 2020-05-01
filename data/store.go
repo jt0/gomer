@@ -27,7 +27,7 @@ type Queryable interface {
 	Storable
 	Paginatable
 
-	ResponseAttributes() []string
+	ResponseFields() []string
 }
 
 type Paginatable interface {

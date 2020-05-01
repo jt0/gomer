@@ -363,7 +363,7 @@ func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, *gomerr
 		}
 	}
 
-	for _, attribute := range q.ResponseAttributes() {
+	for _, attribute := range q.ResponseFields() {
 		safeName(attribute, expressionAttributeNames)
 	}
 

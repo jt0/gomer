@@ -31,6 +31,20 @@ type Instance interface {
 	PostQuery() *gomerr.ApplicationError
 }
 
+func NewInstance(resourceType string, subject auth.Subject) (Instance, *gomerr.ApplicationError) {
+	metadata, ok := resourceMetadata[strings.ToLower(resourceType)]
+	if !ok {
+		return nil, gomerr.BadRequest("Unknown type: " + resourceType)
+	}
+
+	instance := reflect.New(metadata.instanceType.Elem()).Interface().(Instance)
+	instance.setMetadata(metadata)
+	instance.setSubject(subject)
+	instance.OnSubject()
+
+	return instance, nil
+}
+
 func UnmarshalInstance(resourceType string, subject auth.Subject, bytes []byte) (Instance, *gomerr.ApplicationError) {
 	metadata, ok := resourceMetadata[strings.ToLower(resourceType)]
 	if !ok {
