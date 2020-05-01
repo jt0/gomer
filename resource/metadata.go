@@ -11,13 +11,12 @@ import (
 
 type Metadata interface {
 	InstanceName() string
-	CollectionName() string
+	CollectionQueryName() string
 	Parent() Metadata
 	Children() []Metadata
-	// ListQueryKeys
 }
 
-func Register(instance Instance, collection Collection, dataStore data.Store, parentMetadata Metadata) Metadata {
+func Register(instance Instance, collectionQuery CollectionQuery, dataStore data.Store, parentMetadata Metadata) Metadata {
 	if instance == nil {
 		panic("A resource requires an Instance type")
 	}
@@ -39,18 +38,18 @@ func Register(instance Instance, collection Collection, dataStore data.Store, pa
 		panic(fmt.Sprintf("Type other than pointer or struct as instance: %T", instance))
 	}
 
-	ct := reflect.TypeOf(collection)
+	cqt := reflect.TypeOf(collectionQuery)
 	nilSafeParentMetadata, _ := parentMetadata.(*metadata)
 
 	metadata := &metadata{
-		instanceType:   it,
-		instanceName:   instanceName,
-		collectionType: ct,
-		collectionName: strings.ToLower(util.UnqualifiedTypeName(ct)),
-		fields:         fieldMetadata(structType),
-		dataStore:      dataStore,
-		parent:         nilSafeParentMetadata,
-		children:       make([]Metadata, 0),
+		instanceType:        it,
+		instanceName:        instanceName,
+		collectionQueryType: cqt,
+		collectionQueryName: strings.ToLower(util.UnqualifiedTypeName(cqt)),
+		fields:              fields(structType, ""),
+		dataStore:           dataStore,
+		parent:              nilSafeParentMetadata,
+		children:            make([]Metadata, 0),
 	}
 
 	resourceMetadata[instanceName] = metadata
@@ -64,23 +63,24 @@ func Register(instance Instance, collection Collection, dataStore data.Store, pa
 var resourceMetadata = make(map[string]*metadata)
 
 type metadata struct {
-	instanceType   reflect.Type
-	instanceName   string
-	collectionType reflect.Type
-	collectionName string
-	fields         map[string]field
-	idFields       []field
-	dataStore      data.Store
-	parent         *metadata
-	children       []Metadata // Using interface type since we aren't currently using child attributes
+	instanceType        reflect.Type
+	instanceName        string
+	collectionQueryType reflect.Type
+	collectionQueryName string
+	fields              map[string]*field
+	dataStore           data.Store
+	parent              *metadata
+	children            []Metadata // Using interface type since we aren't currently using child attributes
+
+	//idFields       []field
 }
 
 func (m *metadata) InstanceName() string {
 	return m.instanceName
 }
 
-func (m *metadata) CollectionName() string {
-	return m.collectionName
+func (m *metadata) CollectionQueryName() string {
+	return m.collectionQueryName
 }
 
 func (m *metadata) Parent() Metadata {
@@ -96,7 +96,7 @@ func (m *metadata) Children() []Metadata {
 }
 
 func (m *metadata) emptyItems() interface{} {
-	slice := reflect.MakeSlice(reflect.SliceOf(m.instanceType), 1, 1)
+	slice := reflect.MakeSlice(reflect.SliceOf(m.instanceType), 0, 0)
 
 	// Create a pointer to a slice value and set it to the slice
 	slicePtr := reflect.New(slice.Type())

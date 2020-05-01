@@ -143,7 +143,8 @@ func limit(limitAction limitAction, i Instance) (Limiter, *gomerr.ApplicationErr
 		}
 
 		limiterInstance.setMetadata(metadata)
-		limiterInstance.SetSubject(i.Subject())
+		limiterInstance.setSubject(i.Subject())
+		limiterInstance.OnSubject()
 
 		// TODO: cache in case needed by more than one resource...
 		// TODO: need an optimistic lock mechanism to avoid overwriting

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"unicode"
 
 	"github.com/jt0/gomer/auth"
@@ -67,50 +68,58 @@ var (
 	}
 )
 
-func fieldMetadata(structType reflect.Type) map[string]field {
-	fields := make(map[string]field)
+func fields(structType reflect.Type, path string) map[string]*field {
+	fieldMap := make(map[string]*field)
 
 	for i := 0; i < structType.NumField(); i++ {
-		structField := structType.Field(i)
-		structFieldName := structField.Name
+		sField := structType.Field(i)
+		sFieldName := sField.Name
 
-		if unicode.IsLower([]rune(structFieldName)[0]) {
-			continue
-		}
-
-		if structField.Type.Kind() == reflect.Struct {
-			nestedFields := fieldMetadata(structField.Type)
+		if sField.Type.Kind() == reflect.Struct {
+			var nestedFields map[string]*field
+			if sField.Anonymous {
+				nestedFields = fields(sField.Type, path+sFieldName+"+")
+			} else {
+				nestedFields = fields(sField.Type, path+sFieldName+".")
+			}
 
 			for k, v := range nestedFields {
-				fields[k] = v
+				fieldMap[k] = v
 			}
 		} else {
-			field := field{
-				name:         structFieldName,
-				externalName: handleExtnameTag(structField.Tag.Get("extname"), structFieldName),
-				access:       handleAccessTag(structField.Tag.Get("access")),
+			if unicode.IsLower([]rune(sFieldName)[0]) {
+				continue
 			}
 
-			handleDefaultTag(structField.Tag.Get("default"), &field)
+			field := &field{
+				location:     path + sFieldName,
+				externalName: externalName(sField),
+				access:       accessTag(sField.Tag.Get("access")),
+			}
 
-			fields[structFieldName] = field
+			defaultTag(sField.Tag.Get("default"), field)
+
+			fieldMap[field.location] = field
 		}
 	}
 
-	return fields
+	return fieldMap
 }
 
-func handleExtnameTag(extname, fieldName string) string {
-	if extname != "" {
-		return extname
-	} else {
-		return fieldName
+func externalName(sField reflect.StructField) string {
+	jsonTag := sField.Tag.Get("json")
+	if jsonTag == "" {
+		return sField.Name
 	}
+
+	parts := strings.Split(jsonTag, ",")
+
+	return strings.TrimSpace(parts[0])
 }
 
 type fieldAccessBits uint16
 
-func handleAccessTag(access string) fieldAccessBits {
+func accessTag(access string) fieldAccessBits {
 	var accessBits fieldAccessBits
 
 	if access == "" {
@@ -144,7 +153,7 @@ func handleAccessTag(access string) fieldAccessBits {
 	return accessBits
 }
 
-func handleDefaultTag(defaultTag string, field *field) {
+func defaultTag(defaultTag string, field *field) {
 	if defaultTag == "" {
 		return
 	}
@@ -171,7 +180,7 @@ func handleDefaultTag(defaultTag string, field *field) {
 }
 
 type field struct {
-	name                 string
+	location             string
 	externalName         string
 	access               fieldAccessBits
 	defaultValue         string

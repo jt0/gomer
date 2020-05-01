@@ -12,50 +12,42 @@ import (
 	"github.com/jt0/gomer/logs"
 )
 
-type Collection interface {
+type CollectionQuery interface {
 	resource
 	data.Queryable
 
 	PreQuery() *gomerr.ApplicationError
-	PostQuery(results interface{}) *gomerr.ApplicationError
+	Collection(items []interface{}, nextToken *string) (Collection, *gomerr.ApplicationError)
 }
 
-func NewCollection(resourceType string, subject auth.Subject) (Collection, *gomerr.ApplicationError) {
+type Collection struct {
+	Items     []interface{}
+	NextToken *string
+}
+
+func UnmarshalCollectionQuery(resourceType string, subject auth.Subject, bytes []byte) (CollectionQuery, *gomerr.ApplicationError) {
 	metadata, ok := resourceMetadata[strings.ToLower(resourceType)]
 	if !ok {
 		return nil, gomerr.BadRequest("Unknown type: " + resourceType)
 	}
 
-	// Future: could support non-Elem() types, but not sure if it's worth it
-	collection := reflect.New(metadata.collectionType.Elem()).Interface().(Collection)
-	collection.setMetadata(metadata)
-	collection.SetSubject(subject)
-
-	return collection, nil
-}
-
-func UnmarshallCollection(resourceType string, subject auth.Subject, bytes []byte) (Collection, *gomerr.ApplicationError) {
-	collection, ae := NewCollection(resourceType, subject)
-	if ae != nil {
-		return nil, ae
-	}
+	collectionQuery := reflect.New(metadata.collectionQueryType.Elem()).Interface().(CollectionQuery)
 
 	if len(bytes) != 0 {
-		if err := json.Unmarshal(bytes, collection); err != nil {
-			logs.Error.Printf("Unmarshal error while parsing '%s': %s\n", collection.metadata().collectionName, err.Error())
-			return nil, gomerr.BadRequest("Unable to parse request data", fmt.Sprintf("Data does not appear to correlate to a '%s' resource", collection.metadata().collectionName))
+		if err := json.Unmarshal(bytes, collectionQuery); err != nil {
+			logs.Error.Printf("Unmarshal error while parsing '%s': %s\n", resourceType, err.Error())
+			return nil, gomerr.BadRequest("Unable to parse request data", fmt.Sprintf("Data does not appear to correlate to a '%s' resource", collectionQuery.metadata().collectionQueryName))
 		}
 	}
 
-	return collection, nil
+	collectionQuery.setMetadata(metadata)
+	collectionQuery.setSubject(subject)
+	collectionQuery.OnSubject()
+
+	return collectionQuery, nil
 }
 
-type QueryResult struct {
-	Items     []interface{}
-	NextToken *string
-}
-
-func DoQuery(c Collection) (*QueryResult, *gomerr.ApplicationError) {
+func DoQuery(c CollectionQuery) (interface{}, *gomerr.ApplicationError) {
 	ae := c.PreQuery()
 	if ae != nil {
 		return nil, ae
@@ -67,17 +59,16 @@ func DoQuery(c Collection) (*QueryResult, *gomerr.ApplicationError) {
 		return nil, ae
 	}
 
-	ae = c.PostQuery(items)
-	if ae != nil {
-		return nil, ae
-	}
-
-	var resultsArray []interface{}
 	iv := reflect.ValueOf(items).Elem()
+	resultsArray := make([]interface{}, 0, iv.Len())
 	for i := 0; i < iv.Len(); i++ {
 		instance := iv.Index(i).Interface().(Instance)
-		instance.SetSubject(c.Subject())
 		instance.setMetadata(c.metadata())
+		instance.setSubject(c.Subject())
+		instance.OnSubject()
+
+		instance.PostQuery()
+
 		scoped, ae := scopedResult(instance)
 		if ae != nil {
 			if ae.ErrorType == gomerr.ResourceNotFoundType {
@@ -90,28 +81,36 @@ func DoQuery(c Collection) (*QueryResult, *gomerr.ApplicationError) {
 		resultsArray = append(resultsArray, scoped)
 	}
 
-	return &QueryResult{resultsArray, nextToken}, nil
+	return c.Collection(resultsArray, nextToken)
 }
 
-type BaseCollection struct {
+type BaseCollectionQuery struct {
 	BaseResource
-
-	Next     *string `json:"NextToken"`
-	MaxItems *int64  `json:"MaxResults,omitempty"`
 }
 
-func (b *BaseCollection) NextToken() *string {
-	return b.Next
+func (b *BaseCollectionQuery) PersistableTypeName() string {
+	return b.md.instanceName
 }
 
-func (b *BaseCollection) MaxResults() *int64 {
-	return b.MaxItems
-}
-
-func (b *BaseCollection) PreQuery() *gomerr.ApplicationError {
+func (b *BaseCollectionQuery) NextToken() *string {
 	return nil
 }
 
-func (b *BaseCollection) PostQuery(_ interface{}) *gomerr.ApplicationError {
+func (b *BaseCollectionQuery) MaxResults() *int64 {
 	return nil
+}
+
+func (b *BaseCollectionQuery) ResponseFields() []string {
+	return nil
+}
+
+func (b *BaseCollectionQuery) PreQuery() *gomerr.ApplicationError {
+	return nil
+}
+
+func (b *BaseCollectionQuery) Collection(items []interface{}, nextToken *string) (Collection, *gomerr.ApplicationError) {
+	return Collection{
+		Items:     items,
+		NextToken: nextToken,
+	}, nil
 }

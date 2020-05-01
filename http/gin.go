@@ -46,19 +46,18 @@ func subject(c *gin.Context) auth.Subject {
 	return c.MustGet("subject").(auth.Subject)
 }
 
-func buildApi(r *gin.Engine, node resource.Metadata, path string, pathKeys []string) {
-	resourceMetadata := node
+func buildApi(r *gin.Engine, resourceMetadata resource.Metadata, path string, pathKeys []string) {
 	resourceType := resourceMetadata.InstanceName()
 
-	if resourceMetadata.CollectionName() != "" {
-		path = path + "/" + resourceMetadata.CollectionName()
+	if resourceMetadata.CollectionQueryName() != "" {
+		path = path + "/" + resourceMetadata.CollectionQueryName()
 
 		// FIXME: Examine metadata to determine if create/get are supported
 		r.POST(path, createHandler(resourceType, pathKeys))
-		r.GET(path, queryHandler(resourceType, pathKeys, []string{})) // TODO: get query keys from metadata
+		r.GET(path, queryHandler(resourceType, pathKeys))
 	}
 
-	// FIXME: support singleton (non-collection) types that don't have an identifier
+	// FIXME: support singleton (non-query) types that don't have an identifier
 	pathKey := resourceType + "Id"
 	path = path + "/:" + pathKey
 	pathKeys = append(pathKeys, pathKey)
@@ -68,16 +67,16 @@ func buildApi(r *gin.Engine, node resource.Metadata, path string, pathKeys []str
 	r.PATCH(path, patchHandler(resourceType, pathKeys))
 	r.DELETE(path, deleteHandler(resourceType, pathKeys))
 
-	for _, node := range node.Children() {
-		buildApi(r, node, path, pathKeys)
+	for _, childMetadata := range resourceMetadata.Children() {
+		buildApi(r, childMetadata, path, pathKeys)
 	}
 }
 
 func createHandler(resourceType string, pathKeys []string) func(c *gin.Context) {
 	return func(c *gin.Context) {
-		bytes := getBytes(c, rawData(c), pathKeys, nil)
+		bytes := getBytes(c, rawData(c), pathKeys)
 
-		instance, ae := resource.UnmarshallInstance(resourceType, subject(c), bytes)
+		instance, ae := resource.UnmarshalInstance(resourceType, subject(c), bytes)
 		if ae != nil {
 			errorResponse(c, ae)
 
@@ -94,9 +93,9 @@ func createHandler(resourceType string, pathKeys []string) func(c *gin.Context) 
 
 func getHandler(resourceType string, pathKeys []string) func(c *gin.Context) {
 	return func(c *gin.Context) {
-		bytes := getBytes(c, nil, pathKeys, nil)
+		bytes := getBytes(c, nil, pathKeys)
 
-		instance, ae := resource.UnmarshallInstance(resourceType, subject(c), bytes)
+		instance, ae := resource.UnmarshalInstance(resourceType, subject(c), bytes)
 		if ae != nil {
 			errorResponse(c, ae)
 
@@ -127,9 +126,9 @@ func patchHandler(resourceType string, pathKeys []string) func(c *gin.Context) {
 			errorResponse(c, gomerr.BadRequest("Unable to create patch instance."))
 		}
 
-		bytes := getBytes(c, nil, pathKeys, nil)
+		bytes := getBytes(c, nil, pathKeys)
 
-		instance, ae := resource.UnmarshallInstance(resourceType, subject(c), bytes)
+		instance, ae := resource.UnmarshalInstance(resourceType, subject(c), bytes)
 		if ae != nil {
 			errorResponse(c, ae)
 
@@ -146,9 +145,9 @@ func patchHandler(resourceType string, pathKeys []string) func(c *gin.Context) {
 
 func deleteHandler(resourceType string, pathKeys []string) func(c *gin.Context) {
 	return func(c *gin.Context) {
-		bytes := getBytes(c, nil, pathKeys, nil)
+		bytes := getBytes(c, nil, pathKeys)
 
-		instance, ae := resource.UnmarshallInstance(resourceType, subject(c), bytes)
+		instance, ae := resource.UnmarshalInstance(resourceType, subject(c), bytes)
 		if ae != nil {
 			errorResponse(c, ae)
 
@@ -163,18 +162,18 @@ func deleteHandler(resourceType string, pathKeys []string) func(c *gin.Context) 
 	}
 }
 
-func queryHandler(resourceType string, pathKeys []string, listQueryKeys []string) func(c *gin.Context) {
+func queryHandler(resourceType string, pathKeys []string) func(c *gin.Context) {
 	return func(c *gin.Context) {
-		bytes := getBytes(c, nil, pathKeys, listQueryKeys)
+		bytes := getBytes(c, nil, pathKeys)
 
-		collection, ae := resource.UnmarshallCollection(resourceType, subject(c), bytes)
+		collectionQuery, ae := resource.UnmarshalCollectionQuery(resourceType, subject(c), bytes)
 		if ae != nil {
 			errorResponse(c, ae)
 
 			return
 		}
 
-		if result, ae := resource.DoQuery(collection); ae != nil {
+		if result, ae := resource.DoQuery(collectionQuery); ae != nil {
 			errorResponse(c, ae)
 		} else {
 			successResponse(c, http.StatusOK, result)
@@ -188,8 +187,9 @@ func rawData(c *gin.Context) []byte {
 	return bytes
 }
 
-func getBytes(c *gin.Context, bytes []byte, pathKeys []string, queryKeys []string) []byte {
-	if len(pathKeys) == 0 && len(queryKeys) == 0 {
+func getBytes(c *gin.Context, bytes []byte, pathKeys []string) []byte {
+	query := c.Request.URL.Query()
+	if len(pathKeys) == 0 && len(query) == 0 {
 		if len(bytes) == 0 {
 			return []byte("{}")
 		} else {
@@ -200,7 +200,7 @@ func getBytes(c *gin.Context, bytes []byte, pathKeys []string, queryKeys []strin
 	var jsonMap map[string]interface{}
 
 	if len(bytes) == 0 {
-		jsonMap = make(map[string]interface{}, len(pathKeys)+len(queryKeys))
+		jsonMap = make(map[string]interface{}, len(pathKeys)+len(query))
 	} else if err := json.Unmarshal(bytes, &jsonMap); err != nil {
 		logs.Error.Println("Unmarshal error: " + err.Error())
 		// TODO: return 400
@@ -212,10 +212,10 @@ func getBytes(c *gin.Context, bytes []byte, pathKeys []string, queryKeys []strin
 		}
 	}
 
-	for _, key := range queryKeys {
-		if value := c.Query(key); value != "" {
-			jsonMap[key] = value
-		}
+	for key, value := range query {
+		if len(value) > 0 {
+			jsonMap[key] = value[0]
+		} // TODO: arrays or key-only query params
 	}
 
 	bytes, _ = json.Marshal(jsonMap)

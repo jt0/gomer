@@ -6,8 +6,9 @@ import (
 
 type resource interface {
 	Subject() auth.Subject
-	SetSubject(auth.Subject)
+	OnSubject()
 
+	setSubject(auth.Subject)
 	metadata() *metadata
 	setMetadata(*metadata)
 }
@@ -21,7 +22,11 @@ func (b *BaseResource) Subject() auth.Subject {
 	return b.sub
 }
 
-func (b *BaseResource) SetSubject(subject auth.Subject) {
+func (b *BaseInstance) OnSubject() {
+	// No-op by default
+}
+
+func (b *BaseResource) setSubject(subject auth.Subject) {
 	b.sub = subject
 }
 

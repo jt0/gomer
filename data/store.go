@@ -12,19 +12,39 @@ type Store interface {
 	Query(q Queryable, arrayOfPersistable interface{}) (nextToken *string, ae *gomerr.ApplicationError)
 }
 
+type Storable interface {
+	PersistableTypeName() string // TODO: change this to support an array of types
+}
+
 type Persistable interface {
+	Storable
+
 	Id() string
-	TypeName() string
+	NewQueryable() Queryable
 }
 
 type Queryable interface {
-	QueryInfo() (queryKeys []QueryKey, attributes []string)
-	NextToken() *string
-	MaxResults() *int64
+	Storable
+	Paginatable
+
+	ResponseAttributes() []string
 }
 
-type QueryKey struct {
-	Name       string
-	Value      interface{}
-	Descending bool
+type Paginatable interface {
+	NextPageToken() *string
+	PrevPageToken() *string
+	MaxResults() *int64 // TODO: should these pointers? How about nextToken response from query()?
 }
+
+type QueryTypes uint16
+
+const (
+	EQ QueryTypes = iota + 1
+	//NEQ
+	//GTE
+	//GT
+	//LTE
+	//LT
+	//BETWEEN
+	//CONTAINS
+)

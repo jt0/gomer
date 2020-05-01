@@ -28,33 +28,27 @@ type Instance interface {
 	PostUpdate() *gomerr.ApplicationError
 	PreDelete() *gomerr.ApplicationError
 	PostDelete() *gomerr.ApplicationError
+	PostQuery() *gomerr.ApplicationError
 }
 
-func NewInstance(resourceType string, subject auth.Subject) (Instance, *gomerr.ApplicationError) {
+func UnmarshalInstance(resourceType string, subject auth.Subject, bytes []byte) (Instance, *gomerr.ApplicationError) {
 	metadata, ok := resourceMetadata[strings.ToLower(resourceType)]
 	if !ok {
 		return nil, gomerr.BadRequest("Unknown type: " + resourceType)
 	}
 
 	instance := reflect.New(metadata.instanceType.Elem()).Interface().(Instance)
-	instance.setMetadata(metadata)
-	instance.SetSubject(subject)
-
-	return instance, nil
-}
-
-func UnmarshallInstance(resourceType string, subject auth.Subject, bytes []byte) (Instance, *gomerr.ApplicationError) {
-	instance, ae := NewInstance(resourceType, subject)
-	if ae != nil {
-		return nil, ae
-	}
 
 	if len(bytes) != 0 {
 		if err := json.Unmarshal(bytes, &instance); err != nil {
-			logs.Error.Printf("Unmarshal error while parsing '%s': %s\n", instance.metadata().instanceName, err.Error())
+			logs.Error.Printf("Unmarshal error while parsing '%s': %s\n", resourceType, err.Error())
 			return nil, gomerr.BadRequest("Unable to parse request data", fmt.Sprintf("Data does not appear to correlate to a '%s' resource", instance.metadata().instanceName))
 		}
 	}
+
+	instance.setMetadata(metadata)
+	instance.setSubject(subject)
+	instance.OnSubject()
 
 	return instance, nil
 }
@@ -236,6 +230,24 @@ type BaseInstance struct {
 	//persistedValues map[string]interface{}
 }
 
+func (b *BaseInstance) PersistableTypeName() string {
+	return b.md.instanceName
+}
+
+func (b *BaseInstance) NewQueryable() data.Queryable {
+	cqt := b.md.collectionQueryType
+	if cqt == nil {
+		return nil
+	}
+
+	collectionQuery := reflect.New(cqt.Elem()).Interface().(CollectionQuery)
+	collectionQuery.setMetadata(b.md)
+	collectionQuery.setSubject(b.sub)
+	collectionQuery.OnSubject()
+
+	return collectionQuery
+}
+
 func (b *BaseInstance) PreCreate() *gomerr.ApplicationError {
 	return nil
 }
@@ -268,6 +280,6 @@ func (b *BaseInstance) PostDelete() *gomerr.ApplicationError {
 	return nil
 }
 
-func (b *BaseInstance) TypeName() string {
-	return b.BaseResource.metadata().instanceName
+func (b *BaseInstance) PostQuery() *gomerr.ApplicationError {
+	return nil
 }
