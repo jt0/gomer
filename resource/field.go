@@ -11,80 +11,41 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-type FieldAccessPrincipal string
+type fields struct {
+	fieldMap map[string]*field
+	idField  *field
 
-const (
-	FieldAccess auth.PrincipalType = "FieldAccess"
-
-	ReadWriteAll FieldAccessPrincipal = "ReadWriteAll"
-	ReadAll      FieldAccessPrincipal = "ReadAll"
-	NoAccess     FieldAccessPrincipal = "NoAccess"
-)
-
-func (f FieldAccessPrincipal) Id() string {
-	return string(f)
+	//internalToField map[string]*field
+	//keyFields []*field
 }
 
-func (f FieldAccessPrincipal) Type() auth.PrincipalType {
-	return FieldAccess
+type field struct {
+	name                 string
+	externalName         string
+	location             string
+	access               fieldAccessBits
+	defaultValue         string
+	defaultValueFunction FieldDefaultFunction
+	bypassDefaultIfSet   bool
 }
 
-func (f FieldAccessPrincipal) Release() {
-	// No-op
-}
-
-func RegisterFieldAccessPrincipals(fieldAccessPrincipals ...FieldAccessPrincipal) {
-	if len(fieldAccessPrincipals) > 8 {
-		panic(fmt.Sprintf("Too many fieldAccessPrincipals (maximum = 8): %v", fieldAccessPrincipals))
-	}
-
-	for i, r := range fieldAccessPrincipals {
-		bitsLocationForPrincipal[r] = uint(i)
-	}
-}
-
+type fieldAccessBits uint16
 type FieldDefaultFunction func() interface{}
-type FieldDefaultFunctions func(name string) func(subject auth.Subject) interface{}
 
-func RegisterFieldDefaultFunctions(functions map[string]FieldDefaultFunction) {
-	for k, _ := range functions {
-		if k[:1] != "$" {
-			panic("Default functions must start with a '$' symbol")
-		}
-
-		if k[1:2] == "_" {
-			panic("Default function names must not begin with an underscore")
-		}
+func (f *fields) process(structType reflect.Type, path string) *fields {
+	if f.fieldMap == nil {
+		f.fieldMap = make(map[string]*field)
 	}
-
-	fieldDefaultFunctions = functions
-}
-
-var (
-	bitsLocationForPrincipal      = make(map[auth.Principal]uint)
-	fieldDefaultFunctions         map[string]FieldDefaultFunction
-	internalFieldDefaultFunctions = map[string]FieldDefaultFunction{
-		//"$_emptyStringToIntMap": func() interface{} { return make(map[string]int) },
-	}
-)
-
-func fields(structType reflect.Type, path string) map[string]*field {
-	fieldMap := make(map[string]*field)
 
 	for i := 0; i < structType.NumField(); i++ {
 		sField := structType.Field(i)
 		sFieldName := sField.Name
 
 		if sField.Type.Kind() == reflect.Struct {
-			var nestedFields map[string]*field
 			if sField.Anonymous {
-				nestedFields = fields(sField.Type, path+sFieldName+"+")
+				f.process(sField.Type, path+sFieldName+"+")
 			} else {
-				nestedFields = fields(sField.Type, path+sFieldName+".")
-			}
-
-			for k, v := range nestedFields {
-				fieldMap[k] = v
+				f.process(sField.Type, path+sFieldName+".")
 			}
 		} else {
 			if unicode.IsLower([]rune(sFieldName)[0]) {
@@ -92,100 +53,123 @@ func fields(structType reflect.Type, path string) map[string]*field {
 			}
 
 			field := &field{
+				name:         sFieldName,
+				externalName: externalNameTag(sField.Tag.Get("json"), sFieldName),
 				location:     path + sFieldName,
-				externalName: externalName(sField),
 				access:       accessTag(sField.Tag.Get("access")),
 			}
 
-			defaultTag(sField.Tag.Get("default"), field)
+			if idTag, idTagPresent := sField.Tag.Lookup("id"); idTagPresent {
+				defaultTag(idTag, field)
 
-			fieldMap[field.location] = field
+				if f.idField != nil {
+					panic("multiple fields have `id` tag - only one allowed")
+				}
+
+				f.idField = field
+			} else {
+				defaultTag(sField.Tag.Get("default"), field)
+			}
+
+			if current, exists := f.fieldMap[field.externalName]; exists {
+				if strings.Count(current.location, ".") == 0 || strings.Count(current.location, "+") == 0 {
+					fmt.Printf("Info: skipping duplicate field name '%s' from '%s", field.externalName, field.location)
+
+					continue
+				}
+			}
+
+			f.fieldMap[field.externalName] = field // may override nested (up or down) value. That's okay.
 		}
 	}
 
-	return fieldMap
+	if path == "" && f.idField == nil {
+		panic("no `id` field defined for resource " + structType.Name())
+	}
+
+	return f
 }
 
-func externalName(sField reflect.StructField) string {
-	jsonTag := sField.Tag.Get("json")
-	if jsonTag == "" {
-		return sField.Name
-	}
-
-	parts := strings.Split(jsonTag, ",")
-
-	return strings.TrimSpace(parts[0])
+func (f *fields) idExternalName() string {
+	return f.idField.externalName
 }
 
-type fieldAccessBits uint16
-
-func accessTag(access string) fieldAccessBits {
-	var accessBits fieldAccessBits
-
-	if access == "" {
-		return accessBits // no access
+func (f *fields) externalNameToFieldName(externalName string) (string, bool) {
+	if field, ok := f.fieldMap[externalName]; ok {
+		return field.name, ok
+	} else {
+		return externalName, ok
 	}
+}
 
-	if len(access) > 16 {
-		panic("'access' tag too long.  Can only support up to 8 access pairs (16 bits)")
-	}
+func (f *fields) applyDefaults(i Instance) *gomerr.ApplicationError {
+	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
 
-	if len(access)%2 != 0 {
-		panic("expected 'access' must have two values for each field access principal")
-	}
-
-	for i := 0; i < len(access); i += 2 {
-		accessBits <<= 2 // Prepare by pushing two bits up.  The first time this still results in an no bits set (as expected)
-
-		if access[i] == 'r' {
-			accessBits |= 2
-		} else if access[i] != '-' {
-			panic("Invalid access tag value: " + access)
+	// TODO: handle nested/embedded structs
+	for name, field := range f.fieldMap {
+		if field.defaultValueFunction == nil && field.defaultValue == "" {
+			continue
 		}
 
-		if access[i+1] == 'w' {
-			accessBits |= 1
-		} else if access[i+1] != '-' {
-			panic("Invalid access tag value: " + access)
+		fieldValue := resource.FieldByName(name)
+		if field.bypassDefaultIfSet && isSet(fieldValue) {
+			continue
 		}
+
+		var defaultValue interface{}
+		if field.defaultValueFunction != nil {
+			defaultValue = field.defaultValueFunction()
+		} else {
+			defaultValue = field.defaultValue
+		}
+
+		setDefaultValue(fieldValue, defaultValue)
 	}
 
-	return accessBits
+	return nil
 }
 
-func defaultTag(defaultTag string, field *field) {
-	if defaultTag == "" {
-		return
-	}
+func (f *fields) removeNonReadable(i Instance) map[string]interface{} { // TODO: clear fields w/in instance
+	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
+	readView := make(map[string]interface{})
 
-	if defaultTag[:1] == "!" {
-		field.forceDefaultValue = true
-
-		defaultTag = defaultTag[1:]
-	}
-
-	if defaultTag[:1] == "$" {
-		if fn, ok := fieldDefaultFunctions[defaultTag]; ok {
-			field.defaultValueFunction = fn
-
-			return
-		} else if fn, ok := internalFieldDefaultFunctions[defaultTag]; ok {
-			field.defaultValueFunction = fn
-
-			return
+	for _, field := range f.fieldMap {
+		if field.readable(i.Subject().Principal(FieldAccess)) {
+			fieldValue := resource.FieldByName(field.name)
+			if isSet(fieldValue) {
+				readView[field.externalName] = fieldValue.Interface()
+			}
 		}
 	}
 
-	field.defaultValue = defaultTag
+	return readView
 }
 
-type field struct {
-	location             string
-	externalName         string
-	access               fieldAccessBits
-	defaultValue         string
-	defaultValueFunction FieldDefaultFunction
-	forceDefaultValue    bool
+var zeroStructVal = reflect.Value{}
+
+func (f *fields) removeNonWritable(i Instance) *gomerr.ApplicationError {
+	uv := reflect.ValueOf(i).Elem()
+
+	for _, field := range f.fieldMap {
+		if !field.writable(i.Subject().Principal(FieldAccess)) {
+			if strings.Contains(field.location, ".") {
+				continue // TODO: handle nested/embedded structs
+			}
+
+			fv := uv.FieldByName(field.name)
+			if fv == zeroStructVal || fv.IsZero() {
+				continue
+			}
+
+			if !fv.CanSet() {
+				return gomerr.InternalServerError("Unable to set field " + field.name)
+			}
+
+			fv.Set(reflect.Zero(fv.Type()))
+		}
+	}
+
+	return nil
 }
 
 func (f field) readable(fieldAccessPrincipal auth.Principal) bool {
@@ -222,34 +206,6 @@ func (f field) writable(fieldAccessPrincipal auth.Principal) bool {
 	writeBitForRole := fieldAccessBits(1 << writeBitLocationForRole)
 
 	return f.access&writeBitForRole != 0
-}
-
-func applyFieldDefaults(i Instance) *gomerr.ApplicationError {
-	metadata := i.metadata()
-	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
-
-	// TODO: handle nested/embedded structs
-	for name, field := range metadata.fields {
-		if !field.forceDefaultValue && field.defaultValueFunction == nil && field.defaultValue == "" {
-			continue
-		}
-
-		fieldValue := resource.FieldByName(name)
-		if !field.forceDefaultValue && !isEmptyValue(fieldValue) {
-			continue
-		}
-
-		var defaultValue interface{}
-		if field.defaultValueFunction != nil {
-			defaultValue = field.defaultValueFunction()
-		} else {
-			defaultValue = field.defaultValue
-		}
-
-		setDefaultValue(fieldValue, defaultValue)
-	}
-
-	return nil
 }
 
 func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) *gomerr.ApplicationError {
@@ -356,48 +312,144 @@ func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) *gomerr
 	return nil
 }
 
-func scopedResult(i Instance) (interface{}, *gomerr.ApplicationError) {
-	if result := extractFields(i); result == nil || len(result) == 0 {
-		return nil, gomerr.ResourceNotFound(i)
-	} else {
-		return result, nil
+func isSet(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return v.Len() != 0
+	case reflect.Bool:
+		return v.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() != 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return v.Uint() != 0
+	case reflect.Float32, reflect.Float64:
+		return v.Float() != 0
+	case reflect.Interface, reflect.Ptr:
+		return !v.IsNil()
+	case reflect.Invalid:
+		// TODO: log?
+		return false
 	}
+	return true
 }
 
-func extractFields(i Instance) map[string]interface{} {
-	metadata := i.metadata()
-	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
-	resourceView := make(map[string]interface{})
+func externalNameTag(nameTag string, fieldName string) string {
+	if nameTag == "" {
+		return fieldName
+	}
 
-	for name, field := range metadata.fields {
-		if field.readable(i.Subject().Principal(FieldAccess)) {
-			fieldValue := resource.FieldByName(name)
-			if !isEmptyValue(fieldValue) {
-				resourceView[field.externalName] = fieldValue.Interface()
-			}
+	nameTagParts := strings.Split(nameTag, ",")
+	name := strings.TrimSpace(nameTagParts[0])
+
+	if name == "" {
+		return fieldName
+	}
+
+	return name
+}
+
+func accessTag(accessTag string) fieldAccessBits {
+	var accessBits fieldAccessBits
+
+	if accessTag == "" {
+		return accessBits // no access
+	}
+
+	if len(accessTag) > 16 {
+		panic("'access' tag too long.  Can only support up to 8 access pairs (16 bits)")
+	}
+
+	if len(accessTag)%2 != 0 {
+		panic("expected 'access' must have two values for each field access principal")
+	}
+
+	for i := 0; i < len(accessTag); i += 2 {
+		accessBits <<= 2 // Prepare by pushing two bits up.  The first time this still results in an no bits set (as expected)
+
+		if accessTag[i] == 'r' {
+			accessBits |= 2
+		} else if accessTag[i] != '-' {
+			panic("Invalid access tag value: " + accessTag)
+		}
+
+		if accessTag[i+1] == 'w' {
+			accessBits |= 1
+		} else if accessTag[i+1] != '-' {
+			panic("Invalid access tag value: " + accessTag)
 		}
 	}
 
-	return resourceView
+	return accessBits
 }
 
-func isEmptyValue(v reflect.Value) bool {
-	switch v.Kind() {
-	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
-		return v.Len() == 0
-	case reflect.Bool:
-		return !v.Bool()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return v.Int() == 0
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return v.Uint() == 0
-	case reflect.Float32, reflect.Float64:
-		return v.Float() == 0
-	case reflect.Interface, reflect.Ptr:
-		return v.IsNil()
-	case reflect.Invalid:
-		// TODO: log?
-		return true
+func defaultTag(defaultTag string, field *field) {
+	if defaultTag == "" {
+		return
 	}
-	return false
+
+	if defaultTag[:1] == "?" {
+		field.bypassDefaultIfSet = true
+
+		defaultTag = defaultTag[1:]
+	}
+
+	if defaultTag[:1] == "$" {
+		if fn, ok := fieldDefaultFunctions[defaultTag]; ok {
+			field.defaultValueFunction = fn
+
+			return
+		}
+	}
+
+	field.defaultValue = defaultTag
+}
+
+type FieldAccessPrincipal string
+
+const (
+	FieldAccess auth.PrincipalType = "FieldAccess"
+
+	ReadWriteAll FieldAccessPrincipal = "ReadWriteAll"
+	ReadAll      FieldAccessPrincipal = "ReadAll"
+	NoAccess     FieldAccessPrincipal = "NoAccess"
+)
+
+func (f FieldAccessPrincipal) Id() string {
+	return string(f)
+}
+
+func (f FieldAccessPrincipal) Type() auth.PrincipalType {
+	return FieldAccess
+}
+
+func (f FieldAccessPrincipal) Release() {
+	// No-op
+}
+
+var bitsLocationForPrincipal = make(map[auth.Principal]uint)
+
+func RegisterFieldAccessPrincipals(fieldAccessPrincipals ...FieldAccessPrincipal) {
+	if len(fieldAccessPrincipals) > 8 {
+		panic(fmt.Sprintf("Too many fieldAccessPrincipals (maximum = 8): %v", fieldAccessPrincipals))
+	}
+
+	for i, r := range fieldAccessPrincipals {
+		bitsLocationForPrincipal[r] = uint(i)
+	}
+}
+
+var fieldDefaultFunctions map[string]FieldDefaultFunction
+
+func RegisterFieldDefaultFunctions(functions map[string]FieldDefaultFunction) {
+	for k, _ := range functions {
+		if k[:1] != "$" {
+			panic("Default functions must start with a '$' symbol")
+		}
+
+		if k[1:2] == "_" {
+			panic("Default function names must not begin with an underscore")
+		}
+	}
+
+	fieldDefaultFunctions = functions
 }

@@ -6,15 +6,11 @@ import (
 	"reflect"
 	"strings"
 
-	jsonpatch "github.com/evanphx/json-patch"
-
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/logs"
 )
-
-//var validate = validator.New()
 
 type Instance interface {
 	resource
@@ -24,14 +20,14 @@ type Instance interface {
 	PostCreate() *gomerr.ApplicationError
 	PreGet() *gomerr.ApplicationError
 	PostGet() *gomerr.ApplicationError
-	PreUpdate() *gomerr.ApplicationError
-	PostUpdate() *gomerr.ApplicationError
+	PreUpdate(updateInstance Instance) *gomerr.ApplicationError
+	PostUpdate(updateInstance Instance) *gomerr.ApplicationError
 	PreDelete() *gomerr.ApplicationError
 	PostDelete() *gomerr.ApplicationError
 	PostQuery() *gomerr.ApplicationError
 }
 
-func NewInstance(resourceType string, subject auth.Subject) (Instance, *gomerr.ApplicationError) {
+func newInstance(resourceType string, subject auth.Subject) (Instance, *gomerr.ApplicationError) {
 	metadata, ok := resourceMetadata[strings.ToLower(resourceType)]
 	if !ok {
 		return nil, gomerr.BadRequest("Unknown type: " + resourceType)
@@ -40,18 +36,26 @@ func NewInstance(resourceType string, subject auth.Subject) (Instance, *gomerr.A
 	instance := reflect.New(metadata.instanceType.Elem()).Interface().(Instance)
 	instance.setMetadata(metadata)
 	instance.setSubject(subject)
+
+	return instance, nil
+}
+
+func NewInstance(resourceType string, subject auth.Subject) (Instance, *gomerr.ApplicationError) {
+	instance, ae := newInstance(resourceType, subject)
+	if ae != nil {
+		return nil, ae
+	}
+
 	instance.OnSubject()
 
 	return instance, nil
 }
 
 func UnmarshalInstance(resourceType string, subject auth.Subject, bytes []byte) (Instance, *gomerr.ApplicationError) {
-	metadata, ok := resourceMetadata[strings.ToLower(resourceType)]
-	if !ok {
-		return nil, gomerr.BadRequest("Unknown type: " + resourceType)
+	instance, ae := newInstance(resourceType, subject)
+	if ae != nil {
+		return nil, ae
 	}
-
-	instance := reflect.New(metadata.instanceType.Elem()).Interface().(Instance)
 
 	if len(bytes) != 0 {
 		if err := json.Unmarshal(bytes, &instance); err != nil {
@@ -60,15 +64,13 @@ func UnmarshalInstance(resourceType string, subject auth.Subject, bytes []byte) 
 		}
 	}
 
-	instance.setMetadata(metadata)
-	instance.setSubject(subject)
 	instance.OnSubject()
 
 	return instance, nil
 }
 
 func SaveInstance(i Instance) *gomerr.ApplicationError {
-	if ae := i.metadata().dataStore.Update(i); ae != nil {
+	if ae := i.metadata().dataStore.Update(i, nil); ae != nil {
 		return ae
 	}
 
@@ -82,7 +84,7 @@ func DoCreate(i Instance) (result interface{}, ae *gomerr.ApplicationError) {
 		defer saveLimiter(limiterInstance)
 	}
 
-	applyFieldDefaults(i)
+	i.metadata().fields.applyDefaults(i)
 
 	if ae := i.PreCreate(); ae != nil {
 		return nil, ae
@@ -108,45 +110,50 @@ func DoGet(i Instance) (interface{}, *gomerr.ApplicationError) {
 		return nil, ae
 	}
 
-	//i.setPersisted(true)
-
 	return scopedResult(i)
 }
 
-func DoPatch(i Instance, patch jsonpatch.Patch) (interface{}, *gomerr.ApplicationError) {
-	if ae := validatePatch(i, patch); ae != nil {
-		return nil, ae
-	}
-
+func DoUpdate(updateInstance Instance) (interface{}, *gomerr.ApplicationError) {
+	// copy update to a new instance and read data into it
+	i := shallowCopy(updateInstance)
 	if ae := i.metadata().dataStore.Read(i); ae != nil {
 		return nil, ae
 	}
 
-	//i.setPersisted(true)
-
-	if ae := applyPatch(i, patch); ae != nil {
+	if ae := i.metadata().fields.removeNonWritable(updateInstance); ae != nil {
 		return nil, ae
 	}
 
-	if ae := i.PreUpdate(); ae != nil {
+	if ae := i.PreUpdate(updateInstance); ae != nil {
 		return nil, ae
 	}
 
-	//if ae := i.ValidateAction(account, Create); ae != nil {
-	//	return nil, ae
-	//}
-	//
-	if ae := i.metadata().dataStore.Update(i); ae != nil {
+	if ae := i.metadata().dataStore.Update(i, updateInstance); ae != nil {
 		return nil, ae
 	}
 
-	if ae := i.PostUpdate(); ae != nil {
+	if ae := i.PostUpdate(updateInstance); ae != nil {
 		return nil, ae
 	}
-
-	// assert i.persisted == true
 
 	return scopedResult(i)
+}
+
+func shallowCopy(update Instance) Instance {
+	updateCopy := reflect.ValueOf(update).Elem().Interface()
+	persistedPtr := reflect.New(reflect.TypeOf(updateCopy))
+	persistedPtr.Elem().Set(reflect.ValueOf(updateCopy))
+	persisted := persistedPtr.Interface().(Instance)
+
+	return persisted
+}
+
+func scopedResult(i Instance) (interface{}, *gomerr.ApplicationError) {
+	if result := i.metadata().fields.removeNonReadable(i); result == nil || len(result) == 0 {
+		return nil, gomerr.ResourceNotFound(i)
+	} else {
+		return result, nil
+	}
 }
 
 func DoDelete(i Instance) (interface{}, *gomerr.ApplicationError) {
@@ -169,73 +176,6 @@ func DoDelete(i Instance) (interface{}, *gomerr.ApplicationError) {
 	}
 
 	return scopedResult(i)
-}
-
-func validatePatch(i Instance, patch jsonpatch.Patch) *gomerr.ApplicationError {
-	if patch == nil {
-		return gomerr.BadRequest("No applyPatch operations found.")
-	}
-
-	metadata := i.metadata()
-	patchPaths := make([]string, 0)
-	for _, field := range metadata.fields {
-		if field.writable(i.Subject().Principal(FieldAccess)) {
-			// TODO: handle nested/embedded structs
-			patchPaths = append(patchPaths, "/"+field.externalName)
-		}
-	}
-
-	for _, op := range patch {
-		switch op.Kind() {
-		case "add":
-		case "remove":
-		case "replace":
-		default:
-			return gomerr.BadRequest("Only 'add', 'remove', and 'replace' patch operation are supported.")
-		}
-
-		path, err := op.Path()
-		if err != nil {
-			return gomerr.BadRequest("Patch operation has a missing or invalid 'path'.")
-		}
-
-		if !containsString(patchPaths, path) {
-			return gomerr.Forbidden(fmt.Sprintf("Caller cannot applyPatch '%s'.", path))
-		}
-	}
-
-	return nil
-}
-
-func containsString(sl []string, v string) bool {
-	for _, vv := range sl {
-		if vv == v {
-			return true
-		}
-	}
-
-	return false
-}
-
-func applyPatch(i Instance, patch jsonpatch.Patch) *gomerr.ApplicationError {
-	bytes, err := json.Marshal(i)
-	if err != nil {
-		logs.Error.Printf("Failed to marshal bytes for applyPatch: %v", err)
-		return gomerr.BadRequest("Unable to apply patch operations.")
-	}
-
-	updatedBytes, err := patch.Apply(bytes)
-	if err != nil {
-		logs.Error.Printf("Failed to apply patch to group bytes: %v", err)
-		return gomerr.BadRequest("Unable to apply patch operations.")
-	}
-
-	if err := json.Unmarshal(updatedBytes, i); err != nil {
-		logs.Error.Printf("Failed to unmarshal group bytes after applyPatch: %v", err)
-		return gomerr.BadRequest("Unable to apply patch operations.")
-	}
-
-	return nil
 }
 
 type BaseInstance struct {
@@ -278,11 +218,11 @@ func (b *BaseInstance) PostGet() *gomerr.ApplicationError {
 	return nil
 }
 
-func (b *BaseInstance) PreUpdate() *gomerr.ApplicationError {
+func (b *BaseInstance) PreUpdate(_ Instance) *gomerr.ApplicationError {
 	return nil
 }
 
-func (b *BaseInstance) PostUpdate() *gomerr.ApplicationError {
+func (b *BaseInstance) PostUpdate(_ Instance) *gomerr.ApplicationError {
 	return nil
 }
 

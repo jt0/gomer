@@ -19,13 +19,15 @@ type Limiter interface {
 	SetOverride(limited Limited, override int)
 	DefaultLimit(limited Limited) int
 	IncrementAmount(limited Limited) int
+
+	dirty() bool
 }
 
 type BaseLimiter struct {
 	Counts    map[string]int
 	Overrides map[string]int
 
-	dirty bool
+	_dirty bool
 }
 
 func (l *BaseLimiter) Count(limited Limited) int {
@@ -43,7 +45,7 @@ func (l *BaseLimiter) SetCount(limited Limited, count int) {
 
 	l.Counts[util.UnqualifiedTypeName(reflect.TypeOf(limited))] = count
 
-	l.dirty = true
+	l._dirty = true
 }
 
 func (l *BaseLimiter) Override(limited Limited) int {
@@ -65,7 +67,7 @@ func (l *BaseLimiter) SetOverride(limited Limited, override int) {
 		delete(l.Overrides, util.UnqualifiedTypeName(reflect.TypeOf(limited)))
 	}
 
-	l.dirty = true
+	l._dirty = true
 }
 
 func (l *BaseLimiter) DefaultLimit(_ Limited) int {
@@ -76,8 +78,8 @@ func (l *BaseLimiter) IncrementAmount(_ Limited) int {
 	return 1
 }
 
-func (l *BaseLimiter) Dirty() bool {
-	return l.dirty
+func (l *BaseLimiter) dirty() bool {
+	return l._dirty
 }
 
 type limitAction func(Limiter, Limited) *gomerr.ApplicationError
@@ -169,10 +171,10 @@ func limit(limitAction limitAction, i Instance) (Limiter, *gomerr.ApplicationErr
 }
 
 func saveLimiter(limiter Limiter) {
-	if limiter == nil {
+	if limiter == nil || !limiter.dirty() {
 		return
 	}
 
 	limiterInstance := limiter.(Instance) // Should always be true
-	limiterInstance.metadata().dataStore.Update(limiterInstance)
+	limiterInstance.metadata().dataStore.Update(limiterInstance, nil)
 }

@@ -143,8 +143,22 @@ func (t *table) Create(p data.Persistable) *gomerr.ApplicationError {
 	return t.put(p, true)
 }
 
-func (t *table) Update(p data.Persistable) *gomerr.ApplicationError {
+func (t *table) Update(p data.Persistable, update data.Persistable) *gomerr.ApplicationError {
 	// TODO:p1 support partial update vs put()
+	if update != nil {
+		pv := reflect.ValueOf(p).Elem()
+		uv := reflect.ValueOf(update).Elem()
+
+		for i := 0; i < uv.NumField(); i++ {
+			uField := uv.Field(i)
+			if !uField.CanSet() || uField.IsZero() {
+				continue
+			}
+
+			pv.Field(i).Set(uField)
+		}
+	}
+
 	return t.put(p, false)
 }
 

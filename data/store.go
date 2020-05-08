@@ -7,7 +7,7 @@ import (
 type Store interface {
 	Create(p Persistable) *gomerr.ApplicationError
 	Read(p Persistable) *gomerr.ApplicationError
-	Update(p Persistable) *gomerr.ApplicationError
+	Update(p Persistable, update Persistable) *gomerr.ApplicationError
 	Delete(p Persistable) *gomerr.ApplicationError
 	Query(q Queryable, arrayOfPersistable interface{}) (nextToken *string, ae *gomerr.ApplicationError)
 }

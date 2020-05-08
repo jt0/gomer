@@ -14,6 +14,8 @@ type Metadata interface {
 	CollectionQueryName() string
 	Parent() Metadata
 	Children() []Metadata
+	IdExternalName() string
+	ExternalNameToFieldName(externalName string) (string, bool)
 }
 
 func Register(instance Instance, collectionQuery CollectionQuery, dataStore data.Store, parentMetadata Metadata) Metadata {
@@ -46,7 +48,7 @@ func Register(instance Instance, collectionQuery CollectionQuery, dataStore data
 		instanceName:        instanceName,
 		collectionQueryType: cqt,
 		collectionQueryName: strings.ToLower(util.UnqualifiedTypeName(cqt)),
-		fields:              fields(structType, ""),
+		fields:              (&fields{}).process(structType, ""),
 		dataStore:           dataStore,
 		parent:              nilSafeParentMetadata,
 		children:            make([]Metadata, 0),
@@ -67,7 +69,7 @@ type metadata struct {
 	instanceName        string
 	collectionQueryType reflect.Type
 	collectionQueryName string
-	fields              map[string]*field
+	fields              *fields
 	dataStore           data.Store
 	parent              *metadata
 	children            []Metadata // Using interface type since we aren't currently using child attributes
@@ -93,6 +95,14 @@ func (m *metadata) Parent() Metadata {
 
 func (m *metadata) Children() []Metadata {
 	return m.children
+}
+
+func (m *metadata) IdExternalName() string {
+	return m.fields.idExternalName()
+}
+
+func (m *metadata) ExternalNameToFieldName(externalName string) (string, bool) {
+	return m.fields.externalNameToFieldName(externalName)
 }
 
 func (m *metadata) emptyItems() interface{} {
