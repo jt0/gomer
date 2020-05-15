@@ -222,10 +222,6 @@ func (f field) writable(fieldAccessPrincipal auth.Principal) bool {
 func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) *gomerr.ApplicationError {
 	defaultValueValue := reflect.ValueOf(defaultValue)
 
-	if defaultValueValue == zeroStructVal || fieldValue == zeroStructVal {
-		panic("foo")
-	}
-
 	// This handles non-string FieldDefaultFunction results and default strings
 	if defaultValueValue.Type().AssignableTo(fieldValue.Type()) {
 		fieldValue.Set(defaultValueValue)

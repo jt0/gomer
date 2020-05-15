@@ -27,7 +27,7 @@ type BaseLimiter struct {
 	Counts    map[string]int
 	Overrides map[string]int
 
-	_dirty bool
+	dirty_ bool
 }
 
 func (l *BaseLimiter) Count(limited Limited) int {
@@ -45,7 +45,7 @@ func (l *BaseLimiter) SetCount(limited Limited, count int) {
 
 	l.Counts[util.UnqualifiedTypeName(reflect.TypeOf(limited))] = count
 
-	l._dirty = true
+	l.dirty_ = true
 }
 
 func (l *BaseLimiter) Override(limited Limited) int {
@@ -67,7 +67,7 @@ func (l *BaseLimiter) SetOverride(limited Limited, override int) {
 		delete(l.Overrides, util.UnqualifiedTypeName(reflect.TypeOf(limited)))
 	}
 
-	l._dirty = true
+	l.dirty_ = true
 }
 
 func (l *BaseLimiter) DefaultLimit(_ Limited) int {
@@ -79,7 +79,7 @@ func (l *BaseLimiter) IncrementAmount(_ Limited) int {
 }
 
 func (l *BaseLimiter) dirty() bool {
-	return l._dirty
+	return l.dirty_
 }
 
 type limitAction func(Limiter, Limited) *gomerr.ApplicationError
