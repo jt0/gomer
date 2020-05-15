@@ -9,7 +9,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbiface"
 
+	"github.com/jt0/gomer/crypto"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/logs"
@@ -19,21 +21,23 @@ import (
 type table struct {
 	index
 
-	ddb                    *dynamodb.DynamoDB
+	ddb                    dynamodbiface.DynamoDBAPI
 	defaultLimit           *int64
 	maxLimit               *int64
 	defaultConsistencyType ConsistencyType
 	indexes                map[string]*index
 	persistableTypes       map[string]*persistableType
 	valueSeparator         string
+	nextTokenizer          nextTokenizer
 }
 
 type Configuration struct {
-	DynamoDb           *dynamodb.DynamoDB
+	DynamoDb           dynamodbiface.DynamoDBAPI
 	MaxResultsDefault  int64
 	MaxResultsMax      int64
 	ConsistencyDefault ConsistencyType
 	ValueSeparator     string
+	NextTokenCipher    crypto.Cipher
 }
 
 type ConsistencyType int
@@ -58,9 +62,10 @@ func Store(tableName string, config *Configuration, persistables ...data.Persist
 		defaultLimit:           &config.MaxResultsDefault,
 		maxLimit:               &config.MaxResultsMax,
 		defaultConsistencyType: config.ConsistencyDefault,
-		valueSeparator:         config.ValueSeparator,
 		indexes:                make(map[string]*index),
 		persistableTypes:       make(map[string]*persistableType),
+		valueSeparator:         config.ValueSeparator,
+		nextTokenizer:          nextTokenizer{cipher: config.NextTokenCipher},
 	}
 
 	table.prepare(persistables)
@@ -315,7 +320,7 @@ func (t *table) Query(q data.Queryable, arrayOfPersistable interface{}) (nextTok
 		return nil, gomerr.InternalServerError("Unable to retrieve resource.")
 	}
 
-	return t.toToken(qo.LastEvaluatedKey), nil
+	return t.nextTokenizer.tokenize(q, qo.LastEvaluatedKey)
 }
 
 func (t *table) preQueryConstraintsCheck(p data.Persistable, fieldName string, additionalFields []string) *gomerr.ApplicationError {
@@ -392,6 +397,11 @@ func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, *gomerr
 	//	projectionExpressionPtr = &projectionExpression
 	//}
 
+	exclusiveStartKey, ae := t.nextTokenizer.untokenize(q)
+	if ae != nil {
+		return nil, ae
+	}
+
 	input := &dynamodb.QueryInput{
 		TableName:                 t.tableName,
 		IndexName:                 index.name,
@@ -400,10 +410,10 @@ func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, *gomerr
 		ExpressionAttributeValues: expressionAttributeValues,
 		KeyConditionExpression:    &keyConditionExpresion,
 		FilterExpression:          nil,
+		ExclusiveStartKey:         exclusiveStartKey,
+		Limit:                     t.limit(q.MaximumPageSize()),
 		//ProjectionExpression:      projectionExpressionPtr,
 		//ScanIndexForward:          &scanIndexForward,
-		ExclusiveStartKey: t.fromToken(q.NextPageToken()),
-		Limit:             t.limit(q.MaxResults()),
 	}
 
 	return input, nil
@@ -437,32 +447,17 @@ func (t *table) consistencyType(s data.Storable) ConsistencyType {
 	}
 }
 
-func (t *table) limit(maxResults *int64) *int64 {
-	if maxResults != nil && *maxResults > 0 {
-		if *maxResults <= *t.maxLimit {
-			return maxResults
+func (t *table) limit(maximumPageSize *int) *int64 {
+	if maximumPageSize != nil && *maximumPageSize > 0 {
+		mps64 := int64(*maximumPageSize)
+		if mps64 <= *t.maxLimit {
+			return &mps64
 		} else {
 			return t.maxLimit
 		}
 	} else {
 		return t.defaultLimit
 	}
-}
-
-func (t *table) fromToken(token *string) map[string]*dynamodb.AttributeValue {
-	if token != nil {
-		// TODO:p0 implement
-	}
-
-	return nil
-}
-
-func (t *table) toToken(lastEvaluatedKey map[string]*dynamodb.AttributeValue) *string {
-	if lastEvaluatedKey != nil {
-		// TODO:p0 implement
-	}
-
-	return nil
 }
 
 func safeName(fieldName string, expressionAttributeNames map[string]*string) string {

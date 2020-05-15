@@ -17,12 +17,13 @@ type CollectionQuery interface {
 	data.Queryable
 
 	PreQuery() *gomerr.ApplicationError
-	Collection(items []interface{}, nextToken *string) (Collection, *gomerr.ApplicationError)
+	Collection() Collection
 }
 
-type Collection struct {
-	Items     []interface{}
-	NextToken *string
+type Collection interface {
+	SetItems([]interface{})
+	SetNextPageToken(token *string)
+	SetPrevPageToken(token *string)
 }
 
 func UnmarshalCollectionQuery(resourceType string, subject auth.Subject, bytes []byte) (CollectionQuery, *gomerr.ApplicationError) {
@@ -47,7 +48,7 @@ func UnmarshalCollectionQuery(resourceType string, subject auth.Subject, bytes [
 	return collectionQuery, nil
 }
 
-func DoQuery(c CollectionQuery) (interface{}, *gomerr.ApplicationError) {
+func DoQuery(c CollectionQuery) (Collection, *gomerr.ApplicationError) {
 	ae := c.PreQuery()
 	if ae != nil {
 		return nil, ae
@@ -81,22 +82,34 @@ func DoQuery(c CollectionQuery) (interface{}, *gomerr.ApplicationError) {
 		resultsArray = append(resultsArray, scoped)
 	}
 
-	return c.Collection(resultsArray, nextToken)
+	collection := c.Collection()
+	collection.SetItems(resultsArray)
+	collection.SetNextPageToken(nextToken)
+
+	return collection, nil
 }
 
 type BaseCollectionQuery struct {
 	BaseResource
 }
 
+func (b *BaseCollectionQuery) OnSubject() {
+	// ignore
+}
+
 func (b *BaseCollectionQuery) PersistableTypeName() string {
 	return b.md.instanceName
 }
 
-func (b *BaseCollectionQuery) NextToken() *string {
+func (b *BaseCollectionQuery) NextPageToken() *string {
 	return nil
 }
 
-func (b *BaseCollectionQuery) MaxResults() *int64 {
+func (b *BaseCollectionQuery) PrevPageToken() *string {
+	return nil
+}
+
+func (b *BaseCollectionQuery) MaximumPageSize() *int {
 	return nil
 }
 
@@ -106,11 +119,4 @@ func (b *BaseCollectionQuery) ResponseFields() []string {
 
 func (b *BaseCollectionQuery) PreQuery() *gomerr.ApplicationError {
 	return nil
-}
-
-func (b *BaseCollectionQuery) Collection(items []interface{}, nextToken *string) (Collection, *gomerr.ApplicationError) {
-	return Collection{
-		Items:     items,
-		NextToken: nextToken,
-	}, nil
 }

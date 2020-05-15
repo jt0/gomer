@@ -50,6 +50,10 @@ func BadRequest(message string, details ...interface{}) *ApplicationError {
 	return &ApplicationError{BadRequestType, message, details}
 }
 
+func PaginationTokenExpired(details ...interface{}) *ApplicationError {
+	return &ApplicationError{BadRequestType, "Pagination token expired", details}
+}
+
 func LimitExceeded(message string, details ...interface{}) *ApplicationError {
 	return &ApplicationError{LimitExceededType, message, details}
 }

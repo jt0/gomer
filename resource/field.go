@@ -59,8 +59,19 @@ func (f *fields) process(structType reflect.Type, path string) *fields {
 				access:       accessTag(sField.Tag.Get("access")),
 			}
 
-			if idTag, idTagPresent := sField.Tag.Lookup("id"); idTagPresent {
-				defaultTag(idTag, field)
+			// Format: (<defaultTag>)?(,<externalName>)?
+			if idTag, ok := sField.Tag.Lookup("id"); ok {
+				parts := strings.Split(idTag, ",")
+
+				if len(parts) > 2 {
+					panic("unexpected format for id tag: " + idTag)
+				}
+
+				defaultTag(parts[0], field)
+
+				if len(parts) == 2 {
+					field.externalName = strings.TrimSpace(parts[1])
+				}
 
 				if f.idField != nil {
 					panic("multiple fields have `id` tag - only one allowed")
@@ -106,12 +117,12 @@ func (f *fields) applyDefaults(i Instance) *gomerr.ApplicationError {
 	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
 
 	// TODO: handle nested/embedded structs
-	for name, field := range f.fieldMap {
+	for _, field := range f.fieldMap {
 		if field.defaultValueFunction == nil && field.defaultValue == "" {
 			continue
 		}
 
-		fieldValue := resource.FieldByName(name)
+		fieldValue := resource.FieldByName(field.name)
 		if field.bypassDefaultIfSet && isSet(fieldValue) {
 			continue
 		}
@@ -210,6 +221,10 @@ func (f field) writable(fieldAccessPrincipal auth.Principal) bool {
 
 func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) *gomerr.ApplicationError {
 	defaultValueValue := reflect.ValueOf(defaultValue)
+
+	if defaultValueValue == zeroStructVal || fieldValue == zeroStructVal {
+		panic("foo")
+	}
 
 	// This handles non-string FieldDefaultFunction results and default strings
 	if defaultValueValue.Type().AssignableTo(fieldValue.Type()) {

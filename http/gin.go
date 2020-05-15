@@ -57,7 +57,9 @@ func buildApi(r *gin.Engine, md resource.Metadata, path string, pathKeys []strin
 	}
 
 	// FIXME: support singleton (non-query) types that don't have an identifier
-	path = path + "/:" + md.IdExternalName()
+	pathKey := resourceType + "Id"
+	path = path + "/:" + pathKey
+	pathKeys = append(pathKeys, pathKey)
 
 	// TODO: Examine metadata to determine if put/get/patch/delete are supported and if special handlers are needed
 	r.GET(path, instanceHandler(resourceType, md.ExternalNameToFieldName, resource.DoGet, false, http.StatusOK))
@@ -65,7 +67,7 @@ func buildApi(r *gin.Engine, md resource.Metadata, path string, pathKeys []strin
 	r.DELETE(path, instanceHandler(resourceType, md.ExternalNameToFieldName, resource.DoDelete, false, http.StatusNoContent))
 
 	for _, childMetadata := range md.Children() {
-		buildApi(r, childMetadata, path, append(pathKeys, resourceType+"Id"))
+		buildApi(r, childMetadata, path, pathKeys)
 	}
 }
 

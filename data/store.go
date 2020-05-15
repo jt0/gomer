@@ -33,7 +33,7 @@ type Queryable interface {
 type Paginatable interface {
 	NextPageToken() *string
 	PrevPageToken() *string
-	MaxResults() *int64 // TODO: should these pointers? How about nextToken response from query()?
+	MaximumPageSize() *int // TODO: should these pointers? How about nextToken response from query()?
 }
 
 type QueryTypes uint16
