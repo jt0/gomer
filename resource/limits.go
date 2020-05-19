@@ -21,6 +21,7 @@ type Limiter interface {
 	IncrementAmount(limited Limited) int
 
 	dirty() bool
+	clearDirty()
 }
 
 type BaseLimiter struct {
@@ -80,6 +81,10 @@ func (l *BaseLimiter) IncrementAmount(_ Limited) int {
 
 func (l *BaseLimiter) dirty() bool {
 	return l.dirty_
+}
+
+func (l *BaseLimiter) clearDirty() {
+	l.dirty_ = false
 }
 
 type limitAction func(Limiter, Limited) *gomerr.ApplicationError
@@ -163,18 +168,20 @@ func limit(limitAction limitAction, i Instance) (Limiter, *gomerr.ApplicationErr
 	}
 
 	// If we didn't load the limiterInstance, we'll let other code handle the save
-	if loaded {
+	if !loaded {
 		limiter = nil
 	}
 
 	return limiter, nil
 }
 
-func saveLimiter(limiter Limiter) {
-	if limiter == nil || !limiter.dirty() {
+func saveLimiter(limiter Limiter, ae *gomerr.ApplicationError) {
+	if limiter == nil || !limiter.dirty() || ae != nil {
 		return
 	}
 
 	limiterInstance := limiter.(Instance) // Should always be true
 	limiterInstance.metadata().dataStore.Update(limiterInstance, nil)
+
+	limiter.clearDirty()
 }

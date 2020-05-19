@@ -21,8 +21,8 @@ type persistableType struct {
 func NewPersistableType(persistableName string, pType reflect.Type, indexes map[string]*index) *persistableType {
 	pt := &persistableType{
 		name:         persistableName,
+		dbNames:      make(map[string]string, 0),
 		uniqueFields: make(map[string][]string, 0),
-		dbNames:      make(map[string]string),
 	}
 
 	pt.processFields(pType, "", indexes)

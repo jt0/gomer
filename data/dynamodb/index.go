@@ -13,7 +13,6 @@ import (
 )
 
 type index struct {
-	tableName           *string
 	name                *string
 	pk                  *keyAttribute
 	sk                  *keyAttribute

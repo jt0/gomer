@@ -78,15 +78,9 @@ func SaveInstance(i Instance) *gomerr.ApplicationError {
 }
 
 func DoCreate(i Instance) (result interface{}, ae *gomerr.ApplicationError) {
-	if limiterInstance, ae := limit(checkAndIncrement, i); ae != nil {
-		return nil, ae
-	} else {
-		defer saveLimiter(limiterInstance)
-	}
-
 	i.metadata().fields.applyDefaults(i)
 
-	if ae := i.PreCreate(); ae != nil {
+	if ae = i.PreCreate(); ae != nil {
 		return nil, ae
 	}
 
@@ -94,11 +88,17 @@ func DoCreate(i Instance) (result interface{}, ae *gomerr.ApplicationError) {
 	//	return nil, gomerr.ValidationFailure(err)
 	//}
 
-	if ae := i.metadata().dataStore.Create(i); ae != nil {
+	if limiter, lae := limit(checkAndIncrement, i); lae != nil {
+		return nil, lae
+	} else if limiter != nil {
+		defer saveLimiter(limiter, ae)
+	}
+
+	if ae = i.metadata().dataStore.Create(i); ae != nil {
 		return nil, ae
 	}
 
-	if ae := i.PostCreate(); ae != nil {
+	if ae = i.PostCreate(); ae != nil {
 		return nil, ae
 	}
 
@@ -156,22 +156,22 @@ func scopedResult(i Instance) (interface{}, *gomerr.ApplicationError) {
 	}
 }
 
-func DoDelete(i Instance) (interface{}, *gomerr.ApplicationError) {
-	if limiter, ae := limit(decrement, i); ae != nil {
-		return nil, ae
-	} else {
-		defer saveLimiter(limiter)
-	}
-
-	if ae := i.PreDelete(); ae != nil {
+func DoDelete(i Instance) (result interface{}, ae *gomerr.ApplicationError) {
+	if ae = i.PreDelete(); ae != nil {
 		return nil, ae
 	}
 
-	if ae := i.metadata().dataStore.Delete(i); ae != nil {
+	if limiter, lae := limit(decrement, i); lae != nil {
+		return nil, lae
+	} else if limiter != nil {
+		defer saveLimiter(limiter, ae)
+	}
+
+	if ae = i.metadata().dataStore.Delete(i); ae != nil {
 		return nil, ae
 	}
 
-	if ae := i.PostDelete(); ae != nil {
+	if ae = i.PostDelete(); ae != nil {
 		return nil, ae
 	}
 

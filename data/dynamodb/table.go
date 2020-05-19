@@ -21,6 +21,7 @@ import (
 type table struct {
 	index
 
+	tableName              *string
 	ddb                    dynamodbiface.DynamoDBAPI
 	defaultLimit           *int64
 	maxLimit               *int64
@@ -54,10 +55,9 @@ type ConsistencyTyper interface {
 }
 
 func Store(tableName string, config *Configuration, persistables ...data.Persistable) data.Store {
-	tableIndexName := ""
-
 	table := &table{
-		index:                  index{tableName: &tableName, name: &tableIndexName, canReadConsistently: true},
+		tableName:              &tableName,
+		index:                  index{canReadConsistently: true},
 		ddb:                    config.DynamoDb,
 		defaultLimit:           &config.MaxResultsDefault,
 		maxLimit:               &config.MaxResultsMax,
@@ -90,7 +90,6 @@ func (t *table) prepare(persistables []data.Persistable) {
 
 	for _, lsid := range output.Table.LocalSecondaryIndexes {
 		lsi := &index{
-			tableName:           t.tableName,
 			name:                lsid.IndexName,
 			canReadConsistently: true,
 		}
@@ -102,7 +101,6 @@ func (t *table) prepare(persistables []data.Persistable) {
 
 	for _, gsid := range output.Table.GlobalSecondaryIndexes {
 		gsi := &index{
-			tableName:           t.tableName,
 			name:                gsid.IndexName,
 			canReadConsistently: false,
 		}
@@ -137,11 +135,16 @@ func (t *table) prepare(persistables []data.Persistable) {
 }
 
 func (t *table) Create(p data.Persistable) *gomerr.ApplicationError {
-	return t.put(p, true)
+	return t.put(p, t.persistableTypes[p.PersistableTypeName()].uniqueFields, true)
 }
+
+var zeroValue = reflect.Value{}
 
 func (t *table) Update(p data.Persistable, update data.Persistable) *gomerr.ApplicationError {
 	// TODO:p1 support partial update vs put()
+
+	updatedUniqueFields := make(map[string][]string)
+
 	if update != nil {
 		pv := reflect.ValueOf(p).Elem()
 		uv := reflect.ValueOf(update).Elem()
@@ -154,15 +157,22 @@ func (t *table) Update(p data.Persistable, update data.Persistable) *gomerr.Appl
 
 			pv.Field(i).Set(uField)
 		}
+
+		for fieldName, additionalFields := range t.persistableTypes[p.PersistableTypeName()].uniqueFields {
+			uField := uv.FieldByName(fieldName)
+			if uField != zeroValue && !uField.IsZero() {
+				updatedUniqueFields[fieldName] = additionalFields
+			}
+		}
 	}
 
-	return t.put(p, false)
+	return t.put(p, updatedUniqueFields, false)
 }
 
-func (t *table) put(p data.Persistable, ensureUniqueId bool) *gomerr.ApplicationError {
+func (t *table) put(p data.Persistable, uniqueFields map[string][]string, ensureUniqueId bool) *gomerr.ApplicationError {
 	pt := t.persistableTypes[p.PersistableTypeName()]
 
-	for fieldName, additionalFields := range pt.uniqueFields {
+	for fieldName, additionalFields := range uniqueFields {
 		if ae := t.preQueryConstraintsCheck(p, fieldName, additionalFields); ae != nil {
 			return ae
 		}
@@ -374,9 +384,9 @@ func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, *gomerr
 		}
 	}
 
-	for _, attribute := range q.ResponseFields() {
-		safeName(attribute, expressionAttributeNames)
-	}
+	//for _, attribute := range q.ResponseFields() {
+	//	safeName(attribute, expressionAttributeNames)
+	//}
 
 	if len(expressionAttributeNames) == 0 {
 		expressionAttributeNames = nil
@@ -452,16 +462,16 @@ func (t *table) limit(maximumPageSize *int) *int64 {
 	}
 }
 
-func safeName(fieldName string, expressionAttributeNames map[string]*string) string {
+func safeName(attributeName string, expressionAttributeNames map[string]*string) string {
 	// TODO: calculate once and store in persistableType
-	if _, reserved := reservedWords[strings.ToUpper(fieldName)]; reserved || strings.ContainsAny(fieldName, ". ") || fieldName[0] >= '0' || fieldName[0] <= '9' {
+	if _, reserved := reservedWords[strings.ToUpper(attributeName)]; reserved || strings.ContainsAny(attributeName, ". ") || attributeName[0] >= '0' || attributeName[0] <= '9' {
 		replacement := "#a" + strconv.Itoa(len(expressionAttributeNames))
-		expressionAttributeNames[replacement] = &fieldName
+		expressionAttributeNames[replacement] = &attributeName
 
 		return replacement
 	}
 
-	return fieldName
+	return attributeName
 }
 
 var (
