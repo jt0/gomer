@@ -22,9 +22,9 @@ type index struct {
 }
 
 type keyAttribute struct {
-	name              string
-	attributeType     string
-	compositeKeyParts map[string][]string // persistable type name -> key parts
+	name                   string
+	attributeType          string
+	keyFieldsByPersistable map[string][]string // persistable type name -> key fields
 }
 
 type candidate struct {
@@ -36,9 +36,9 @@ type candidate struct {
 func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement, attributeTypes map[string]string) {
 	for _, keySchemaElement := range keySchemaElements {
 		key := &keyAttribute{
-			name:              *keySchemaElement.AttributeName,
-			attributeType:     attributeTypes[*keySchemaElement.AttributeName],
-			compositeKeyParts: make(map[string][]string),
+			name:                   *keySchemaElement.AttributeName,
+			attributeType:          attributeTypes[*keySchemaElement.AttributeName],
+			keyFieldsByPersistable: make(map[string][]string),
 		}
 		switch *keySchemaElement.KeyType {
 		case dynamodb.KeyTypeHash:
@@ -99,7 +99,7 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, *gomerr.ApplicationErr
 func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 	// TODO: validate index sufficiently projects over request. if not, return nil
 
-	for _, keyField := range i.pk.compositeKeyParts[ptName] {
+	for _, keyField := range i.pk.keyFieldsByPersistable[ptName] {
 		if keyField[:1] == "'" {
 			continue
 		}
@@ -113,7 +113,7 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 
 	// Needs more work to handle multi-attribute cases such as "between"
 	if i.sk != nil {
-		for _, keyField := range i.sk.compositeKeyParts[ptName] {
+		for _, keyField := range i.sk.keyFieldsByPersistable[ptName] {
 			if keyField[:1] == "'" {
 				continue
 			}
@@ -129,7 +129,7 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 			}
 		}
 
-		candidate.skLength = len(i.sk.compositeKeyParts[ptName])
+		candidate.skLength = len(i.sk.keyFieldsByPersistable[ptName])
 	}
 
 	return candidate
@@ -176,15 +176,15 @@ func (k *keyAttribute) attributeValue(s data.Storable, valueSeparator string) *d
 func (k *keyAttribute) buildKeyValue(s data.Storable, valueSeparator string) string {
 	sv := reflect.ValueOf(s).Elem()
 
-	compositeParts := k.compositeKeyParts[s.PersistableTypeName()]
-	compositeValues := make([]string, len(compositeParts))
-	for i, compositePart := range compositeParts {
-		if compositePart[:1] == "'" {
-			compositeValues[i] = compositePart[1 : len(compositePart)-1]
+	keyFields := k.keyFieldsByPersistable[s.PersistableTypeName()]
+	keyValues := make([]string, len(keyFields))
+	for i, fieldName := range keyFields {
+		if fieldName[:1] == "'" {
+			keyValues[i] = fieldName[1 : len(fieldName)-1]
 		} else {
-			compositeValues[i] = fmt.Sprint(sv.FieldByName(compositePart).Interface())
+			keyValues[i] = fmt.Sprint(sv.FieldByName(fieldName).Interface())
 		}
 	}
 
-	return strings.Join(compositeValues, valueSeparator)
+	return strings.Join(keyValues, valueSeparator)
 }

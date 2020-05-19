@@ -83,10 +83,12 @@ func (f *fields) process(structType reflect.Type, path string) *fields {
 			}
 
 			if current, exists := f.fieldMap[field.externalName]; exists {
-				if strings.Count(current.location, ".") == 0 || strings.Count(current.location, "+") == 0 {
-					fmt.Printf("Info: skipping duplicate field name '%s' from '%s", field.externalName, field.location)
+				if strings.Count(current.location, ".") == 0 && strings.Count(current.location, "+") == 0 {
+					fmt.Printf("Info: skipping duplicate field found at '%s'\n", field.location)
 
 					continue
+				} else {
+					fmt.Printf("Info: replacing duplicate field found at '%s' with '%s'\n", current.location, field.location)
 				}
 			}
 

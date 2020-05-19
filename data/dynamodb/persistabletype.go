@@ -18,6 +18,18 @@ type persistableType struct {
 	uniqueFields map[string][]string // Map of field name -> set of fields that determine uniqueness
 }
 
+func NewPersistableType(persistableName string, pType reflect.Type, indexes map[string]*index) *persistableType {
+	pt := &persistableType{
+		name:         persistableName,
+		uniqueFields: make(map[string][]string, 0),
+		dbNames:      make(map[string]string),
+	}
+
+	pt.processFields(pType, "", indexes)
+
+	return pt
+}
+
 func (pt *persistableType) processFields(structType reflect.Type, fieldPath string, indexes map[string]*index) {
 	for i := 0; i < structType.NumField(); i++ {
 		field := structType.Field(i)
@@ -107,8 +119,18 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 			fieldName = groups[7]
 		}
 
-		key.compositeKeyParts[pt.name] = util.InsertStringAtIndex(key.compositeKeyParts[pt.name], fieldName, partIndex)
+		key.keyFieldsByPersistable[pt.name] = util.InsertStringAtIndex(key.keyFieldsByPersistable[pt.name], fieldName, partIndex)
 	}
+}
+
+func (pt *persistableType) dbNameToFieldName(dbName string) string {
+	for k, v := range pt.dbNames {
+		if v == dbName {
+			return k
+		}
+	}
+
+	return dbName // If we reach here, no alternative dbName was offered so must be the same as the field name
 }
 
 func (pt *persistableType) convertFieldNamesToDbNames(av *map[string]*dynamodb.AttributeValue) {

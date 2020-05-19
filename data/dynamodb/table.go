@@ -115,27 +115,19 @@ func (t *table) prepare(persistables []data.Persistable) {
 		pType := reflect.TypeOf(persistable).Elem()
 		pName := strings.ToLower(util.UnqualifiedTypeName(pType))
 
-		pt := &persistableType{
-			name:         pName,
-			uniqueFields: make(map[string][]string, 0),
-			dbNames:      make(map[string]string),
-		}
-
-		pt.processFields(pType, "", t.indexes)
+		pt := NewPersistableType(pName, pType, t.indexes)
 
 		// Validate that each key in each index has fully defined key fields for this persistable
 		for _, index := range t.indexes {
 			for _, keyAttribute := range index.keyAttributes() {
-				if keyParts := keyAttribute.compositeKeyParts[pName]; keyParts != nil {
+				if keyParts := keyAttribute.keyFieldsByPersistable[pName]; keyParts != nil {
 					for i, keyPart := range keyParts {
 						if keyPart == "" {
-							panic(fmt.Sprintf("%s's compositeKeyPart #%d for key '%s' is missing", pName, i, keyAttribute.name))
+							panic(fmt.Sprintf("%s's keyField #%d for key '%s' is missing", pName, i, keyAttribute.name))
 						}
 					}
 				} else {
-					if _, ok := pType.FieldByName(keyAttribute.name); ok {
-						keyAttribute.compositeKeyParts[pName] = []string{keyAttribute.name}
-					}
+					keyAttribute.keyFieldsByPersistable[pName] = []string{pt.dbNameToFieldName(keyAttribute.name)}
 				}
 			}
 		}
