@@ -11,10 +11,10 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbiface"
 
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/crypto"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/logs"
 	"github.com/jt0/gomer/util"
 )
 
@@ -41,6 +41,8 @@ type Configuration struct {
 	NextTokenCipher    crypto.Cipher
 }
 
+var tables = make(map[string]data.Store)
+
 type ConsistencyType int
 
 const (
@@ -54,7 +56,7 @@ type ConsistencyTyper interface {
 	SetConsistencyType(consistencyType ConsistencyType)
 }
 
-func Store(tableName string, config *Configuration, persistables ...data.Persistable) data.Store {
+func Store(tableName string, config *Configuration, persistables ...data.Persistable) (data.Store, gomerr.Gomerr) {
 	table := &table{
 		tableName:              &tableName,
 		index:                  index{canReadConsistently: true},
@@ -68,16 +70,31 @@ func Store(tableName string, config *Configuration, persistables ...data.Persist
 		nextTokenizer:          nextTokenizer{cipher: config.NextTokenCipher},
 	}
 
-	table.prepare(persistables)
+	if ge := table.prepare(persistables); ge != nil {
+		return nil, ge
+	}
 
-	return table
+	tables[tableName] = table
+
+	return table, nil
 }
 
-func (t *table) prepare(persistables []data.Persistable) {
+func Stores() map[string]data.Store {
+	return tables
+}
+
+func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 	input := &dynamodb.DescribeTableInput{TableName: t.tableName}
 	output, err := t.ddb.DescribeTable(input)
 	if err != nil {
-		panic("Table inspection error")
+		if awsErr, ok := err.(awserr.Error); ok {
+			switch awsErr.Code() {
+			case dynamodb.ErrCodeResourceNotFoundException:
+				return gomerr.NotFound("ddb.Table", *t.tableName).WithCause(awsErr).AddCulprit(gomerr.Configuration)
+			}
+		}
+
+		return gomerr.Dependency(err, input)
 	}
 
 	attributeTypes := make(map[string]string)
@@ -85,7 +102,10 @@ func (t *table) prepare(persistables []data.Persistable) {
 		attributeTypes[*at.AttributeName] = *at.AttributeType
 	}
 
-	t.index.processKeySchema(output.Table.KeySchema, attributeTypes)
+	if ge := t.index.processKeySchema(output.Table.KeySchema, attributeTypes); ge != nil {
+		return ge
+	}
+
 	t.indexes[""] = &t.index
 
 	for _, lsid := range output.Table.LocalSecondaryIndexes {
@@ -93,7 +113,11 @@ func (t *table) prepare(persistables []data.Persistable) {
 			name:                lsid.IndexName,
 			canReadConsistently: true,
 		}
-		lsi.processKeySchema(lsid.KeySchema, attributeTypes)
+
+		if ge := lsi.processKeySchema(lsid.KeySchema, attributeTypes); ge != nil {
+			return ge
+		}
+
 		lsi.pk = t.pk // Overwrite w/ t.pk
 
 		t.indexes[*lsid.IndexName] = lsi
@@ -104,7 +128,10 @@ func (t *table) prepare(persistables []data.Persistable) {
 			name:                gsid.IndexName,
 			canReadConsistently: false,
 		}
-		gsi.processKeySchema(gsid.KeySchema, attributeTypes)
+
+		if ge := gsi.processKeySchema(gsid.KeySchema, attributeTypes); ge != nil {
+			return ge
+		}
 
 		t.indexes[*gsid.IndexName] = gsi
 	}
@@ -113,7 +140,10 @@ func (t *table) prepare(persistables []data.Persistable) {
 		pType := reflect.TypeOf(persistable).Elem()
 		pName := strings.ToLower(util.UnqualifiedTypeName(pType))
 
-		pt := NewPersistableType(pName, pType, t.indexes)
+		pt, ge := newPersistableType(pName, pType, t.indexes)
+		if ge != nil {
+			return ge
+		}
 
 		// Validate that each key in each index has fully defined key fields for this persistable
 		for _, index := range t.indexes {
@@ -121,7 +151,7 @@ func (t *table) prepare(persistables []data.Persistable) {
 				if keyParts := keyAttribute.keyFieldsByPersistable[pName]; keyParts != nil {
 					for i, keyPart := range keyParts {
 						if keyPart == "" {
-							panic(fmt.Sprintf("%s's keyField #%d for key '%s' is missing", pName, i, keyAttribute.name))
+							return gomerr.BadValue(keyAttribute.name+"["+pName+"]["+strconv.Itoa(i)+"]", keyParts, constraint.NonZero())
 						}
 					}
 				} else {
@@ -132,15 +162,31 @@ func (t *table) prepare(persistables []data.Persistable) {
 
 		t.persistableTypes[pName] = pt
 	}
+
+	return nil
 }
 
-func (t *table) Create(p data.Persistable) *gomerr.ApplicationError {
-	return t.put(p, t.persistableTypes[p.PersistableTypeName()].uniqueFields, true)
+func (t *table) Create(p data.Persistable) (ge gomerr.Gomerr) {
+	defer func() {
+		if ge != nil {
+			ge = data.CreateFailed(ge, p)
+		}
+	}()
+
+	ge = t.put(p, t.persistableTypes[p.PersistableTypeName()].uniqueFields, true)
+
+	return
 }
 
 var zeroValue = reflect.Value{}
 
-func (t *table) Update(p data.Persistable, update data.Persistable) *gomerr.ApplicationError {
+func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.Gomerr) {
+	defer func() {
+		if ge != nil {
+			ge = data.UpdateFailed(ge, p, update)
+		}
+	}()
+
 	// TODO:p1 support partial update vs put()
 
 	updatedUniqueFields := make(map[string][]string)
@@ -166,24 +212,23 @@ func (t *table) Update(p data.Persistable, update data.Persistable) *gomerr.Appl
 		}
 	}
 
-	return t.put(p, updatedUniqueFields, false)
+	ge = t.put(p, updatedUniqueFields, false)
+
+	return
 }
 
-func (t *table) put(p data.Persistable, uniqueFields map[string][]string, ensureUniqueId bool) *gomerr.ApplicationError {
+func (t *table) put(p data.Persistable, uniqueFields map[string][]string, ensureUniqueId bool) gomerr.Gomerr {
 	pt := t.persistableTypes[p.PersistableTypeName()]
 
 	for fieldName, additionalFields := range uniqueFields {
-		if ae := t.preQueryConstraintsCheck(p, fieldName, additionalFields); ae != nil {
-			return ae
+		if ge := t.preQueryConstraintsCheck(p, fieldName, additionalFields); ge != nil {
+			return ge
 		}
 	}
 
 	av, err := dynamodbattribute.MarshalMap(p)
 	if err != nil {
-		logs.Error.Println("Failed to marshal p: " + err.Error())
-		logs.Error.Printf("%T: %v", p, p)
-
-		return gomerr.InternalServerError("Unable to construct persistable form.")
+		return gomerr.Marshal(err, p)
 	}
 
 	pt.convertFieldNamesToDbNames(&av)
@@ -213,26 +258,35 @@ func (t *table) put(p data.Persistable, uniqueFields map[string][]string, ensure
 	_, err = t.ddb.PutItem(input) // TODO:p3 look at result data to track capacity or other info?
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
-			// ErrCodeProvisionedThroughputExceededException, ErrCodeResourceNotFoundException,
-			// ErrCodeItemCollectionSizeLimitExceededException, ErrCodeTransactionConflictException,
-			// ErrCodeRequestLimitExceeded, ErrCodeInternalServerError
 			switch awsErr.Code() {
 			case dynamodb.ErrCodeConditionalCheckFailedException:
-				return gomerr.ConflictException("Conditional check failed")
-			default:
-				logs.Error.Println(awsErr.Code(), awsErr.Error())
+				if ensureUniqueId {
+					return gomerr.InternalServer(err).AddNotes("unique id check failed. retry with a new id").AddCulprit(gomerr.Internal)
+				}
+			case dynamodb.ErrCodeRequestLimitExceeded:
+				fallthrough
+			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
+				fallthrough
+			case dynamodb.ErrCodeProvisionedThroughputExceededException:
+				fallthrough
+			case dynamodb.ErrCodeResourceNotFoundException:
+				return gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
 			}
-		} else {
-			logs.Error.Println(err.Error())
 		}
 
-		return gomerr.InternalServerError("Unable to persist resource.")
+		return gomerr.Dependency(err, input)
 	}
 
 	return nil
 }
 
-func (t *table) Read(p data.Persistable) *gomerr.ApplicationError {
+func (t *table) Read(p data.Persistable) (ge gomerr.Gomerr) {
+	defer func() {
+		if ge != nil {
+			ge = data.ReadFailed(ge, p)
+		}
+	}()
+
 	keys := make(map[string]*dynamodb.AttributeValue, 2)
 	t.populateKeyValues(keys, p, t.valueSeparator)
 
@@ -246,34 +300,37 @@ func (t *table) Read(p data.Persistable) *gomerr.ApplicationError {
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
+			case dynamodb.ErrCodeProvisionedThroughputExceededException:
+				fallthrough
+			case dynamodb.ErrCodeRequestLimitExceeded:
+				fallthrough
 			case dynamodb.ErrCodeResourceNotFoundException:
-				return gomerr.ResourceNotFound(p)
-			default:
-				// ErrCodeProvisionedThroughputExceededException, ErrCodeRequestLimitExceeded, ErrCodeInternalServerError:
-				logs.Error.Println(awsErr.Code(), awsErr.Error())
+				return gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
 			}
-		} else {
-			logs.Error.Println(err.Error())
 		}
 
-		return gomerr.InternalServerError("Unable to get resource.")
+		return gomerr.Dependency(err, input)
 	}
 
 	if output.Item == nil {
-		return gomerr.ResourceNotFound(p)
+		return gomerr.ResourceNotFound(p.PersistableTypeName(), p.Id()).AddCulprit(gomerr.Client)
 	}
 
 	err = dynamodbattribute.UnmarshalMap(output.Item, p)
 	if err != nil {
-		logs.Error.Println("Failed to unmarshal p: " + err.Error())
-
-		return gomerr.InternalServerError("Unable to retrieve resource.")
+		return gomerr.Unmarshal(err, output.Item, p).AddCulprit(gomerr.Internal)
 	}
 
 	return nil
 }
 
-func (t *table) Delete(p data.Persistable) *gomerr.ApplicationError {
+func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
+	defer func() {
+		if ge != nil {
+			ge = data.DeleteFailed(ge, p)
+		}
+	}()
+
 	// TODO:p2 support a soft-delete option
 
 	keys := make(map[string]*dynamodb.AttributeValue, 2)
@@ -288,44 +345,56 @@ func (t *table) Delete(p data.Persistable) *gomerr.ApplicationError {
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
+			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
+				fallthrough
+			case dynamodb.ErrCodeProvisionedThroughputExceededException:
+				fallthrough
+			case dynamodb.ErrCodeRequestLimitExceeded:
+				fallthrough
 			case dynamodb.ErrCodeResourceNotFoundException:
-				return gomerr.ResourceNotFound(p)
-			default:
-				// ErrCodeProvisionedThroughputExceededException, ErrCodeRequestLimitExceeded, ErrCodeInternalServerError:
-				logs.Error.Println(awsErr.Code(), awsErr.Error())
+				return gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
 			}
-		} else {
-			logs.Error.Println(err.Error())
 		}
 
-		return gomerr.InternalServerError("Unable to delete resource.")
+		return gomerr.Dependency(err, input)
 	}
 
 	return nil
 }
 
-func (t *table) Query(q data.Queryable, arrayOfPersistable interface{}) (nextToken *string, ae *gomerr.ApplicationError) {
-	qi, ae := t.buildQueryInput(q)
-	if ae != nil {
-		return nil, ae
+func (t *table) Query(q data.Queryable, arrayOfPersistable interface{}) (nextToken *string, ge gomerr.Gomerr) {
+	defer func() {
+		if ge != nil {
+			ge = data.QueryFailed(ge, q)
+		}
+	}()
+
+	var input *dynamodb.QueryInput
+	input, ge = t.buildQueryInput(q)
+	if ge != nil {
+		return nil, ge.AddCulprit(gomerr.Internal)
 	}
 
-	qo, ae := t.runQuery(qi)
-	if ae != nil {
-		return nil, ae
+	var output *dynamodb.QueryOutput
+	output, ge = t.runQuery(input)
+	if ge != nil {
+		return nil, ge
 	}
 
-	err := dynamodbattribute.UnmarshalListOfMaps(qo.Items, arrayOfPersistable)
+	nextToken, ge = t.nextTokenizer.tokenize(q, output.LastEvaluatedKey)
+	if ge != nil {
+		return nil, ge.AddCulprit(gomerr.Internal)
+	}
+
+	err := dynamodbattribute.UnmarshalListOfMaps(output.Items, arrayOfPersistable)
 	if err != nil {
-		logs.Error.Println("Failed to unmarshal p: " + err.Error())
-
-		return nil, gomerr.InternalServerError("Unable to retrieve resource.")
+		return nil, gomerr.Unmarshal(err, output.Items, arrayOfPersistable).AddCulprit(gomerr.Internal)
 	}
 
-	return t.nextTokenizer.tokenize(q, qo.LastEvaluatedKey)
+	return nextToken, nil
 }
 
-func (t *table) preQueryConstraintsCheck(p data.Persistable, fieldName string, additionalFields []string) *gomerr.ApplicationError {
+func (t *table) preQueryConstraintsCheck(p data.Persistable, fieldName string, additionalFields []string) gomerr.Gomerr {
 	q := p.NewQueryable()
 	if ct, ok := p.(ConsistencyTyper); ok {
 		ct.SetConsistencyType(Preferred)
@@ -339,36 +408,53 @@ func (t *table) preQueryConstraintsCheck(p data.Persistable, fieldName string, a
 		qv.FieldByName(additionalField).Set(pv.FieldByName(additionalField))
 	}
 
-	qi, ae := t.buildQueryInput(q)
-	if ae != nil {
-		return ae
+	qi, ge := t.buildQueryInput(q)
+	if ge != nil {
+		return ge.AddCulprit(gomerr.Internal)
 	}
 
-	for queryLimit := int64(1); ; queryLimit += 100 { // Bump limit up each time
+	for queryLimit := int64(1); queryLimit <= 300; queryLimit += 100 { // Bump limit up each time
 		qi.Limit = &queryLimit
 
-		qo, ae := t.runQuery(qi)
-		if ae != nil {
-			return ae
+		qo, ge := t.runQuery(qi)
+		if ge != nil {
+			return ge
 		}
 
 		if len(qo.Items) > 0 {
-			return gomerr.ConflictException("A resource exists with a conflicting value", map[string]string{"Field": fieldName, "Resource": p.PersistableTypeName()})
+			var by interface{}
+
+			arrayOfPersistable := util.EmptySliceForType(reflect.TypeOf(p))
+			err := dynamodbattribute.UnmarshalListOfMaps(qo.Items, arrayOfPersistable)
+			if err != nil {
+				by = qo.Items[0]
+			} else {
+				slice := reflect.ValueOf(arrayOfPersistable).Elem()
+				pOther, ok := slice.Index(0).Interface().(data.Persistable)
+				if !ok {
+					by = qo.Items[0]
+				} else {
+					by = pOther.Id()
+				}
+			}
+
+			return data.ConstraintViolation(data.Unique, fieldName, by).AddCulprit(gomerr.Client)
 		}
 
 		if qo.LastEvaluatedKey == nil {
 			return nil
 		}
 
-		// TODO: log that we're looping - should be a warning sign
 		qi.ExclusiveStartKey = qo.LastEvaluatedKey
 	}
+
+	return data.QueryFailed(nil, q).AddNotes("unable to verify constraint", "too many paginated calls to DDB").AddCulprit(gomerr.Configuration)
 }
 
-func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, *gomerr.ApplicationError) {
-	index, consistent, ae := indexFor(t, q)
-	if ae != nil {
-		return nil, ae
+func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, gomerr.Gomerr) {
+	index, consistent, ge := indexFor(t, q)
+	if ge != nil {
+		return nil, ge
 	}
 
 	expressionAttributeNames := make(map[string]*string, 2)
@@ -379,7 +465,13 @@ func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, *gomerr
 
 	if index.sk != nil {
 		if av := index.sk.attributeValue(q, t.valueSeparator); av != nil {
-			keyConditionExpresion += " AND " + safeName(index.sk.name, expressionAttributeNames) + "=:sk"
+			if av.S != nil && strings.HasSuffix(*av.S, ":") {
+				trimmed := strings.Trim(*av.S, ":")
+				av.S = &trimmed
+				keyConditionExpresion += " AND begins_with(" + safeName(index.sk.name, expressionAttributeNames) + ",:sk)"
+			} else {
+				keyConditionExpresion += " AND " + safeName(index.sk.name, expressionAttributeNames) + "=:sk"
+			}
 			expressionAttributeValues[":sk"] = av
 		}
 	}
@@ -399,9 +491,9 @@ func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, *gomerr
 	//	projectionExpressionPtr = &projectionExpression
 	//}
 
-	exclusiveStartKey, ae := t.nextTokenizer.untokenize(q)
-	if ae != nil {
-		return nil, ae
+	exclusiveStartKey, ge := t.nextTokenizer.untokenize(q)
+	if ge != nil {
+		return nil, ge
 	}
 
 	input := &dynamodb.QueryInput{
@@ -421,21 +513,26 @@ func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, *gomerr
 	return input, nil
 }
 
-func (t *table) runQuery(input *dynamodb.QueryInput) (*dynamodb.QueryOutput, *gomerr.ApplicationError) {
+func (t *table) runQuery(input *dynamodb.QueryInput) (*dynamodb.QueryOutput, gomerr.Gomerr) {
 	output, err := t.ddb.Query(input)
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			// TODO: improve exceptions
 			switch awsErr.Code() {
-			default:
-				// ErrCodeProvisionedThroughputExceededException, ErrCodeRequestLimitExceeded, ErrCodeInternalServerError:
-				logs.Error.Println(awsErr.Code(), awsErr.Error())
+			case dynamodb.ErrCodeConditionalCheckFailedException:
+				fallthrough
+			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
+				fallthrough
+			case dynamodb.ErrCodeProvisionedThroughputExceededException:
+				fallthrough
+			case dynamodb.ErrCodeRequestLimitExceeded:
+				fallthrough
+			case dynamodb.ErrCodeResourceNotFoundException:
+				return nil, gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
 			}
-		} else {
-			logs.Error.Println(err.Error())
 		}
 
-		return nil, gomerr.InternalServerError("Unable to list resource")
+		return nil, gomerr.Dependency(err, input)
 	}
 
 	return output, nil

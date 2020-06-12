@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/jt0/gomer/auth"
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/gomerr"
 )
 
@@ -32,94 +33,97 @@ type field struct {
 type fieldAccessBits uint16
 type FieldDefaultFunction func() interface{}
 
-func (f *fields) process(structType reflect.Type, path string) *fields {
-	if f.fieldMap == nil {
-		f.fieldMap = make(map[string]*field)
+func newFields(structType reflect.Type) (*fields, gomerr.Gomerr) {
+	fields := &fields{
+		fieldMap: make(map[string]*field),
 	}
 
+	if errors := fields.process(structType, "", make([]gomerr.Gomerr, 0)); len(errors) > 0 {
+		return nil, gomerr.Batch(errors).AddCulprit(gomerr.Configuration)
+	}
+
+	return fields, nil
+}
+
+func (fs *fields) process(structType reflect.Type, path string, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	for i := 0; i < structType.NumField(); i++ {
 		sField := structType.Field(i)
 		sFieldName := sField.Name
 
 		if sField.Type.Kind() == reflect.Struct {
 			if sField.Anonymous {
-				f.process(sField.Type, path+sFieldName+"+")
+				errors = fs.process(sField.Type, path+sFieldName+"+", errors)
 			} else {
-				f.process(sField.Type, path+sFieldName+".")
+				errors = fs.process(sField.Type, path+sFieldName+".", errors)
 			}
 		} else {
 			if unicode.IsLower([]rune(sFieldName)[0]) {
 				continue
 			}
 
-			field := &field{
-				name:         sFieldName,
-				externalName: externalNameTag(sField.Tag.Get("json"), sFieldName),
-				location:     path + sFieldName,
-				access:       accessTag(sField.Tag.Get("access")),
+			f := &field{
+				name:     sFieldName,
+				location: path + sFieldName,
 			}
 
-			// Format: (<defaultTag>)?(,<externalName>)?
-			if idTag, ok := sField.Tag.Lookup("id"); ok {
-				parts := strings.Split(idTag, ",")
+			f.externalNameTag(sField.Tag.Get("json"))
 
-				if len(parts) > 2 {
-					panic("unexpected format for id tag: " + idTag)
+			if ge := f.accessTag(sField.Tag.Get("access")); ge != nil {
+				errors = append(errors, ge)
+			}
+
+			if tag, ok := sField.Tag.Lookup("id"); ok {
+				if ge := f.idTag(tag); ge != nil {
+					errors = append(errors, ge)
 				}
 
-				defaultTag(parts[0], field)
-
-				if len(parts) == 2 {
-					field.externalName = strings.TrimSpace(parts[1])
+				if fs.idField != nil {
+					errors = append(errors, gomerr.BadValue(structType.Name()+"."+sFieldName, []*field{f, fs.idField}, constraint.ExactlyOnce()).AddNotes("multiple fields with `id`"))
 				}
 
-				if f.idField != nil {
-					panic("multiple fields have `id` tag - only one allowed")
-				}
-
-				f.idField = field
+				fs.idField = f
 			} else {
-				defaultTag(sField.Tag.Get("default"), field)
+				f.defaultTag(sField.Tag.Get("default"))
 			}
 
-			if current, exists := f.fieldMap[field.externalName]; exists {
+			if current, exists := fs.fieldMap[f.externalName]; exists {
 				if strings.Count(current.location, ".") == 0 && strings.Count(current.location, "+") == 0 {
-					fmt.Printf("Info: skipping duplicate field found at '%s'\n", field.location)
+					fmt.Printf("Info: skipping duplicate field found at '%s'\n", f.location)
 
 					continue
 				} else {
-					fmt.Printf("Info: replacing duplicate field found at '%s' with '%s'\n", current.location, field.location)
+					fmt.Printf("Info: replacing duplicate field found at '%s' with '%s'\n", current.location, f.location)
 				}
 			}
 
-			f.fieldMap[field.externalName] = field // may override nested (up or down) value. That's okay.
+			fs.fieldMap[f.externalName] = f // may override nested (up or down) value. That's okay.
 		}
 	}
 
-	if path == "" && f.idField == nil {
-		panic("no `id` field defined for resource " + structType.Name())
+	if path == "" && fs.idField == nil {
+		errors = append(errors, gomerr.BadValue(structType.Name()+".<idField>", nil, constraint.ExactlyOnce()))
 	}
 
-	return f
+	return errors
 }
 
-func (f *fields) idExternalName() string {
-	return f.idField.externalName
+func (fs *fields) idExternalName() string {
+	return fs.idField.externalName
 }
 
-func (f *fields) externalNameToFieldName(externalName string) (string, bool) {
-	if field, ok := f.fieldMap[externalName]; ok {
+func (fs *fields) externalNameToFieldName(externalName string) (string, bool) {
+	if field, ok := fs.fieldMap[externalName]; ok {
 		return field.name, ok
 	} else {
 		return externalName, ok
 	}
 }
 
-func (f *fields) applyDefaults(i Instance) *gomerr.ApplicationError {
+func (fs *fields) applyDefaults(i Instance) gomerr.Gomerr {
 	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
 
 	// TODO: handle nested/embedded structs
-	for _, field := range f.fieldMap {
+	for _, field := range fs.fieldMap {
 		if field.defaultValueFunction == nil && field.defaultValue == "" {
 			continue
 		}
@@ -136,17 +140,19 @@ func (f *fields) applyDefaults(i Instance) *gomerr.ApplicationError {
 			defaultValue = field.defaultValue
 		}
 
-		setDefaultValue(fieldValue, defaultValue)
+		if ge := setDefaultValue(fieldValue, defaultValue); ge != nil {
+			return ge.AddNotes(fmt.Sprintf("Unable to set %s's default value (%v)", field.location, defaultValue))
+		}
 	}
 
 	return nil
 }
 
-func (f *fields) removeNonReadable(i Instance) map[string]interface{} { // TODO: clear fields w/in instance
+func (fs *fields) removeNonReadable(i Instance) map[string]interface{} { // TODO: clear fields w/in instance
 	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
 	readView := make(map[string]interface{})
 
-	for _, field := range f.fieldMap {
+	for _, field := range fs.fieldMap {
 		if field.readable(i.Subject().Principal(FieldAccess)) {
 			fieldValue := resource.FieldByName(field.name)
 			if isSet(fieldValue) {
@@ -158,24 +164,22 @@ func (f *fields) removeNonReadable(i Instance) map[string]interface{} { // TODO:
 	return readView
 }
 
-var zeroStructVal = reflect.Value{}
-
-func (f *fields) removeNonWritable(i Instance) *gomerr.ApplicationError {
+func (fs *fields) removeNonWritable(i Instance) gomerr.Gomerr {
 	uv := reflect.ValueOf(i).Elem()
 
-	for _, field := range f.fieldMap {
+	for _, field := range fs.fieldMap {
 		if !field.writable(i.Subject().Principal(FieldAccess)) {
 			if strings.Contains(field.location, ".") {
 				continue // TODO: handle nested/embedded structs
 			}
 
 			fv := uv.FieldByName(field.name)
-			if fv == zeroStructVal || fv.IsZero() {
+			if !fv.IsValid() || fv.IsZero() {
 				continue
 			}
 
 			if !fv.CanSet() {
-				return gomerr.InternalServerError("Unable to set field " + field.name)
+				return gomerr.BadValue(i.PersistableTypeName()+"."+field.name+".CanSet()", fv, constraint.Function(canSet)).AddNotes("Can't zero field").AddCulprit(gomerr.Configuration)
 			}
 
 			fv.Set(reflect.Zero(fv.Type()))
@@ -183,6 +187,10 @@ func (f *fields) removeNonWritable(i Instance) *gomerr.ApplicationError {
 	}
 
 	return nil
+}
+
+func canSet(i interface{}) bool {
+	return i.(reflect.Value).CanSet()
 }
 
 func (f field) readable(fieldAccessPrincipal auth.Principal) bool {
@@ -221,7 +229,7 @@ func (f field) writable(fieldAccessPrincipal auth.Principal) bool {
 	return f.access&writeBitForRole != 0
 }
 
-func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) *gomerr.ApplicationError {
+func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) gomerr.Gomerr {
 	defaultValueValue := reflect.ValueOf(defaultValue)
 
 	// This handles non-string FieldDefaultFunction results and default strings
@@ -233,7 +241,7 @@ func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) *gomerr
 
 	stringValue, ok := defaultValue.(string)
 	if !ok {
-		return gomerr.InternalServerError(fmt.Sprintf("Expected string, got '%d'", defaultValueValue.Kind()))
+		return gomerr.BadValue("defaultValue type", defaultValue, constraint.TypeOf("")).AddNotes("Non-string representations should have already been handled").AddCulprit(gomerr.Configuration)
 	}
 
 	var typedDefaultValue interface{}
@@ -313,11 +321,16 @@ func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) *gomerr
 	case reflect.Float64:
 		typedDefaultValue, err = strconv.ParseFloat(stringValue, 64)
 	default:
-		return gomerr.InternalServerError(fmt.Sprintf("Unsupported default value type (%d)", fieldValue.Kind()))
+		return gomerr.BadValue("Unsupported defaultValue type", fieldValue.Kind().String(), constraint.Values(
+			reflect.Bool.String(),
+			reflect.Int.String(), reflect.Int8.String(), reflect.Int16.String(), reflect.Int32.String(), reflect.Int64.String(),
+			reflect.Uint.String(), reflect.Uint8.String(), reflect.Uint16.String(), reflect.Uint32.String(), reflect.Uint64.String(), reflect.Uintptr.String(),
+			reflect.Float32.String, reflect.Float64.String(),
+		)).AddCulprit(gomerr.Configuration)
 	}
 
 	if err != nil {
-		return gomerr.InternalServerError(fmt.Sprintf("Invalid value for '%d' type: %v", defaultValueValue.Kind(), defaultValue))
+		return gomerr.Unmarshal(err, defaultValue, fieldValue.Kind().String()).AddCulprit(gomerr.Configuration)
 	}
 
 	fieldValue.Set(reflect.ValueOf(typedDefaultValue))
@@ -346,75 +359,99 @@ func isSet(v reflect.Value) bool {
 	return true
 }
 
-func externalNameTag(nameTag string, fieldName string) string {
+func (f *field) idTag(idTag string) gomerr.Gomerr {
+	// Format: (<defaultTagValue>)?(,<externalName>)?
+	parts := strings.Split(idTag, ",")
+
+	if len(parts) > 2 {
+		return gomerr.BadValue("'id' tag", parts, constraint.Length(1, 2)).AddCulprit(gomerr.Configuration)
+	}
+
+	f.defaultTag(parts[0])
+
+	if len(parts) == 2 {
+		f.externalName = strings.TrimSpace(parts[1])
+	}
+
+	return nil
+}
+
+func (f *field) externalNameTag(nameTag string) {
 	if nameTag == "" {
-		return fieldName
+		f.externalName = f.name
+		return
 	}
 
 	nameTagParts := strings.Split(nameTag, ",")
 	name := strings.TrimSpace(nameTagParts[0])
 
 	if name == "" {
-		return fieldName
+		f.externalName = f.name
+		return
 	}
 
-	return name
+	f.externalName = name
 }
 
-func accessTag(accessTag string) fieldAccessBits {
-	var accessBits fieldAccessBits
-
+func (f *field) accessTag(accessTag string) gomerr.Gomerr {
 	if accessTag == "" {
-		return accessBits // no access
+		return nil // no access
 	}
 
 	if len(accessTag) > 16 {
-		panic("'access' tag too long.  Can only support up to 8 access pairs (16 bits)")
+		return gomerr.BadValue("'access' tag", accessTag, constraint.Length(0, 16)).AddNotes("can only support up to 8 field access principals pairs").AddCulprit(gomerr.Configuration)
 	}
 
-	if len(accessTag)%2 != 0 {
-		panic("expected 'access' must have two values for each field access principal")
+	if !mod2(accessTag) {
+		return gomerr.BadValue("'access' tag", accessTag, constraint.Function(mod2)).AddNotes("each field access principal needs a specified 'read' and 'write' value").AddCulprit(gomerr.Configuration)
 	}
 
+	var accessBits fieldAccessBits
 	for i := 0; i < len(accessTag); i += 2 {
 		accessBits <<= 2 // Prepare by pushing two bits up.  The first time this still results in an no bits set (as expected)
 
 		if accessTag[i] == 'r' {
 			accessBits |= 2
 		} else if accessTag[i] != '-' {
-			panic("Invalid access tag value: " + accessTag)
+			return gomerr.BadValue("'access' tag", accessTag[i], constraint.Values('r', '-')).AddCulprit(gomerr.Configuration)
 		}
 
 		if accessTag[i+1] == 'w' {
 			accessBits |= 1
 		} else if accessTag[i+1] != '-' {
-			panic("Invalid access tag value: " + accessTag)
+			return gomerr.BadValue("'access' tag", accessTag[i], constraint.Values('r', '-')).AddCulprit(gomerr.Configuration)
 		}
 	}
 
-	return accessBits
+	f.access = accessBits
+
+	return nil
 }
 
-func defaultTag(defaultTag string, field *field) {
+func mod2(i interface{}) bool {
+	return len(i.(string))%2 == 0
+}
+
+func (f *field) defaultTag(defaultTag string) {
 	if defaultTag == "" {
 		return
 	}
 
 	if defaultTag[:1] == "?" {
-		field.bypassDefaultIfSet = true
+		f.bypassDefaultIfSet = true
 
 		defaultTag = defaultTag[1:]
 	}
 
 	if defaultTag[:1] == "$" {
 		if fn, ok := fieldDefaultFunctions[defaultTag]; ok {
-			field.defaultValueFunction = fn
+			f.defaultValueFunction = fn
 
 			return
 		}
 	}
 
-	field.defaultValue = defaultTag
+	f.defaultValue = defaultTag
 }
 
 type FieldAccessPrincipal string
@@ -435,8 +472,8 @@ func (f FieldAccessPrincipal) Type() auth.PrincipalType {
 	return FieldAccess
 }
 
-func (f FieldAccessPrincipal) Release() {
-	// No-op
+func (f FieldAccessPrincipal) Release(_ bool) gomerr.Gomerr {
+	return nil
 }
 
 var bitsLocationForPrincipal = make(map[auth.Principal]uint)

@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/crypto"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
@@ -19,56 +20,59 @@ type nextTokenizer struct {
 }
 
 type nextToken struct {
-	Version          int                `json:"v"`
+	Version          string             `json:"v"`
 	Filter           map[string]*string `json:"fd"`
 	LastEvaluatedKey map[string]string  `json:"lek"`
 	Expiration       time.Time          `json:"exp"`
 }
 
 const (
-	v1           = 1
-	stringPrefix = "S:"
-	numberPrefix = "N:"
+	nextTokenFormatVersion = "1"
+	stringPrefix           = "S:"
+	numberPrefix           = "N:"
 )
 
-func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*dynamodb.AttributeValue) (*string, *gomerr.ApplicationError) {
+func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*dynamodb.AttributeValue) (*string, gomerr.Gomerr) {
 	if lastEvaluatedKey == nil {
 		return nil, nil
 	}
 
 	nextToken := &nextToken{
-		Version:          v1,
+		Version:          nextTokenFormatVersion,
 		Filter:           nil, // TODO
 		LastEvaluatedKey: encodeLastEvaluatedKey(lastEvaluatedKey),
 		Expiration:       expirationTime(),
 	}
 
-	toEncrypt, _ := json.Marshal(nextToken)
+	toEncrypt, err := json.Marshal(nextToken)
+	if err != nil {
+		return nil, gomerr.Marshal(err, nextToken).AddCulprit(gomerr.Internal)
+	}
 
 	return t.cipher.Encrypt(toEncrypt, nil)
 }
 
-func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.AttributeValue, *gomerr.ApplicationError) {
+func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.AttributeValue, gomerr.Gomerr) {
 	if q.NextPageToken() == nil {
 		return nil, nil
 	}
 
-	toUnmarshal, ae := t.cipher.Decrypt(q.NextPageToken(), nil)
-	if ae != nil {
-		return nil, ae
+	toUnmarshal, ge := t.cipher.Decrypt(q.NextPageToken(), nil)
+	if ge != nil {
+		return nil, ge
 	}
 
 	nt := &nextToken{}
 	if err := json.Unmarshal(toUnmarshal, nt); err != nil {
-		return nil, gomerr.InternalServerError("Unable to next token data")
+		return nil, gomerr.Unmarshal(err, toUnmarshal, nt).AddCulprit(gomerr.Internal)
 	}
 
-	if nt.Version != v1 {
-		return nil, gomerr.InternalServerError("Unexpected next token version ")
+	if nt.Version != nextTokenFormatVersion {
+		return nil, gomerr.BadValue("nextTokenFormatVersion", nt.Version, constraint.Values(nextTokenFormatVersion)).AddCulprit(gomerr.Internal)
 	}
 
-	if expired(nt.Expiration) {
-		return nil, gomerr.PaginationTokenExpired()
+	if nt.expired() {
+		return nil, gomerr.TokenExpired(nt.Expiration).AddCulprit(gomerr.Client)
 	}
 
 	// TODO: validate filter
@@ -80,8 +84,8 @@ func expirationTime() time.Time {
 	return time.Now().UTC().Add(time.Hour * 24)
 }
 
-func expired(expiration time.Time) bool {
-	return time.Now().UTC().After(expiration)
+func (nt *nextToken) expired() bool {
+	return time.Now().UTC().After(nt.Expiration)
 }
 
 func encodeLastEvaluatedKey(lastEvaluatedKey map[string]*dynamodb.AttributeValue) map[string]string {

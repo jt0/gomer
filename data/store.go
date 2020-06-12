@@ -5,11 +5,11 @@ import (
 )
 
 type Store interface {
-	Create(p Persistable) *gomerr.ApplicationError
-	Read(p Persistable) *gomerr.ApplicationError
-	Update(p Persistable, update Persistable) *gomerr.ApplicationError
-	Delete(p Persistable) *gomerr.ApplicationError
-	Query(q Queryable, arrayOfPersistable interface{}) (nextToken *string, ae *gomerr.ApplicationError)
+	Create(p Persistable) gomerr.Gomerr
+	Read(p Persistable) gomerr.Gomerr
+	Update(p Persistable, update Persistable) gomerr.Gomerr
+	Delete(p Persistable) gomerr.Gomerr
+	Query(q Queryable, arrayOfPersistable interface{}) (nextToken *string, ge gomerr.Gomerr)
 }
 
 type Storable interface {

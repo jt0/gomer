@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 )
@@ -32,13 +33,18 @@ type candidate struct {
 	skMissing int
 }
 
-func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement, attributeTypes map[string]string) {
+func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement, attributeTypes map[string]string) (ge gomerr.Gomerr) {
 	for _, keySchemaElement := range keySchemaElements {
 		key := &keyAttribute{
 			name:                   *keySchemaElement.AttributeName,
-			attributeType:          attributeTypes[*keySchemaElement.AttributeName],
 			keyFieldsByPersistable: make(map[string][]string),
 		}
+
+		key.attributeType, ge = safeAttributeType(attributeTypes[*keySchemaElement.AttributeName])
+		if ge != nil {
+			return
+		}
+
 		switch *keySchemaElement.KeyType {
 		case dynamodb.KeyTypeHash:
 			i.pk = key
@@ -46,9 +52,11 @@ func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement,
 			i.sk = key
 		}
 	}
+
+	return nil
 }
 
-func indexFor(t *table, q data.Queryable) (*index, *bool, *gomerr.ApplicationError) {
+func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 	var consistencyType ConsistencyType
 	if c, ok := q.(ConsistencyTyper); ok {
 		consistencyType = c.ConsistencyType()
@@ -71,7 +79,7 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, *gomerr.ApplicationErr
 
 	switch len(candidates) {
 	case 0:
-		return nil, nil, gomerr.BadRequest("Unable to satisfy query")
+		return nil, nil, data.IndexNotFound(*t.tableName, q).AddCulprit(gomerr.Configuration)
 	case 1:
 		return candidates[0].index, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
 	default:
@@ -168,8 +176,17 @@ func (k *keyAttribute) attributeValue(s data.Storable, valueSeparator string) *d
 		n := fmt.Sprint(value)
 		return &dynamodb.AttributeValue{N: &n}
 	default:
-		panic("Unsupported scalar attribute type value: " + k.attributeType)
+		// Can only be one of the two explicit types - protected by usage of safeAttributeType() function
+		return nil
 	}
+}
+
+func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
+	if attributeType == dynamodb.ScalarAttributeTypeS || attributeType == dynamodb.ScalarAttributeTypeN {
+		return attributeType, nil
+	}
+
+	return "", gomerr.BadValue("attributeType", attributeType, constraint.Values("S", "N")).AddNotes("Only supporting string and number attribute types").AddCulprit(gomerr.Configuration)
 }
 
 func (k *keyAttribute) buildKeyValue(s data.Storable, valueSeparator string) string {

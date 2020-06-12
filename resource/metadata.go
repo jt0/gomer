@@ -1,11 +1,12 @@
 package resource
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
+	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/util"
 )
 
@@ -18,16 +19,17 @@ type Metadata interface {
 	ExternalNameToFieldName(externalName string) (string, bool)
 }
 
-func Register(instance Instance, collectionQuery CollectionQuery, dataStore data.Store, parentMetadata Metadata) Metadata {
+func Register(instance Instance, collectionQuery CollectionQuery, dataStore data.Store, parentMetadata Metadata) (md *metadata, ge gomerr.Gomerr) {
 	if instance == nil {
-		panic("A resource requires an Instance type")
+		return nil, gomerr.BadValue("instance", instance, constraint.NonZero()).AddNotes("A resource requires an Instance type").AddCulprit(gomerr.Configuration)
 	}
 
 	it := reflect.TypeOf(instance)
 	instanceName := strings.ToLower(util.UnqualifiedTypeName(it))
 
-	if metadata, ok := resourceMetadata[instanceName]; ok {
-		return metadata
+	md = resourceMetadata[instanceName]
+	if md != nil {
+		return
 	}
 
 	var structType reflect.Type
@@ -36,30 +38,32 @@ func Register(instance Instance, collectionQuery CollectionQuery, dataStore data
 		structType = it
 	case reflect.Ptr:
 		structType = it.Elem()
-	default:
-		panic(fmt.Sprintf("Type other than pointer or struct as instance: %T", instance))
 	}
 
 	cqt := reflect.TypeOf(collectionQuery)
 	nilSafeParentMetadata, _ := parentMetadata.(*metadata)
 
-	metadata := &metadata{
+	md = &metadata{
 		instanceType:        it,
 		instanceName:        instanceName,
 		collectionQueryType: cqt,
 		collectionQueryName: strings.ToLower(util.UnqualifiedTypeName(cqt)),
-		fields:              (&fields{}).process(structType, ""),
 		dataStore:           dataStore,
 		parent:              nilSafeParentMetadata,
 		children:            make([]Metadata, 0),
 	}
 
-	resourceMetadata[instanceName] = metadata
-	if nilSafeParentMetadata != nil {
-		nilSafeParentMetadata.children = append(nilSafeParentMetadata.children, metadata)
+	md.fields, ge = newFields(structType)
+	if ge != nil {
+		return nil, ge // don't want to return metadata value
 	}
 
-	return metadata
+	resourceMetadata[instanceName] = md
+	if nilSafeParentMetadata != nil {
+		nilSafeParentMetadata.children = append(nilSafeParentMetadata.children, md)
+	}
+
+	return
 }
 
 var resourceMetadata = make(map[string]*metadata)

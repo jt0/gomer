@@ -2,35 +2,33 @@ package resource
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strings"
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/logs"
 )
 
 type Instance interface {
 	resource
 	data.Persistable
 
-	PreCreate() *gomerr.ApplicationError
-	PostCreate() *gomerr.ApplicationError
-	PreGet() *gomerr.ApplicationError
-	PostGet() *gomerr.ApplicationError
-	PreUpdate(updateInstance Instance) *gomerr.ApplicationError
-	PostUpdate(updateInstance Instance) *gomerr.ApplicationError
-	PreDelete() *gomerr.ApplicationError
-	PostDelete() *gomerr.ApplicationError
-	PostQuery() *gomerr.ApplicationError
+	PreCreate() gomerr.Gomerr
+	PostCreate() gomerr.Gomerr
+	PreGet() gomerr.Gomerr
+	PostGet() gomerr.Gomerr
+	PreUpdate(updateInstance Instance) gomerr.Gomerr
+	PostUpdate(updateInstance Instance) gomerr.Gomerr
+	PreDelete() gomerr.Gomerr
+	PostDelete() gomerr.Gomerr
+	PostQuery() gomerr.Gomerr
 }
 
-func newInstance(resourceType string, subject auth.Subject) (Instance, *gomerr.ApplicationError) {
+func newInstance(resourceType string, subject auth.Subject) (Instance, gomerr.Gomerr) {
 	metadata, ok := resourceMetadata[strings.ToLower(resourceType)]
 	if !ok {
-		return nil, gomerr.BadRequest("Unknown type: " + resourceType)
+		return nil, gomerr.NotFound("resource type", resourceType).AddCulprit(gomerr.Client)
 	}
 
 	instance := reflect.New(metadata.instanceType.Elem()).Interface().(Instance)
@@ -40,10 +38,10 @@ func newInstance(resourceType string, subject auth.Subject) (Instance, *gomerr.A
 	return instance, nil
 }
 
-func NewInstance(resourceType string, subject auth.Subject) (Instance, *gomerr.ApplicationError) {
-	instance, ae := newInstance(resourceType, subject)
-	if ae != nil {
-		return nil, ae
+func NewInstance(resourceType string, subject auth.Subject) (Instance, gomerr.Gomerr) {
+	instance, ge := newInstance(resourceType, subject)
+	if ge != nil {
+		return nil, ge
 	}
 
 	instance.OnSubject()
@@ -51,16 +49,15 @@ func NewInstance(resourceType string, subject auth.Subject) (Instance, *gomerr.A
 	return instance, nil
 }
 
-func UnmarshalInstance(resourceType string, subject auth.Subject, bytes []byte) (Instance, *gomerr.ApplicationError) {
-	instance, ae := newInstance(resourceType, subject)
-	if ae != nil {
-		return nil, ae
+func UnmarshalInstance(resourceType string, subject auth.Subject, bytes []byte) (Instance, gomerr.Gomerr) {
+	instance, ge := newInstance(resourceType, subject)
+	if ge != nil {
+		return nil, ge
 	}
 
 	if len(bytes) != 0 {
 		if err := json.Unmarshal(bytes, &instance); err != nil {
-			logs.Error.Printf("Unmarshal error while parsing '%s': %s\n", resourceType, err.Error())
-			return nil, gomerr.BadRequest("Unable to parse request data", fmt.Sprintf("Data does not appear to correlate to a '%s' resource", instance.metadata().instanceName))
+			return nil, gomerr.Unmarshal(err, bytes, instance).AddCulprit(gomerr.Client)
 		}
 	}
 
@@ -69,71 +66,73 @@ func UnmarshalInstance(resourceType string, subject auth.Subject, bytes []byte) 
 	return instance, nil
 }
 
-func SaveInstance(i Instance) *gomerr.ApplicationError {
-	if ae := i.metadata().dataStore.Update(i, nil); ae != nil {
-		return ae
+func SaveInstance(i Instance) gomerr.Gomerr {
+	if ge := i.metadata().dataStore.Update(i, nil); ge != nil {
+		return ge
 	}
 
 	return nil
 }
 
-func DoCreate(i Instance) (result interface{}, ae *gomerr.ApplicationError) {
-	i.metadata().fields.applyDefaults(i)
+func DoCreate(i Instance) (result interface{}, ge gomerr.Gomerr) {
+	if ge := i.metadata().fields.applyDefaults(i); ge != nil {
+		return nil, ge.AddNotes("could not apply defaults during create")
+	}
 
-	if ae = i.PreCreate(); ae != nil {
-		return nil, ae
+	if ge = i.PreCreate(); ge != nil {
+		return nil, ge
 	}
 
 	//if err := validate.Struct(i); err != nil {
 	//	return nil, gomerr.ValidationFailure(err)
 	//}
 
-	if limiter, lae := limit(checkAndIncrement, i); lae != nil {
-		return nil, lae
+	if limiter, lge := limit(checkAndIncrement, i); lge != nil {
+		return nil, lge
 	} else if limiter != nil {
-		defer saveLimiter(limiter, ae)
+		defer saveLimiter(limiter, ge)
 	}
 
-	if ae = i.metadata().dataStore.Create(i); ae != nil {
-		return nil, ae
+	if ge = i.metadata().dataStore.Create(i); ge != nil {
+		return nil, ge
 	}
 
-	if ae = i.PostCreate(); ae != nil {
-		return nil, ae
-	}
-
-	return scopedResult(i)
-}
-
-func DoGet(i Instance) (interface{}, *gomerr.ApplicationError) {
-	if ae := i.metadata().dataStore.Read(i); ae != nil {
-		return nil, ae
+	if ge = i.PostCreate(); ge != nil {
+		return nil, ge
 	}
 
 	return scopedResult(i)
 }
 
-func DoUpdate(updateInstance Instance) (interface{}, *gomerr.ApplicationError) {
+func DoGet(i Instance) (interface{}, gomerr.Gomerr) {
+	if ge := i.metadata().dataStore.Read(i); ge != nil {
+		return nil, ge
+	}
+
+	return scopedResult(i)
+}
+
+func DoUpdate(updateInstance Instance) (interface{}, gomerr.Gomerr) {
 	// copy update to a new instance and read data into it
 	i := shallowCopy(updateInstance)
-	if ae := i.metadata().dataStore.Read(i); ae != nil {
-		return nil, ae
+	if ge := i.metadata().dataStore.Read(i); ge != nil {
+		return nil, ge.AddNotes("unable to retrieve persisted instance for update")
 	}
 
-	if ae := i.metadata().fields.removeNonWritable(updateInstance); ae != nil {
-		return nil, ae
+	if ge := i.metadata().fields.removeNonWritable(updateInstance); ge != nil {
+		return nil, ge.AddNotes("unable to clean updateInstance before processing").AddCulprit(gomerr.Configuration)
 	}
 
-	if ae := i.PreUpdate(updateInstance); ae != nil {
-		return nil, ae
+	if ge := i.PreUpdate(updateInstance); ge != nil {
+		return nil, ge
 	}
 
-	if ae := i.metadata().dataStore.Update(i, updateInstance); ae != nil {
-		return nil, ae
+	if ge := i.metadata().dataStore.Update(i, updateInstance); ge != nil {
+		return nil, ge
 	}
 
-	if ae := i.PostUpdate(updateInstance); ae != nil {
-		return nil, ae
+	if ge := i.PostUpdate(updateInstance); ge != nil {
+		return nil, ge
 	}
 
 	return scopedResult(i)
@@ -148,31 +147,31 @@ func shallowCopy(update Instance) Instance {
 	return persisted
 }
 
-func scopedResult(i Instance) (interface{}, *gomerr.ApplicationError) {
+func scopedResult(i Instance) (interface{}, gomerr.Gomerr) {
 	if result := i.metadata().fields.removeNonReadable(i); result == nil || len(result) == 0 {
-		return nil, gomerr.ResourceNotFound(i)
+		return nil, gomerr.ResourceNotFound(i.PersistableTypeName(), i.Id()).AddCulprit(gomerr.Client)
 	} else {
 		return result, nil
 	}
 }
 
-func DoDelete(i Instance) (result interface{}, ae *gomerr.ApplicationError) {
-	if ae = i.PreDelete(); ae != nil {
-		return nil, ae
+func DoDelete(i Instance) (result interface{}, ge gomerr.Gomerr) {
+	if ge = i.PreDelete(); ge != nil {
+		return nil, ge
 	}
 
-	if limiter, lae := limit(decrement, i); lae != nil {
-		return nil, lae
+	if limiter, lge := limit(decrement, i); lge != nil {
+		return nil, lge
 	} else if limiter != nil {
-		defer saveLimiter(limiter, ae)
+		defer saveLimiter(limiter, ge)
 	}
 
-	if ae = i.metadata().dataStore.Delete(i); ae != nil {
-		return nil, ae
+	if ge = i.metadata().dataStore.Delete(i); ge != nil {
+		return nil, ge
 	}
 
-	if ae = i.PostDelete(); ae != nil {
-		return nil, ae
+	if ge = i.PostDelete(); ge != nil {
+		return nil, ge
 	}
 
 	return scopedResult(i)
@@ -202,38 +201,38 @@ func (b *BaseInstance) NewQueryable() data.Queryable {
 	return collectionQuery
 }
 
-func (b *BaseInstance) PreCreate() *gomerr.ApplicationError {
+func (b *BaseInstance) PreCreate() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PostCreate() *gomerr.ApplicationError {
+func (b *BaseInstance) PostCreate() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PreGet() *gomerr.ApplicationError {
+func (b *BaseInstance) PreGet() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PostGet() *gomerr.ApplicationError {
+func (b *BaseInstance) PostGet() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PreUpdate(_ Instance) *gomerr.ApplicationError {
+func (b *BaseInstance) PreUpdate(_ Instance) gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PostUpdate(_ Instance) *gomerr.ApplicationError {
+func (b *BaseInstance) PostUpdate(_ Instance) gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PreDelete() *gomerr.ApplicationError {
+func (b *BaseInstance) PreDelete() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PostDelete() *gomerr.ApplicationError {
+func (b *BaseInstance) PostDelete() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PostQuery() *gomerr.ApplicationError {
+func (b *BaseInstance) PostQuery() gomerr.Gomerr {
 	return nil
 }

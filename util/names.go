@@ -5,9 +5,14 @@ import (
 	"strings"
 )
 
-func UnqualifiedTypeName(t reflect.Type) string {
-	if t == nil {
+func UnqualifiedTypeName(i interface{}) string {
+	if i == nil {
 		return ""
+	}
+
+	t, ok := i.(reflect.Type)
+	if !ok {
+		t = reflect.TypeOf(i)
 	}
 
 	s := t.String()

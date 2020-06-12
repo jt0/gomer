@@ -5,6 +5,14 @@ import (
 )
 
 type Cipher interface {
-	Encrypt(plaintext []byte, encryptionContext map[string]*string) (*string, *gomerr.ApplicationError)
-	Decrypt(encoded *string, encryptionContext map[string]*string) ([]byte, *gomerr.ApplicationError)
+	Encrypt(plaintext []byte, encryptionContext map[string]*string) (*string, gomerr.Gomerr)
+	Decrypt(encoded *string, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr)
+}
+
+type CipherError struct {
+	gomerr.Gomerr
+}
+
+func CipherFailure(cause error) gomerr.Gomerr {
+	return gomerr.BuildWithCause(cause, new(CipherError))
 }

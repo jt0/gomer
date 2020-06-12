@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"reflect"
 )
 
 func InsertStringAtIndex(slice []string, value string, index int) []string {
@@ -24,4 +25,14 @@ func InsertStringAtIndex(slice []string, value string, index int) []string {
 	slice[index] = value
 
 	return slice
+}
+
+func EmptySliceForType(t reflect.Type) interface{} {
+	slice := reflect.MakeSlice(reflect.SliceOf(t), 0, 0)
+
+	// Create a pointer to a slice value and set it to the slice
+	slicePtr := reflect.New(slice.Type())
+	slicePtr.Elem().Set(slice)
+
+	return slicePtr.Interface()
 }

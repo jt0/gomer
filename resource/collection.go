@@ -2,21 +2,21 @@ package resource
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"reflect"
 	"strings"
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/logs"
+	"github.com/jt0/gomer/util"
 )
 
 type CollectionQuery interface {
 	resource
 	data.Queryable
 
-	PreQuery() *gomerr.ApplicationError
+	PreQuery() gomerr.Gomerr
 	Collection() Collection
 }
 
@@ -26,38 +26,57 @@ type Collection interface {
 	SetPrevPageToken(token *string)
 }
 
-func UnmarshalCollectionQuery(resourceType string, subject auth.Subject, bytes []byte) (CollectionQuery, *gomerr.ApplicationError) {
+func newCollectionQuery(resourceType string, subject auth.Subject) (CollectionQuery, gomerr.Gomerr) {
 	metadata, ok := resourceMetadata[strings.ToLower(resourceType)]
 	if !ok {
-		return nil, gomerr.BadRequest("Unknown type: " + resourceType)
+		return nil, gomerr.NotFound("resource type", resourceType).AddCulprit(gomerr.Client)
 	}
 
 	collectionQuery := reflect.New(metadata.collectionQueryType.Elem()).Interface().(CollectionQuery)
-
-	if len(bytes) != 0 {
-		if err := json.Unmarshal(bytes, collectionQuery); err != nil {
-			logs.Error.Printf("Unmarshal error while parsing '%s': %s\n", resourceType, err.Error())
-			return nil, gomerr.BadRequest("Unable to parse request data", fmt.Sprintf("Data does not appear to correlate to a '%s' resource", collectionQuery.metadata().collectionQueryName))
-		}
-	}
-
 	collectionQuery.setMetadata(metadata)
 	collectionQuery.setSubject(subject)
+
+	return collectionQuery, nil
+}
+
+func NewCollectionQuery(resourceType string, subject auth.Subject) (CollectionQuery, gomerr.Gomerr) {
+	collectionQuery, ge := newCollectionQuery(resourceType, subject)
+	if ge != nil {
+		return nil, ge
+	}
+
 	collectionQuery.OnSubject()
 
 	return collectionQuery, nil
 }
 
-func DoQuery(c CollectionQuery) (Collection, *gomerr.ApplicationError) {
-	ae := c.PreQuery()
-	if ae != nil {
-		return nil, ae
+func UnmarshalCollectionQuery(resourceType string, subject auth.Subject, bytes []byte) (CollectionQuery, gomerr.Gomerr) {
+	collectionQuery, ge := newCollectionQuery(resourceType, subject)
+	if ge != nil {
+		return nil, ge
 	}
 
-	items := c.metadata().emptyItems()
-	nextToken, ae := c.metadata().dataStore.Query(c, items)
-	if ae != nil {
-		return nil, ae
+	if len(bytes) != 0 {
+		if err := json.Unmarshal(bytes, collectionQuery); err != nil {
+			return nil, gomerr.Unmarshal(err, bytes, collectionQuery)
+		}
+	}
+
+	collectionQuery.OnSubject()
+
+	return collectionQuery, nil
+}
+
+func DoQuery(c CollectionQuery) (Collection, gomerr.Gomerr) {
+	ge := c.PreQuery()
+	if ge != nil {
+		return nil, ge
+	}
+
+	items := util.EmptySliceForType(c.metadata().instanceType)
+	nextToken, ge := c.metadata().dataStore.Query(c, items)
+	if ge != nil {
+		return nil, ge
 	}
 
 	iv := reflect.ValueOf(items).Elem()
@@ -68,14 +87,18 @@ func DoQuery(c CollectionQuery) (Collection, *gomerr.ApplicationError) {
 		instance.setSubject(c.Subject())
 		instance.OnSubject()
 
-		instance.PostQuery()
+		ge := instance.PostQuery()
+		if ge != nil {
+			return nil, ge
+		}
 
-		scoped, ae := scopedResult(instance)
-		if ae != nil {
-			if ae.ErrorType == gomerr.ResourceNotFoundType {
+		scoped, ge := scopedResult(instance)
+		if ge != nil {
+			var resourceNotFoundError *gomerr.ResourceNotFoundError
+			if errors.As(ge, &resourceNotFoundError) {
 				continue
 			} else {
-				return nil, ae
+				return nil, ge
 			}
 		}
 
@@ -117,6 +140,6 @@ func (b *BaseCollectionQuery) ResponseFields() []string {
 	return nil
 }
 
-func (b *BaseCollectionQuery) PreQuery() *gomerr.ApplicationError {
+func (b *BaseCollectionQuery) PreQuery() gomerr.Gomerr {
 	return nil
 }

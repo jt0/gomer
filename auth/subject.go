@@ -1,8 +1,12 @@
 package auth
 
+import (
+	"github.com/jt0/gomer/gomerr"
+)
+
 type Subject interface {
 	Principal(principalType PrincipalType) Principal
-	Release()
+	Release(errored bool) gomerr.Gomerr
 }
 
 type basicSubject struct {
@@ -23,23 +27,34 @@ func (b *basicSubject) Principal(principalType PrincipalType) Principal {
 	return b.principals[principalType]
 }
 
-func (b *basicSubject) Release() {
+func (b *basicSubject) Release(errored bool) gomerr.Gomerr {
+	errors := make([]gomerr.Gomerr, 0)
 	for _, principal := range b.principals {
-		principal.Release()
+		ge := principal.Release(errored)
+		if ge != nil {
+			errors = append(errors, ge)
+		}
 	}
+
+	if len(errors) > 0 {
+		return gomerr.Batch(errors)
+	}
+
+	return nil
 }
 
 type PrincipalType string
+
 const (
 	Account PrincipalType = "Account"
-	Role PrincipalType = "Role"
-	User PrincipalType = "User"
-	Group PrincipalType = "Group"
+	Role    PrincipalType = "Role"
+	User    PrincipalType = "User"
+	Group   PrincipalType = "Group"
 	Request PrincipalType = "Request"
 )
 
 type Principal interface {
 	Id() string
 	Type() PrincipalType
-	Release()
+	Release(errored bool) gomerr.Gomerr
 }

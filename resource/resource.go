@@ -5,6 +5,7 @@ import (
 )
 
 type resource interface {
+	Metadata() Metadata
 	Subject() auth.Subject
 	OnSubject()
 
@@ -16,6 +17,10 @@ type resource interface {
 type BaseResource struct {
 	md  *metadata
 	sub auth.Subject
+}
+
+func (b *BaseResource) Metadata() Metadata {
+	return b.md
 }
 
 func (b *BaseResource) Subject() auth.Subject {
