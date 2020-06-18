@@ -41,6 +41,11 @@ type DependencyError struct {
 	Service string
 }
 
+type UnsupportedError struct {
+	Gomerr
+	CorrectiveAction string
+}
+
 type PanicError struct {
 	Gomerr
 	Recover interface{}
@@ -68,6 +73,10 @@ func TokenExpired(expiredAt time.Time) Gomerr {
 
 func Dependency(cause error, input interface{}) Gomerr {
 	return BuildWithCause(cause, new(DependencyError), input)
+}
+
+func Unsupported(correctiveAction string) Gomerr {
+	return Build(new(UnsupportedError), correctiveAction)
 }
 
 func Panic(recover interface{}) Gomerr {

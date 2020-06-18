@@ -183,6 +183,10 @@ type BaseInstance struct {
 	//persistedValues map[string]interface{}
 }
 
+func (b *BaseInstance) Id() string {
+	panic(gomerr.Unsupported("shadow Id() from the embedding struct"))
+}
+
 func (b *BaseInstance) PersistableTypeName() string {
 	return b.md.instanceName
 }

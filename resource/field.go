@@ -31,7 +31,7 @@ type field struct {
 }
 
 type fieldAccessBits uint16
-type FieldDefaultFunction func() interface{}
+type FieldDefaultFunction func(Instance) interface{}
 
 func newFields(structType reflect.Type) (*fields, gomerr.Gomerr) {
 	fields := &fields{
@@ -135,7 +135,7 @@ func (fs *fields) applyDefaults(i Instance) gomerr.Gomerr {
 
 		var defaultValue interface{}
 		if field.defaultValueFunction != nil {
-			defaultValue = field.defaultValueFunction()
+			defaultValue = field.defaultValueFunction(i)
 		} else {
 			defaultValue = field.defaultValue
 		}
