@@ -1,4 +1,4 @@
-package http
+package gin
 
 import (
 	"encoding/json"
@@ -8,126 +8,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/resource"
-	"github.com/jt0/gomer/util"
 )
 
-type ErrorRenderer func(gomerr.Gomerr) (statusCode int, responsePayload interface{})
-type GinContextSubjectProvider func(*gin.Context) (auth.Subject, gomerr.Gomerr)
-
-func GinEngine(rootResources []resource.Metadata, errorRenderer ErrorRenderer, subjectProvider GinContextSubjectProvider) (*gin.Engine, gomerr.Gomerr) {
-	r := gin.Default()
-
-	r.Use(errorHandler(errorRenderer), subjectHandler(subjectProvider))
-
-	r.NoMethod() // Make sure to write output to avoid gin providing default text
-	r.NoRoute()  // Make sure to write output to avoid gin providing default text
-
-	for _, rootResource := range rootResources {
-		buildApi(r, rootResource, "", []string{})
-	}
-
-	return r, nil
-}
-
-func errorHandler(errorRenderer ErrorRenderer) func(c *gin.Context) {
-	if errorRenderer == nil {
-		println("[Warning] Using default error renderer - do not use in production!!")
-		errorRenderer = DefaultErrorRenderer
-	}
-
-	return func(c *gin.Context) {
-		c.Next()
-
-		if len(c.Errors) == 0 {
-			return
-		}
-
-		if c.Writer.Written() {
-			println(c.Errors.String())
-			return
-		}
-
-		if len(c.Errors) > 1 {
-			println(c.Errors.String())
-		}
-
-		ge, ok := c.Errors.Last().Err.(gomerr.Gomerr)
-		if !ok {
-			ge = gomerr.InternalServer(c.Errors.Last().Err)
-		}
-
-		c.IndentedJSON(errorRenderer(ge))
+func BuildRoutes(r *gin.Engine, resourceMetadata ...resource.Metadata) {
+	for _, md := range resourceMetadata {
+		buildRoutes(r, md, "", []string{})
 	}
 }
 
-func DefaultErrorRenderer(ge gomerr.Gomerr) (statusCode int, responsePayload interface{}) {
-	if ae, ok := ge.(gomerr.ApplicationError); ok {
-		statusCode = ae.StatusCode
-	} else if ge.Culprit() == gomerr.Client {
-		statusCode = http.StatusBadRequest
-	} else {
-		statusCode = http.StatusInternalServerError
-	}
-
-	errorDetails := make(map[string]interface{})
-	responsePayload = errorDetails
-	for {
-		attributes := ge.Attributes()
-		errorDetails[util.UnqualifiedTypeName(ge)] = attributes
-		attributes["_Location"] = ge.Location()
-		if ge.Culprit() != gomerr.Unspecified {
-			attributes["_Culprit"] = ge.Culprit()
-		}
-		if len(ge.Notes()) > 0 {
-			attributes["_Notes"] = ge.Notes()
-		}
-
-		err := ge.Cause()
-		if err == nil {
-			return
-		}
-
-		causeDetails := make(map[string]interface{})
-		attributes["_Cause"] = causeDetails
-		var ok bool
-		ge, ok = err.(gomerr.Gomerr)
-		if ok {
-			errorDetails = causeDetails
-		} else {
-			causeDetails[util.UnqualifiedTypeName(err)] = err
-			return
-		}
-	}
-}
-
-func subjectHandler(subjectProvider GinContextSubjectProvider) func(c *gin.Context) {
-	if subjectProvider == nil {
-		// TODO: provide default subjectProvider that at least includes resource.ReadWriteAll
-	}
-
-	return func(c *gin.Context) {
-		if subject, ge := subjectProvider(c); ge != nil {
-			_ = c.Error(ge)
-			c.Abort()
-		} else {
-			c.Set("subject", subject)
-			c.Next()
-			ge := subject.Release(c.IsAborted() || len(c.Errors) > 0)
-			if ge != nil {
-				// TODO: log but don't error
-			}
-		}
-	}
-}
-
-func subject(c *gin.Context) auth.Subject {
-	return c.MustGet("subject").(auth.Subject)
-}
-
-func buildApi(r *gin.Engine, md resource.Metadata, path string, pathKeys []string) {
+func buildRoutes(r *gin.Engine, md resource.Metadata, path string, pathKeys []string) {
 	resourceType := md.InstanceName()
 
 	if md.CollectionQueryName() != "" {
@@ -157,7 +48,7 @@ func buildApi(r *gin.Engine, md resource.Metadata, path string, pathKeys []strin
 	r.DELETE(path, instanceHandler(resourceType, md.ExternalNameToFieldName, resource.DoDelete, false, http.StatusNoContent))
 
 	for _, childMetadata := range md.Children() {
-		buildApi(r, childMetadata, path, pathKeys)
+		buildRoutes(r, childMetadata, path, pathKeys)
 	}
 }
 
@@ -177,7 +68,7 @@ func instanceHandler(resourceType string, externalToFieldName func(string) (stri
 			return
 		}
 
-		instance, ge := resource.UnmarshalInstance(resourceType, subject(c), bytes)
+		instance, ge := resource.UnmarshalInstance(resourceType, Subject(c), bytes)
 		if ge != nil {
 			_ = c.Error(ge)
 			return
@@ -205,7 +96,7 @@ func collectionQueryHandler(resourceType string) func(c *gin.Context) {
 			return
 		}
 
-		collectionQuery, ge := resource.UnmarshalCollectionQuery(resourceType, subject(c), bytes)
+		collectionQuery, ge := resource.UnmarshalCollectionQuery(resourceType, Subject(c), bytes)
 		if ge != nil {
 			_ = c.Error(ge)
 			return
