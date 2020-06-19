@@ -75,6 +75,10 @@ func SaveInstance(i Instance) gomerr.Gomerr {
 }
 
 func DoCreate(i Instance) (result interface{}, ge gomerr.Gomerr) {
+	if ge := i.metadata().fields.removeNonWritable(i, create); ge != nil {
+		return nil, ge.AddNotes("unable to clean updateInstance before processing").AddCulprit(gomerr.Configuration)
+	}
+
 	if ge := i.metadata().fields.applyDefaults(i); ge != nil {
 		return nil, ge.AddNotes("could not apply defaults during create")
 	}
@@ -119,7 +123,7 @@ func DoUpdate(updateInstance Instance) (interface{}, gomerr.Gomerr) {
 		return nil, ge.AddNotes("unable to retrieve persisted instance for update")
 	}
 
-	if ge := i.metadata().fields.removeNonWritable(updateInstance); ge != nil {
+	if ge := i.metadata().fields.removeNonWritable(updateInstance, update); ge != nil {
 		return nil, ge.AddNotes("unable to clean updateInstance before processing").AddCulprit(gomerr.Configuration)
 	}
 
