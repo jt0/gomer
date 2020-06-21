@@ -115,7 +115,7 @@ func saveLimiter(limiter Limiter, ge gomerr.Gomerr) {
 	}
 
 	limiterInstance := limiter.(Instance) // Should always be true
-	ge = limiterInstance.metadata().dataStore.Update(limiterInstance, limiterInstance)
+	ge = limiterInstance.metadata().dataStore.Update(limiterInstance, nil)
 	if ge != nil {
 		// TODO: use provided logger
 		fmt.Println("Failed to save limiter (type: %s, id: %s). Error: %s"+limiterInstance.PersistableTypeName(), limiterInstance.Id(), ge)

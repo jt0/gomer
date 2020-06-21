@@ -8,9 +8,18 @@ import (
 )
 
 type CountLimiter struct {
-	util.Dirty
 	Currents  map[string]Count
 	Overrides map[string]Count
+
+	dirty bool
+}
+
+func (l *CountLimiter) IsDirty() bool {
+	return l.dirty
+}
+
+func (l *CountLimiter) ClearDirty() {
+	l.dirty = false
 }
 
 func (l *CountLimiter) Current(limited Limited) util.Amount {
@@ -33,7 +42,7 @@ func (l *CountLimiter) SetCurrent(limited Limited, current util.Amount) {
 
 	l.Currents[util.UnqualifiedTypeName(reflect.TypeOf(limited))] = current.(Count)
 
-	l.Dirty.SetDirty()
+	l.dirty = true
 }
 
 func (l *CountLimiter) Override(limited Limited) util.Amount {
@@ -60,7 +69,7 @@ func (l *CountLimiter) SetOverride(limited Limited, override util.Amount) {
 		delete(l.Overrides, util.UnqualifiedTypeName(reflect.TypeOf(limited)))
 	}
 
-	l.Dirty.SetDirty()
+	l.dirty = true
 }
 
 func (l *CountLimiter) Maximum(limited Limited) util.Amount {

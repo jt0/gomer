@@ -75,11 +75,11 @@ func SaveInstance(i Instance) gomerr.Gomerr {
 }
 
 func DoCreate(i Instance) (result interface{}, ge gomerr.Gomerr) {
-	if ge := i.metadata().fields.removeNonWritable(i, create); ge != nil {
-		return nil, ge.AddNotes("unable to clean updateInstance before processing").AddCulprit(gomerr.Configuration)
+	if ge = i.metadata().fields.removeNonWritable(i, createAccess); ge != nil {
+		return nil, ge.AddNotes("unable to clean instance before processing").AddCulprit(gomerr.Configuration)
 	}
 
-	if ge := i.metadata().fields.applyDefaults(i); ge != nil {
+	if ge = i.metadata().fields.applyDefaults(i); ge != nil {
 		return nil, ge.AddNotes("could not apply defaults during create")
 	}
 
@@ -123,7 +123,7 @@ func DoUpdate(updateInstance Instance) (interface{}, gomerr.Gomerr) {
 		return nil, ge.AddNotes("unable to retrieve persisted instance for update")
 	}
 
-	if ge := i.metadata().fields.removeNonWritable(updateInstance, update); ge != nil {
+	if ge := i.metadata().fields.removeNonWritable(updateInstance, updateAccess); ge != nil {
 		return nil, ge.AddNotes("unable to clean updateInstance before processing").AddCulprit(gomerr.Configuration)
 	}
 
@@ -153,7 +153,7 @@ func shallowCopy(update Instance) Instance {
 
 func scopedResult(i Instance) (interface{}, gomerr.Gomerr) {
 	if result := i.metadata().fields.removeNonReadable(i); result == nil || len(result) == 0 {
-		return nil, gomerr.ResourceNotFound(i.PersistableTypeName(), i.Id()).AddCulprit(gomerr.Client)
+		return nil, gomerr.NotFound(i.PersistableTypeName(), i.Id()).AddCulprit(gomerr.Client)
 	} else {
 		return result, nil
 	}

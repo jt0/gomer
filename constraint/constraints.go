@@ -7,6 +7,7 @@ import (
 )
 
 type Constraint interface {
+	//fmt.Stringer
 	Evaluate(constrained interface{}) bool
 }
 
@@ -54,7 +55,13 @@ func Values(values ...interface{}) Constraint {
 	return &valuesConstraint{values}
 }
 
-func (c *valuesConstraint) Evaluate(interface{}) bool {
+func (c *valuesConstraint) Evaluate(i interface{}) bool {
+	for _, v := range c.values {
+		if i == v {
+			return true
+		}
+	}
+
 	return false
 }
 

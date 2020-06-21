@@ -9,12 +9,18 @@ import (
 	"github.com/jt0/gomer/util"
 )
 
-type GomerrErrorRenderer func(gomerr.Gomerr) (statusCode int, responsePayload interface{})
+type GomerrRenderer func(gomerr.Gomerr) (statusCode int, responsePayload interface{})
+type GomerrBatchRenderer func(batchError gomerr.BatchError) (statusCode int, responsePayload interface{})
 
-func GomerrRenderHandler(errorRenderer GomerrErrorRenderer) gin.HandlerFunc {
+func GomerrRenderHandler(errorRenderer GomerrRenderer, batchRenderer GomerrBatchRenderer) gin.HandlerFunc {
 	if errorRenderer == nil {
-		println("[Warning] Using default error renderer - do not use in production!!")
-		errorRenderer = defaultErrorRenderer
+		println("[Warning] Using default GomerrRenderer - do not use in production!!")
+		errorRenderer = defaultGomerrRenderer
+	}
+
+	if batchRenderer == nil {
+		println("[Warning] Using default GomerrBatchRenderer - do not use in production!!")
+		batchRenderer = defaultGomerrBatchRenderer
 	}
 
 	return func(c *gin.Context) {
@@ -33,18 +39,34 @@ func GomerrRenderHandler(errorRenderer GomerrErrorRenderer) gin.HandlerFunc {
 			println(c.Errors.String())
 		}
 
-		ge, ok := c.Errors.Last().Err.(gomerr.Gomerr)
-		if !ok {
-			ge = gomerr.InternalServer(c.Errors.Last().Err)
+		lastErr := c.Errors.Last().Err
+		if bge, ok := lastErr.(gomerr.BatchError); ok {
+			c.IndentedJSON(batchRenderer(bge))
+		} else if ge, ok := lastErr.(gomerr.Gomerr); ok {
+			c.IndentedJSON(errorRenderer(ge))
+		} else {
+			c.IndentedJSON(errorRenderer(gomerr.InternalServer(lastErr).AddNotes("wrapping non-gomerr error at render time")))
 		}
-
-		c.IndentedJSON(errorRenderer(ge))
 	}
 }
 
-func defaultErrorRenderer(ge gomerr.Gomerr) (statusCode int, responsePayload interface{}) {
-	if ae, ok := ge.(gomerr.ApplicationError); ok {
-		statusCode = ae.StatusCode
+const (
+	// No predefined HTTP code for LimitExceeded, but this appears to be growing in adoption
+	HttpStatusLimitExceeded = 402
+)
+
+var GomerrToStatusCode = map[string]int{
+	util.UnqualifiedTypeName(gomerr.BadValueError{}):      http.StatusBadRequest,
+	util.UnqualifiedTypeName(gomerr.LimitExceededError{}): HttpStatusLimitExceeded,
+	util.UnqualifiedTypeName(gomerr.NotFoundError{}):      http.StatusNotFound,
+
+	// XXX: finish populating..
+}
+
+func defaultGomerrRenderer(ge gomerr.Gomerr) (statusCode int, responsePayload interface{}) {
+	if sc, ok := GomerrToStatusCode[util.UnqualifiedTypeName(ge)]; ok {
+		// TODO: logic to verify 4xx/5xx based on culprit...
+		statusCode = sc
 	} else if ge.Culprit() == gomerr.Client {
 		statusCode = http.StatusBadRequest
 	} else {
@@ -80,4 +102,9 @@ func defaultErrorRenderer(ge gomerr.Gomerr) (statusCode int, responsePayload int
 			return
 		}
 	}
+}
+
+func defaultGomerrBatchRenderer(bge gomerr.BatchError) (statusCode int, responsePayload interface{}) {
+	// XXX
+	return 0, nil
 }

@@ -221,7 +221,7 @@ func (t *table) put(p data.Persistable, uniqueFields map[string][]string, ensure
 	pt := t.persistableTypes[p.PersistableTypeName()]
 
 	for fieldName, additionalFields := range uniqueFields {
-		if ge := t.preQueryConstraintsCheck(p, fieldName, additionalFields); ge != nil {
+		if ge := t.constraintsCheck(p, fieldName, additionalFields); ge != nil {
 			return ge
 		}
 	}
@@ -234,7 +234,7 @@ func (t *table) put(p data.Persistable, uniqueFields map[string][]string, ensure
 	pt.convertFieldNamesToDbNames(&av)
 
 	for _, index := range t.indexes {
-		index.populateKeyValues(av, p, t.valueSeparator)
+		_ = index.populateKeyValues(av, p, t.valueSeparator, false)
 	}
 
 	// TODO: here we could compare the current av map w/ one we stashed into the object somewhere
@@ -288,7 +288,10 @@ func (t *table) Read(p data.Persistable) (ge gomerr.Gomerr) {
 	}()
 
 	keys := make(map[string]*dynamodb.AttributeValue, 2)
-	t.populateKeyValues(keys, p, t.valueSeparator)
+	ge = t.populateKeyValues(keys, p, t.valueSeparator, true)
+	if ge != nil {
+		return ge.AddNotes("cannot read persistable without key value(s)")
+	}
 
 	input := &dynamodb.GetItemInput{
 		Key:            keys,
@@ -313,7 +316,7 @@ func (t *table) Read(p data.Persistable) (ge gomerr.Gomerr) {
 	}
 
 	if output.Item == nil {
-		return gomerr.ResourceNotFound(p.PersistableTypeName(), p.Id()).AddCulprit(gomerr.Client)
+		return gomerr.NotFound(p.PersistableTypeName(), p.Id()).AddCulprit(gomerr.Client)
 	}
 
 	err = dynamodbattribute.UnmarshalMap(output.Item, p)
@@ -334,7 +337,10 @@ func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
 	// TODO:p2 support a soft-delete option
 
 	keys := make(map[string]*dynamodb.AttributeValue, 2)
-	t.populateKeyValues(keys, p, t.valueSeparator)
+	ge = t.populateKeyValues(keys, p, t.valueSeparator, true)
+	if ge != nil {
+		return ge.AddNotes("cannot delete persistable without key value(s)")
+	}
 
 	input := &dynamodb.DeleteItemInput{
 		Key:       keys,
@@ -394,7 +400,7 @@ func (t *table) Query(q data.Queryable, arrayOfPersistable interface{}) (nextTok
 	return nextToken, nil
 }
 
-func (t *table) preQueryConstraintsCheck(p data.Persistable, fieldName string, additionalFields []string) gomerr.Gomerr {
+func (t *table) constraintsCheck(p data.Persistable, fieldName string, additionalFields []string) gomerr.Gomerr {
 	q := p.NewQueryable()
 	if ct, ok := p.(ConsistencyTyper); ok {
 		ct.SetConsistencyType(Preferred)
@@ -461,10 +467,13 @@ func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, gomerr.
 	expressionAttributeValues := make(map[string]*dynamodb.AttributeValue, 2)
 
 	keyConditionExpresion := safeName(index.pk.name, expressionAttributeNames) + "=:pk"
-	expressionAttributeValues[":pk"] = index.pk.attributeValue(q, t.valueSeparator)
+	expressionAttributeValues[":pk"], ge = index.pk.attributeValue(q, t.valueSeparator, true)
+	if ge != nil {
+		return nil, ge.AddNotes("cannot perform query without partition key")
+	}
 
 	if index.sk != nil {
-		if av := index.sk.attributeValue(q, t.valueSeparator); av != nil {
+		if av, _ := index.sk.attributeValue(q, t.valueSeparator, false); av != nil {
 			if av.S != nil && strings.HasSuffix(*av.S, ":") {
 				trimmed := strings.Trim(*av.S, ":")
 				av.S = &trimmed

@@ -94,8 +94,8 @@ func DoQuery(c CollectionQuery) (Collection, gomerr.Gomerr) {
 
 		scoped, ge := scopedResult(instance)
 		if ge != nil {
-			var resourceNotFoundError *gomerr.ResourceNotFoundError
-			if errors.As(ge, &resourceNotFoundError) {
+			var nfe *gomerr.NotFoundError
+			if errors.As(ge, &nfe) {
 				continue
 			} else {
 				return nil, ge

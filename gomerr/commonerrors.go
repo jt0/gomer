@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/jt0/gomer/constraint"
+	"github.com/jt0/gomer/util"
 )
 
 type NotFoundError struct {
@@ -17,6 +18,19 @@ type BadValueError struct {
 	What     string
 	Actual   interface{}
 	Expected constraint.Constraint
+}
+
+type LimitExceededError struct {
+	Gomerr
+	LimitType string
+	Limit     util.Amount
+	Current   util.Amount
+	Attempted util.Amount
+}
+
+type ConflictError struct {
+	Gomerr
+	Conflict string
 }
 
 type MarshalError struct {
@@ -46,6 +60,10 @@ type UnsupportedError struct {
 	CorrectiveAction string
 }
 
+type InternalError struct {
+	Gomerr
+}
+
 type PanicError struct {
 	Gomerr
 	Recover interface{}
@@ -57,6 +75,14 @@ func NotFound(type_ string, id string) Gomerr {
 
 func BadValue(what string, actual interface{}, expected constraint.Constraint) Gomerr {
 	return Build(new(BadValueError), what, actual, expected)
+}
+
+func LimitExceeded(limitType string, limit util.Amount, current util.Amount, attempted util.Amount) Gomerr {
+	return Build(new(LimitExceededError), limitType, limit, current, attempted)
+}
+
+func Conflict(conflict string) Gomerr {
+	return Build(new(ConflictError), conflict)
 }
 
 func Marshal(cause error, toMarshal interface{}) Gomerr {
@@ -77,6 +103,11 @@ func Dependency(cause error, input interface{}) Gomerr {
 
 func Unsupported(correctiveAction string) Gomerr {
 	return Build(new(UnsupportedError), correctiveAction)
+}
+
+func InternalServer(cause error) Gomerr {
+	// XXX: remove cause
+	return BuildWithCause(cause, new(InternalError))
 }
 
 func Panic(recover interface{}) Gomerr {

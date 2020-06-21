@@ -120,13 +120,18 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 
 	// Needs more work to handle multi-attribute cases such as "between"
 	if i.sk != nil {
-		for _, keyField := range i.sk.keyFieldsByPersistable[ptName] {
+		for kfi, keyField := range i.sk.keyFieldsByPersistable[ptName] {
 			if keyField[:1] == "'" {
 				continue
 			}
 
-			if fv := qv.FieldByName(keyField); !fv.IsValid() {
-				return nil
+			fv := qv.FieldByName(keyField)
+			if !fv.IsValid() {
+				if kfi == 0 {
+					return nil
+				} else {
+					candidate.skMissing++
+				}
 			} else if fv.IsZero() {
 				candidate.skMissing++
 			} else {
@@ -142,16 +147,18 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 	return candidate
 }
 
-func (i *index) populateKeyValues(av map[string]*dynamodb.AttributeValue, p data.Persistable, valueSeparator string) {
+func (i *index) populateKeyValues(av map[string]*dynamodb.AttributeValue, p data.Persistable, valueSeparator string, mustBeSet bool) (ge gomerr.Gomerr) {
 	if _, present := av[i.pk.name]; !present {
-		av[i.pk.name] = i.pk.attributeValue(p, valueSeparator)
+		av[i.pk.name], ge = i.pk.attributeValue(p, valueSeparator, mustBeSet)
 	}
 
-	if i.sk != nil {
+	if ge == nil && i.sk != nil {
 		if _, present := av[i.sk.name]; !present {
-			av[i.sk.name] = i.sk.attributeValue(p, valueSeparator)
+			av[i.sk.name], ge = i.sk.attributeValue(p, valueSeparator, mustBeSet)
 		}
 	}
+
+	return
 }
 
 func (i *index) keyAttributes() []*keyAttribute {
@@ -162,22 +169,26 @@ func (i *index) keyAttributes() []*keyAttribute {
 	}
 }
 
-func (k *keyAttribute) attributeValue(s data.Storable, valueSeparator string) *dynamodb.AttributeValue {
+func (k *keyAttribute) attributeValue(s data.Storable, valueSeparator string, mustBeSet bool) (*dynamodb.AttributeValue, gomerr.Gomerr) {
 	value := k.buildKeyValue(s, valueSeparator)
 	if value == "" {
-		return nil
+		if mustBeSet {
+			return nil, gomerr.BadValue("storable.keyAttribute", s, constraint.NonZero())
+		}
+
+		return nil, nil
 	}
 
 	switch k.attributeType {
 	case dynamodb.ScalarAttributeTypeS:
 		s := fmt.Sprint(value) // TODO:p1 replace with a better conversion mechanism (e.g. handle times)
-		return &dynamodb.AttributeValue{S: &s}
+		return &dynamodb.AttributeValue{S: &s}, nil
 	case dynamodb.ScalarAttributeTypeN:
 		n := fmt.Sprint(value)
-		return &dynamodb.AttributeValue{N: &n}
+		return &dynamodb.AttributeValue{N: &n}, nil
 	default:
 		// Can only be one of the two explicit types - protected by usage of safeAttributeType() function
-		return nil
+		return nil, gomerr.Unsupported("unexpected key attributeType: " + k.attributeType).AddCulprit(gomerr.Internal)
 	}
 }
 
@@ -198,7 +209,12 @@ func (k *keyAttribute) buildKeyValue(s data.Storable, valueSeparator string) str
 		if fieldName[:1] == "'" {
 			keyValues[i] = fieldName[1 : len(fieldName)-1]
 		} else {
-			keyValues[i] = fmt.Sprint(sv.FieldByName(fieldName).Interface())
+			v := sv.FieldByName(fieldName)
+			if v.IsValid() {
+				keyValues[i] = fmt.Sprint(v.Interface())
+			} else {
+				keyValues[i] = ""
+			}
 		}
 	}
 

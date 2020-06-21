@@ -25,9 +25,11 @@ type field struct {
 	externalName         string
 	location             string
 	accessBits           fieldAccessBits
+	provided             bool
 	defaultValue         string
 	defaultValueFunction FieldDefaultFunction
 	bypassDefaultIfSet   bool
+	zeroVal              reflect.Value
 }
 
 type fieldAccessBits uint32
@@ -64,6 +66,7 @@ func (fs *fields) process(structType reflect.Type, path string, errors []gomerr.
 			f := &field{
 				name:     sFieldName,
 				location: path + sFieldName,
+				zeroVal:  reflect.Zero(sField.Type),
 			}
 
 			f.externalNameTag(sField.Tag.Get("json"))
@@ -153,7 +156,7 @@ func (fs *fields) removeNonReadable(i Instance) map[string]interface{} { // TODO
 	readView := make(map[string]interface{})
 
 	for _, field := range fs.fieldMap {
-		if field.access(i.Subject().Principal(FieldAccess), read) {
+		if field.access(i.Subject().Principal(FieldAccess), readAccess) {
 			fieldValue := resource.FieldByName(field.name)
 			if isSet(fieldValue) {
 				readView[field.externalName] = fieldValue.Interface()
@@ -168,6 +171,16 @@ func (fs *fields) removeNonWritable(i Instance, accessType fieldAccessBits) gome
 	uv := reflect.ValueOf(i).Elem()
 
 	for _, field := range fs.fieldMap {
+		if field.provided {
+			continue
+		}
+
+		willOverwrite := (field.defaultValueFunction != nil || field.defaultValue != "") && !field.bypassDefaultIfSet
+		if accessType == createAccess && willOverwrite {
+			// If present, will be overwritten when the default is applied
+			continue
+		}
+
 		if !field.access(i.Subject().Principal(FieldAccess), accessType) {
 			if strings.Contains(field.location, ".") {
 				continue // TODO: handle nested/embedded structs
@@ -182,7 +195,7 @@ func (fs *fields) removeNonWritable(i Instance, accessType fieldAccessBits) gome
 				return gomerr.BadValue(i.PersistableTypeName()+"."+field.name+".CanSet()", fv, constraint.Function(canSet)).AddNotes("Can't zero field").AddCulprit(gomerr.Configuration)
 			}
 
-			fv.Set(reflect.Zero(fv.Type()))
+			fv.Set(field.zeroVal)
 		}
 	}
 
@@ -358,15 +371,16 @@ func (f *field) externalNameTag(nameTag string) {
 }
 
 const (
-	read   = fieldAccessBits(0x100)
-	create = fieldAccessBits(0x010)
-	update = fieldAccessBits(0x001)
+	readAccess = fieldAccessBits(1 << iota)
+	createAccess
+	updateAccess
+	numAccessTypes = iota
 
 	readChar   = 'r'
 	writeChar  = 'w'
 	createChar = 'c'
 	updateChar = 'u'
-	noopChar   = '-'
+	dashChar   = '-'
 )
 
 func (f *field) accessTag(accessTag string) gomerr.Gomerr {
@@ -374,38 +388,44 @@ func (f *field) accessTag(accessTag string) gomerr.Gomerr {
 		return nil // no access
 	}
 
-	if len(accessTag) > 16 {
-		return gomerr.BadValue("'access' tag", accessTag, constraint.Length(0, 16)).AddNotes("can only support up to 8 field access principals pairs").AddCulprit(gomerr.Configuration)
+	parts := strings.Split(accessTag, ",")
+	if len(parts) > 1 {
+		f.provided = parts[1] == "p" || parts[1] == "provided"
 	}
 
-	if !mod2(accessTag) {
-		return gomerr.BadValue("'access' tag", accessTag, constraint.Function(mod2)).AddNotes("each field access principal needs a specified 'read' and 'write' value").AddCulprit(gomerr.Configuration)
+	access := strings.TrimSpace(parts[0])
+	if len(access) == 0 {
+		return nil
+	} else if len(access) > 16 {
+		return gomerr.BadValue("'access' tag", access, constraint.Length(0, 16)).AddNotes("can only support up to 8 field access principals pairs").AddCulprit(gomerr.Configuration)
+	} else if !mod2(access) {
+		return gomerr.BadValue("'access' tag", access, constraint.Function(mod2)).AddNotes("each field access principal needs a specified 'read' and 'write' value").AddCulprit(gomerr.Configuration)
 	}
 
 	var accessBits fieldAccessBits
-	for i := 0; i < len(accessTag); i += 2 {
-		accessBits <<= 3 // Prepare to write the next 3 bits.  The first time this still results in no set bits
+	for i := 0; i < len(access); i += 2 {
+		accessBits <<= numAccessTypes // Prepare to write the next access bits.  The first time this still results in no set bits
 
-		switch accessTag[i] {
+		switch access[i] {
 		case readChar:
-			accessBits |= read
-		case noopChar:
+			accessBits |= readAccess
+		case dashChar:
 			// nothing to set
 		default:
-			return gomerr.BadValue("'access' tag", accessTag[i], constraint.Values(readChar, noopChar)).AddCulprit(gomerr.Configuration)
+			return gomerr.BadValue("'access' tag", access[i], constraint.Values(readChar, dashChar)).AddCulprit(gomerr.Configuration)
 		}
 
-		switch accessTag[i+1] {
+		switch access[i+1] {
 		case writeChar:
-			accessBits |= create & update
+			accessBits |= createAccess | updateAccess
 		case createChar:
-			accessBits |= create
+			accessBits |= createAccess
 		case updateChar:
-			accessBits |= update
-		case noopChar:
+			accessBits |= updateAccess
+		case dashChar:
 			// nothing to set
 		default:
-			return gomerr.BadValue("'access' tag", accessTag[i], constraint.Values(writeChar, createChar, updateChar, noopChar)).AddCulprit(gomerr.Configuration)
+			return gomerr.BadValue("'access' tag", access[i], constraint.Values(writeChar, createChar, updateChar, dashChar)).AddCulprit(gomerr.Configuration)
 		}
 	}
 
@@ -414,21 +434,25 @@ func (f *field) accessTag(accessTag string) gomerr.Gomerr {
 	return nil
 }
 
-func (f field) access(fieldAccessPrincipal auth.Principal, accessType fieldAccessBits) bool {
-	if fieldAccessPrincipal == nil || fieldAccessPrincipal == NoAccess {
-		return false
-	} else if fieldAccessPrincipal == ReadWriteAll || fieldAccessPrincipal == ReadAll {
+func (f *field) access(fieldAccessPrincipal auth.Principal, accessType fieldAccessBits) bool {
+	switch fieldAccessPrincipal {
+	case ReadWriteAll:
 		return true
-	}
-
-	bitsLocation, ok := bitsLocationForPrincipal[fieldAccessPrincipal]
-	if !ok {
+	case ReadAll:
+		return accessType&readAccess == readAccess
+	case NoAccess:
+		fallthrough
+	case nil:
 		return false
+	default:
+		bitsIndex, ok := bitsLocationForPrincipal[fieldAccessPrincipal]
+		if !ok {
+			return false // no matching principal
+		}
+
+		accessTypeBits := accessType << (numAccessTypes * bitsIndex)
+		return f.accessBits&accessTypeBits == accessTypeBits
 	}
-
-	accessBit := accessType << (3 * bitsLocation)
-
-	return f.accessBits&accessBit != 0
 }
 
 func mod2(i interface{}) bool {
@@ -478,13 +502,18 @@ func (f FieldAccessPrincipal) Release(_ bool) gomerr.Gomerr {
 }
 
 var bitsLocationForPrincipal = make(map[auth.Principal]uint)
+var reservedPrincipalsConstraint = constraint.Values(ReadWriteAll, ReadAll, NoAccess)
 
 func RegisterFieldAccessPrincipals(fieldAccessPrincipals ...FieldAccessPrincipal) {
-	if len(fieldAccessPrincipals) > 8 {
-		panic(fmt.Sprintf("Too many fieldAccessPrincipals (maximum = 8): %v", fieldAccessPrincipals))
+	if len(fieldAccessPrincipals) > 7 {
+		panic(fmt.Sprintf("too many fieldAccessPrincipals (maximum = 7): %v", fieldAccessPrincipals))
 	}
 
 	for i, r := range fieldAccessPrincipals {
+		if reservedPrincipalsConstraint.Evaluate(r) {
+			panic(fmt.Sprintf("cannot register a predefined FieldAccessPrincipal: %s (predefined: %v)", r, reservedPrincipalsConstraint))
+		}
+
 		bitsLocationForPrincipal[r] = uint(i)
 	}
 }
