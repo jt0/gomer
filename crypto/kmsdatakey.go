@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/binary"
 	"io"
 
@@ -18,94 +17,76 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-type KmsDataKey struct {
+const (
+	encryptedEncodingFormatVersion     = 1
+	encryptedEncodingFormatVersionByte = byte(encryptedEncodingFormatVersion)
+)
+
+type kmsEncrypter struct {
 	kms         kmsiface.KMSAPI
-	masterKeyId *string
-	nonceLength uint8
+	masterKeyId string
 }
 
-func NewKmsDataKey(kmsClient kmsiface.KMSAPI, masterKeyId string, nonceLength uint8) (*KmsDataKey, gomerr.Gomerr) {
-	input := &kms.DescribeKeyInput{
-		KeyId: aws.String(masterKeyId),
-	}
-
-	output, err := kmsClient.DescribeKey(input)
-	if err != nil {
-		if awsErr, ok := err.(awserr.Error); ok {
-			switch awsErr.Code() {
-			case kms.ErrCodeNotFoundException:
-				fallthrough
-			case kms.ErrCodeInvalidArnException:
-				return nil, gomerr.NotFound("kms.CustomerMasterKey", masterKeyId).WithCause(awsErr).AddCulprit(gomerr.Configuration)
-			}
-		}
-
-		return nil, gomerr.Dependency(err, input)
-	}
-
-	if !*output.KeyMetadata.Enabled {
-		return nil, gomerr.BadValue("kms.CustomerMasterKey", *output.KeyMetadata.KeyState, constraint.Values("ENABLED")).AddNotes("masterKeyId: " + masterKeyId).AddCulprit(gomerr.Configuration)
-	}
-
-	return &KmsDataKey{
+func KmsEncrypter(kmsClient kmsiface.KMSAPI, masterKeyId string) Encrypter {
+	return kmsEncrypter{
 		kms:         kmsClient,
-		masterKeyId: output.KeyMetadata.KeyId,
-		nonceLength: nonceLength,
-	}, nil
+		masterKeyId: masterKeyId,
+	}
 }
 
-func (k *KmsDataKey) Encrypt(plaintext []byte, encryptionContext map[string]*string) (*string, gomerr.Gomerr) {
+func (k kmsEncrypter) Encrypt(plaintext []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
 	input := &kms.GenerateDataKeyInput{
-		KeyId:             k.masterKeyId,
+		KeyId:             &k.masterKeyId,
 		EncryptionContext: encryptionContext,
 		KeySpec:           aws.String(kms.DataKeySpecAes256),
 	}
 
-	// TODO: build (optional) support for caching
 	dataKey, err := k.kms.GenerateDataKey(input)
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
 			case kms.ErrCodeNotFoundException:
-				return nil, gomerr.NotFound("kms.CustomerMasterKey", *k.masterKeyId).WithCause(awsErr).AddCulprit(gomerr.Configuration)
+				return nil, gomerr.NotFound("kms.CustomerMasterKey", k.masterKeyId).WithCause(awsErr)
 			case kms.ErrCodeDisabledException:
 				fallthrough
 			case kms.ErrCodeInvalidStateException:
-				return nil, gomerr.Dependency(err, input).AddNotes("kms.GenerateDataKey()").AddCulprit(gomerr.Configuration)
+				return nil, gomerr.Dependency(err, input).AddNotes("kms.GenerateDataKey()")
 			case kms.ErrCodeInvalidGrantTokenException:
 				fallthrough
 			case kms.ErrCodeInvalidKeyUsageException:
-				return nil, gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
+				return nil, gomerr.Dependency(err, input)
 			}
 		}
 
 		return nil, gomerr.Dependency(err, input)
 	}
 
-	return k.encrypt(plaintext, dataKey)
-}
-
-func (k *KmsDataKey) encrypt(plaintext []byte, dataKey *kms.GenerateDataKeyOutput) (*string, gomerr.Gomerr) {
-	block, err := aes.NewCipher(dataKey.Plaintext)
-	if err != nil {
-		return nil, CipherFailure(err)
+	encrypted, nonce, ge := encrypt(dataKey.Plaintext, plaintext)
+	if ge != nil {
+		return nil, ge
 	}
 
-	nonce := make([]byte, k.nonceLength)
-	_, _ = io.ReadFull(rand.Reader, nonce)
+	return encode(encrypted, nonce, dataKey.CiphertextBlob), nil
+}
+
+func encrypt(key, plaintext []byte) (encrypted []byte, nonce []byte, ge gomerr.Gomerr) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, nil, CipherFailure(err)
+	}
 
 	aead, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, CipherFailure(err)
+		return nil, nil, CipherFailure(err)
 	}
 
-	return encode(aead.Seal(plaintext[:0], nonce, plaintext, nil), dataKey.CiphertextBlob, nonce), nil
+	nonce = make([]byte, aead.NonceSize())
+	_, _ = io.ReadFull(rand.Reader, nonce)
+
+	return aead.Seal(plaintext[:0], nonce, plaintext, nil), nonce, nil
 }
 
-const encryptedEncodingFormatVersion = 1
-const encryptedEncodingFormatVersionByte = byte(encryptedEncodingFormatVersion)
-
-func encode(ciphertext []byte, ciphertextBlob []byte, nonce []byte) *string {
+func encode(ciphertext, nonce, ciphertextBlob []byte) []byte {
 	writer := new(bytes.Buffer)
 
 	writer.WriteByte(encryptedEncodingFormatVersionByte)
@@ -119,13 +100,21 @@ func encode(ciphertext []byte, ciphertextBlob []byte, nonce []byte) *string {
 	_ = binary.Write(writer, binary.LittleEndian, uint16(len(nonce)))
 	writer.Write(nonce)
 
-	encoded := base64.RawURLEncoding.EncodeToString(writer.Bytes())
-
-	return &encoded
+	return writer.Bytes()
 }
 
-func (k *KmsDataKey) Decrypt(encoded *string, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
-	ciphertext, ciphertextBlob, nonce, ge := decode(encoded)
+type kmsDecrypter struct {
+	kms kmsiface.KMSAPI
+}
+
+func KmsDecrypter(kmsClient kmsiface.KMSAPI) Decrypter {
+	return kmsDecrypter{
+		kms: kmsClient,
+	}
+}
+
+func (k kmsDecrypter) Decrypt(encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
+	ciphertext, ciphertextBlob, nonce, ge := decode(encrypted)
 	if ge != nil {
 		return nil, ge
 	}
@@ -139,12 +128,10 @@ func (k *KmsDataKey) Decrypt(encoded *string, encryptionContext map[string]*stri
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
-			case kms.ErrCodeNotFoundException:
-				return nil, gomerr.NotFound("kms.CustomerMasterKey", *k.masterKeyId).WithCause(awsErr).AddCulprit(gomerr.Configuration)
 			case kms.ErrCodeDisabledException:
 				fallthrough
 			case kms.ErrCodeInvalidStateException:
-				return nil, gomerr.Dependency(err, input).AddNotes("kms.Decrypt()").AddCulprit(gomerr.Configuration)
+				return nil, gomerr.Dependency(err, input).AddNotes("kms.Decrypt()")
 			case kms.ErrCodeInvalidGrantTokenException:
 				fallthrough
 			case kms.ErrCodeInvalidCiphertextException:
@@ -157,16 +144,11 @@ func (k *KmsDataKey) Decrypt(encoded *string, encryptionContext map[string]*stri
 		return nil, gomerr.Dependency(err, input)
 	}
 
-	return k.decrypt(ciphertext, nonce, dataKey)
+	return decrypt(dataKey.Plaintext, ciphertext, nonce)
 }
 
-func decode(encoded *string) (ciphertext []byte, ciphertextBlob []byte, nonce []byte, ge gomerr.Gomerr) {
-	encodedBytes, err := base64.RawURLEncoding.DecodeString(*encoded)
-	if err != nil {
-		return nil, nil, nil, gomerr.BadValue("encoded", *encoded, constraint.Base64()).WithCause(err).AddCulprit(gomerr.Client)
-	}
-
-	reader := bytes.NewBuffer(encodedBytes)
+func decode(encoded []byte) (ciphertext []byte, ciphertextBlob []byte, nonce []byte, ge gomerr.Gomerr) {
+	reader := bytes.NewBuffer(encoded)
 
 	version, _ := reader.ReadByte()
 	if version != encryptedEncodingFormatVersionByte {
@@ -196,8 +178,8 @@ func decode(encoded *string) (ciphertext []byte, ciphertextBlob []byte, nonce []
 	return
 }
 
-func (k *KmsDataKey) decrypt(ciphertext []byte, nonce []byte, dataKey *kms.DecryptOutput) ([]byte, gomerr.Gomerr) {
-	block, err := aes.NewCipher(dataKey.Plaintext)
+func decrypt(key []byte, ciphertext []byte, nonce []byte) ([]byte, gomerr.Gomerr) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, CipherFailure(err)
 	}

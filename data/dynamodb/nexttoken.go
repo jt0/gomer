@@ -1,6 +1,7 @@
 package dynamodb
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -49,7 +50,13 @@ func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*
 		return nil, gomerr.Marshal(err, nextToken).AddCulprit(gomerr.Internal)
 	}
 
-	return t.cipher.Encrypt(toEncrypt, nil)
+	encrypted, ge := t.cipher.Encrypt(toEncrypt, nil)
+	if ge != nil {
+		return nil, ge
+	}
+
+	encoded := base64.RawURLEncoding.EncodeToString(encrypted)
+	return &encoded, nil
 }
 
 func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.AttributeValue, gomerr.Gomerr) {
@@ -57,7 +64,12 @@ func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.Attri
 		return nil, nil
 	}
 
-	toUnmarshal, ge := t.cipher.Decrypt(q.NextPageToken(), nil)
+	encrypted, err := base64.RawURLEncoding.DecodeString(*q.NextPageToken())
+	if err != nil {
+		return nil, gomerr.Unmarshal(err, *q.NextPageToken(), encrypted).AddCulprit(gomerr.Client)
+	}
+
+	toUnmarshal, ge := t.cipher.Decrypt(encrypted, nil)
 	if ge != nil {
 		return nil, ge
 	}
