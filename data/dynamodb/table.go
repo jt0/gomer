@@ -30,15 +30,17 @@ type table struct {
 	persistableTypes       map[string]*persistableType
 	valueSeparator         string
 	nextTokenizer          nextTokenizer
+	failDeleteIfNotPresent bool
 }
 
 type Configuration struct {
-	DynamoDb           dynamodbiface.DynamoDBAPI
-	MaxResultsDefault  int64
-	MaxResultsMax      int64
-	ConsistencyDefault ConsistencyType
-	ValueSeparator     string
-	NextTokenCipher    crypto.Cipher
+	DynamoDb               dynamodbiface.DynamoDBAPI
+	MaxResultsDefault      int64
+	MaxResultsMax          int64
+	ConsistencyDefault     ConsistencyType
+	ValueSeparator         string
+	NextTokenCipher        crypto.Cipher
+	FailDeleteIfNotPresent bool
 }
 
 var tables = make(map[string]data.Store)
@@ -68,6 +70,7 @@ func Store(tableName string, config *Configuration, persistables ...data.Persist
 		persistableTypes:       make(map[string]*persistableType),
 		valueSeparator:         config.ValueSeparator,
 		nextTokenizer:          nextTokenizer{cipher: config.NextTokenCipher},
+		failDeleteIfNotPresent: config.FailDeleteIfNotPresent,
 	}
 
 	if ge := table.prepare(persistables); ge != nil {
@@ -201,7 +204,11 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 				continue
 			}
 
-			pv.Field(i).Set(uField)
+			if pv.Field(i).Interface() == uv.Field(i).Interface() { // TODO: deal w/ pointers and structs
+				uField.Set(reflect.Zero(uField.Type()))
+			} else {
+				pv.Field(i).Set(uField)
+			}
 		}
 
 		for fieldName, additionalFields := range t.persistableTypes[p.PersistableTypeName()].uniqueFields {
@@ -303,11 +310,11 @@ func (t *table) Read(p data.Persistable) (ge gomerr.Gomerr) {
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
+			case dynamodb.ErrCodeResourceNotFoundException:
+				return gomerr.NotFound(p.PersistableTypeName(), p.Id()).WithCause(err)
 			case dynamodb.ErrCodeProvisionedThroughputExceededException:
 				fallthrough
 			case dynamodb.ErrCodeRequestLimitExceeded:
-				fallthrough
-			case dynamodb.ErrCodeResourceNotFoundException:
 				return gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
 			}
 		}
@@ -342,22 +349,27 @@ func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
 		return ge.AddNotes("cannot delete persistable without key value(s)")
 	}
 
-	input := &dynamodb.DeleteItemInput{
-		Key:       keys,
-		TableName: t.tableName,
+	var existenceCheckExpression *string
+	if t.failDeleteIfNotPresent {
+		expression := fmt.Sprintf("attribute_exists(%s)", t.pk.name)
+		if t.sk != nil {
+			expression += fmt.Sprintf(" AND attribute_exists(%s)", t.sk.name)
+		}
+		existenceCheckExpression = &expression
 	}
 
+	input := &dynamodb.DeleteItemInput{
+		Key:                 keys,
+		TableName:           t.tableName,
+		ConditionExpression: existenceCheckExpression,
+	}
 	_, err := t.ddb.DeleteItem(input)
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
-			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
-				fallthrough
-			case dynamodb.ErrCodeProvisionedThroughputExceededException:
-				fallthrough
-			case dynamodb.ErrCodeRequestLimitExceeded:
-				fallthrough
-			case dynamodb.ErrCodeResourceNotFoundException:
+			case dynamodb.ErrCodeResourceNotFoundException, dynamodb.ErrCodeConditionalCheckFailedException:
+				return gomerr.NotFound(p.PersistableTypeName(), p.Id()).WithCause(err)
+			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException, dynamodb.ErrCodeProvisionedThroughputExceededException, dynamodb.ErrCodeRequestLimitExceeded:
 				return gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
 			}
 		}

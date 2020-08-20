@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
-	"strings"
 
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 
@@ -202,21 +201,24 @@ func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
 
 func (k *keyAttribute) buildKeyValue(s data.Storable, valueSeparator string) string {
 	sv := reflect.ValueOf(s).Elem()
-
 	keyFields := k.keyFieldsByPersistable[s.PersistableTypeName()]
-	keyValues := make([]string, len(keyFields))
-	for i, fieldName := range keyFields {
-		if fieldName[:1] == "'" {
-			keyValues[i] = fieldName[1 : len(fieldName)-1]
+	keyValue := fieldValue(keyFields[0], sv) // will always have at least one keyField
+	for i := 1; i < len(keyFields); i++ {
+		keyValue += valueSeparator
+		keyValue += fieldValue(keyFields[i], sv)
+	}
+	return keyValue
+}
+
+func fieldValue(fieldName string, sv reflect.Value) string {
+	if fieldName[:1] == "'" {
+		return fieldName[1 : len(fieldName)-1]
+	} else {
+		v := sv.FieldByName(fieldName)
+		if v.IsValid() {
+			return fmt.Sprint(v.Interface())
 		} else {
-			v := sv.FieldByName(fieldName)
-			if v.IsValid() {
-				keyValues[i] = fmt.Sprint(v.Interface())
-			} else {
-				keyValues[i] = ""
-			}
+			return ""
 		}
 	}
-
-	return strings.Join(keyValues, valueSeparator)
 }

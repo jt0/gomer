@@ -109,7 +109,15 @@ func DoCreate(i Instance) (result interface{}, ge gomerr.Gomerr) {
 }
 
 func DoGet(i Instance) (interface{}, gomerr.Gomerr) {
+	if ge := i.PreGet(); ge != nil {
+		return nil, ge
+	}
+
 	if ge := i.metadata().dataStore.Read(i); ge != nil {
+		return nil, ge
+	}
+
+	if ge := i.PostGet(); ge != nil {
 		return nil, ge
 	}
 

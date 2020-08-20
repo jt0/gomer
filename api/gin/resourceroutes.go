@@ -127,8 +127,10 @@ func getBytes(c *gin.Context, externalToFieldName func(string) (string, bool), r
 	}
 
 	for key, value := range queryParams {
-		if fieldName, ok := externalToFieldName(key); ok && len(value) > 0 {
-			jsonMap[fieldName] = value[0]
+		// TODO: decide if body values should be overwritten by query params
+		// Test if the query param will apply to some field in the targeted type and only apply if yes
+		if _, ok := externalToFieldName(key); ok && len(value) > 0 {
+			jsonMap[key] = value[0]
 		} // TODO: arrays or key-only query params
 	}
 
