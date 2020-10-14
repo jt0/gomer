@@ -11,10 +11,11 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbiface"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/crypto"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
+	. "github.com/jt0/gomer/gomerr/because"
+	"github.com/jt0/gomer/limit"
 	"github.com/jt0/gomer/util"
 )
 
@@ -51,6 +52,8 @@ const (
 	Indifferent ConsistencyType = iota
 	Required
 	Preferred
+
+	maxItemSize = limit.DataSize(400 * 1024)
 )
 
 type ConsistencyTyper interface {
@@ -93,11 +96,11 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
 			case dynamodb.ErrCodeResourceNotFoundException:
-				return gomerr.NotFound("ddb.Table", *t.tableName).WithCause(awsErr).AddCulprit(gomerr.Configuration)
+				return gomerr.NotFound("ddb.Table", *t.tableName).Wrap(awsErr)
 			}
 		}
 
-		return gomerr.Dependency(err, input)
+		return gomerr.Dependency("DynamoDB", input).Wrap(err)
 	}
 
 	attributeTypes := make(map[string]string)
@@ -141,7 +144,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 
 	for _, persistable := range persistables {
 		pType := reflect.TypeOf(persistable).Elem()
-		pName := strings.ToLower(util.UnqualifiedTypeName(pType))
+		pName := util.UnqualifiedTypeName(pType)
 
 		pt, ge := newPersistableType(pName, pType, t.indexes)
 		if ge != nil {
@@ -154,7 +157,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 				if keyParts := keyAttribute.keyFieldsByPersistable[pName]; keyParts != nil {
 					for i, keyPart := range keyParts {
 						if keyPart == "" {
-							return gomerr.BadValue(keyAttribute.name+"["+pName+"]["+strconv.Itoa(i)+"]", keyParts, constraint.NonZero())
+							return gomerr.Missing(keyAttribute.name+"["+pName+"]["+strconv.Itoa(i)+"]", keyParts)
 						}
 					}
 				} else {
@@ -169,10 +172,15 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 	return nil
 }
 
+func (t *table) Name() string {
+	return *t.tableName
+}
+
 func (t *table) Create(p data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = data.CreateFailed(ge, p)
+			// XXX: is this needed or should this just be added to the attributes
+			ge = gomerr.Data("Create", p).Wrap(ge)
 		}
 	}()
 
@@ -186,7 +194,7 @@ var zeroValue = reflect.Value{}
 func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = data.UpdateFailed(ge, p, update)
+			ge = gomerr.Data("Update", p).Wrap(ge)
 		}
 	}()
 
@@ -224,10 +232,10 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 	return
 }
 
-func (t *table) put(p data.Persistable, uniqueFields map[string][]string, ensureUniqueId bool) gomerr.Gomerr {
+func (t *table) put(p data.Persistable, fieldsToCheckForUniqueness map[string][]string, ensureUniqueId bool) gomerr.Gomerr {
 	pt := t.persistableTypes[p.PersistableTypeName()]
 
-	for fieldName, additionalFields := range uniqueFields {
+	for fieldName, additionalFields := range fieldsToCheckForUniqueness {
 		if ge := t.constraintsCheck(p, fieldName, additionalFields); ge != nil {
 			return ge
 		}
@@ -235,7 +243,7 @@ func (t *table) put(p data.Persistable, uniqueFields map[string][]string, ensure
 
 	av, err := dynamodbattribute.MarshalMap(p)
 	if err != nil {
-		return gomerr.Marshal(err, p)
+		return gomerr.Marshal(p.PersistableTypeName(), p).Wrap(err)
 	}
 
 	pt.convertFieldNamesToDbNames(&av)
@@ -268,20 +276,18 @@ func (t *table) put(p data.Persistable, uniqueFields map[string][]string, ensure
 			switch awsErr.Code() {
 			case dynamodb.ErrCodeConditionalCheckFailedException:
 				if ensureUniqueId {
-					return gomerr.InternalServer(err).AddNotes("unique id check failed. retry with a new id").AddCulprit(gomerr.Internal)
+					return gomerr.Internal("Unique id check failed, retry with a new id value").Wrap(err)
+				} else {
+					return gomerr.Dependency("DynamoDB", input).Wrap(err)
 				}
-			case dynamodb.ErrCodeRequestLimitExceeded:
-				fallthrough
+			case dynamodb.ErrCodeRequestLimitExceeded, dynamodb.ErrCodeProvisionedThroughputExceededException:
+				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(awsErr)
 			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
-				fallthrough
-			case dynamodb.ErrCodeProvisionedThroughputExceededException:
-				fallthrough
-			case dynamodb.ErrCodeResourceNotFoundException:
-				return gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
+				return limit.Exceeded("DynamoDB", "item.size()", maxItemSize, limit.NotApplicable, limit.Unknown)
 			}
 		}
 
-		return gomerr.Dependency(err, input)
+		return gomerr.Dependency("DynamoDB", input).Wrap(err)
 	}
 
 	return nil
@@ -290,14 +296,14 @@ func (t *table) put(p data.Persistable, uniqueFields map[string][]string, ensure
 func (t *table) Read(p data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = data.ReadFailed(ge, p)
+			ge = gomerr.Data("Read", p).Wrap(ge)
 		}
 	}()
 
 	keys := make(map[string]*dynamodb.AttributeValue, 2)
 	ge = t.populateKeyValues(keys, p, t.valueSeparator, true)
 	if ge != nil {
-		return ge.AddNotes("cannot read persistable without key value(s)")
+		return ge
 	}
 
 	input := &dynamodb.GetItemInput{
@@ -305,30 +311,27 @@ func (t *table) Read(p data.Persistable) (ge gomerr.Gomerr) {
 		ConsistentRead: consistentRead(t.consistencyType(p), true),
 		TableName:      t.tableName,
 	}
-
 	output, err := t.ddb.GetItem(input)
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
 			case dynamodb.ErrCodeResourceNotFoundException:
-				return gomerr.NotFound(p.PersistableTypeName(), p.Id()).WithCause(err)
-			case dynamodb.ErrCodeProvisionedThroughputExceededException:
-				fallthrough
-			case dynamodb.ErrCodeRequestLimitExceeded:
-				return gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
+				return gomerr.NotFound(p.PersistableTypeName(), p.Id()).Wrap(err)
+			case dynamodb.ErrCodeRequestLimitExceeded, dynamodb.ErrCodeProvisionedThroughputExceededException:
+				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(awsErr)
 			}
 		}
 
-		return gomerr.Dependency(err, input)
+		return gomerr.Dependency("DynamoDB", input).Wrap(err)
 	}
 
 	if output.Item == nil {
-		return gomerr.NotFound(p.PersistableTypeName(), p.Id()).AddCulprit(gomerr.Client)
+		return gomerr.NotFound(p.PersistableTypeName(), p.Id())
 	}
 
 	err = dynamodbattribute.UnmarshalMap(output.Item, p)
 	if err != nil {
-		return gomerr.Unmarshal(err, output.Item, p).AddCulprit(gomerr.Internal)
+		return gomerr.Unmarshal(p.PersistableTypeName(), output.Item, p).Wrap(err)
 	}
 
 	return nil
@@ -337,7 +340,7 @@ func (t *table) Read(p data.Persistable) (ge gomerr.Gomerr) {
 func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = data.DeleteFailed(ge, p)
+			ge = gomerr.Data("Delete", p).Wrap(ge)
 		}
 	}()
 
@@ -346,7 +349,7 @@ func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
 	keys := make(map[string]*dynamodb.AttributeValue, 2)
 	ge = t.populateKeyValues(keys, p, t.valueSeparator, true)
 	if ge != nil {
-		return ge.AddNotes("cannot delete persistable without key value(s)")
+		return ge
 	}
 
 	var existenceCheckExpression *string
@@ -367,30 +370,30 @@ func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
-			case dynamodb.ErrCodeResourceNotFoundException, dynamodb.ErrCodeConditionalCheckFailedException:
-				return gomerr.NotFound(p.PersistableTypeName(), p.Id()).WithCause(err)
-			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException, dynamodb.ErrCodeProvisionedThroughputExceededException, dynamodb.ErrCodeRequestLimitExceeded:
-				return gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
+			case dynamodb.ErrCodeResourceNotFoundException:
+				return gomerr.NotFound(p.PersistableTypeName(), p.Id()).Wrap(err)
+			case dynamodb.ErrCodeRequestLimitExceeded, dynamodb.ErrCodeProvisionedThroughputExceededException:
+				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(awsErr)
 			}
 		}
 
-		return gomerr.Dependency(err, input)
+		return gomerr.Dependency("DynamoDB", input).Wrap(err)
 	}
 
 	return nil
 }
 
-func (t *table) Query(q data.Queryable, arrayOfPersistable interface{}) (nextToken *string, ge gomerr.Gomerr) {
+func (t *table) Query(q data.Queryable, outSlice interface{}) (nextToken *string, ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = data.QueryFailed(ge, q)
+			ge = gomerr.Data("Query", q).Wrap(ge)
 		}
 	}()
 
 	var input *dynamodb.QueryInput
 	input, ge = t.buildQueryInput(q)
 	if ge != nil {
-		return nil, ge.AddCulprit(gomerr.Internal)
+		return nil, ge
 	}
 
 	var output *dynamodb.QueryOutput
@@ -401,12 +404,12 @@ func (t *table) Query(q data.Queryable, arrayOfPersistable interface{}) (nextTok
 
 	nextToken, ge = t.nextTokenizer.tokenize(q, output.LastEvaluatedKey)
 	if ge != nil {
-		return nil, ge.AddCulprit(gomerr.Internal)
+		return nil, gomerr.Internal("Unable to generate nextToken").Wrap(ge)
 	}
 
-	err := dynamodbattribute.UnmarshalListOfMaps(output.Items, arrayOfPersistable)
+	err := dynamodbattribute.UnmarshalListOfMaps(output.Items, outSlice)
 	if err != nil {
-		return nil, gomerr.Unmarshal(err, output.Items, arrayOfPersistable).AddCulprit(gomerr.Internal)
+		return nil, gomerr.Unmarshal("[]"+q.PersistableTypeName(), output.Items, outSlice).Wrap(err)
 	}
 
 	return nextToken, nil
@@ -426,49 +429,51 @@ func (t *table) constraintsCheck(p data.Persistable, fieldName string, additiona
 		qv.FieldByName(additionalField).Set(pv.FieldByName(additionalField))
 	}
 
-	qi, ge := t.buildQueryInput(q)
+	input, ge := t.buildQueryInput(q)
 	if ge != nil {
-		return ge.AddCulprit(gomerr.Internal)
+		return gomerr.Internal("Unable to build constraint query").Wrap(ge)
 	}
 
 	for queryLimit := int64(1); queryLimit <= 300; queryLimit += 100 { // Bump limit up each time
-		qi.Limit = &queryLimit
+		input.Limit = &queryLimit
 
-		qo, ge := t.runQuery(qi)
+		output, ge := t.runQuery(input)
 		if ge != nil {
 			return ge
 		}
 
-		if len(qo.Items) > 0 {
-			var by interface{}
+		if len(output.Items) > 0 {
+			var existingItem interface{}
 
-			arrayOfPersistable := util.EmptySliceForType(reflect.TypeOf(p))
-			err := dynamodbattribute.UnmarshalListOfMaps(qo.Items, arrayOfPersistable)
+			outSlice := util.EmptySliceForType(reflect.TypeOf(p))
+			err := dynamodbattribute.UnmarshalListOfMaps(output.Items, outSlice)
 			if err != nil {
-				by = qo.Items[0]
+				existingItem = output.Items[0]
 			} else {
-				slice := reflect.ValueOf(arrayOfPersistable).Elem()
+				slice := reflect.ValueOf(outSlice).Elem()
 				pOther, ok := slice.Index(0).Interface().(data.Persistable)
 				if !ok {
-					by = qo.Items[0]
+					existingItem = output.Items[0]
 				} else {
-					by = pOther.Id()
+					existingItem = pOther.Id()
 				}
 			}
 
-			return data.ConstraintViolation(data.Unique, fieldName, by).AddCulprit(gomerr.Client)
+			return gomerr.ConflictBetween(p, existingItem).Because(NotUnique).On(fieldName)
 		}
 
-		if qo.LastEvaluatedKey == nil {
+		if output.LastEvaluatedKey == nil {
 			return nil
 		}
 
-		qi.ExclusiveStartKey = qo.LastEvaluatedKey
+		input.ExclusiveStartKey = output.LastEvaluatedKey
 	}
 
-	return data.QueryFailed(nil, q).AddNotes("unable to verify constraint", "too many paginated calls to DDB").AddCulprit(gomerr.Configuration)
+	return gomerr.Internal("Too many db checks to verify field constraint").AddAttribute("Field", fieldName)
 }
 
+// buildQueryInput Builds the DynamoDB QueryInput types based on the provided queryable. See indexFor and
+// nextTokenizer.untokenize for possible error types.
 func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, gomerr.Gomerr) {
 	index, consistent, ge := indexFor(t, q)
 	if ge != nil {
@@ -479,21 +484,18 @@ func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, gomerr.
 	expressionAttributeValues := make(map[string]*dynamodb.AttributeValue, 2)
 
 	keyConditionExpresion := safeName(index.pk.name, expressionAttributeNames) + "=:pk"
-	expressionAttributeValues[":pk"], ge = index.pk.attributeValue(q, t.valueSeparator, true)
-	if ge != nil {
-		return nil, ge.AddNotes("cannot perform query without partition key")
-	}
+	expressionAttributeValues[":pk"] = index.pk.attributeValue(q, t.valueSeparator) // Non-null because indexFor succeeded
 
 	if index.sk != nil {
-		if av, _ := index.sk.attributeValue(q, t.valueSeparator, false); av != nil {
-			if av.S != nil && strings.HasSuffix(*av.S, ":") {
-				trimmed := strings.Trim(*av.S, ":")
-				av.S = &trimmed
+		if eav := index.sk.attributeValue(q, t.valueSeparator); eav != nil {
+			if eav.S != nil && strings.HasSuffix(*eav.S, ":") {
+				trimmed := strings.Trim(*eav.S, ":")
+				eav.S = &trimmed
 				keyConditionExpresion += " AND begins_with(" + safeName(index.sk.name, expressionAttributeNames) + ",:sk)"
 			} else {
 				keyConditionExpresion += " AND " + safeName(index.sk.name, expressionAttributeNames) + "=:sk"
 			}
-			expressionAttributeValues[":sk"] = av
+			expressionAttributeValues[":sk"] = eav
 		}
 	}
 
@@ -540,20 +542,14 @@ func (t *table) runQuery(input *dynamodb.QueryInput) (*dynamodb.QueryOutput, gom
 		if awsErr, ok := err.(awserr.Error); ok {
 			// TODO: improve exceptions
 			switch awsErr.Code() {
-			case dynamodb.ErrCodeConditionalCheckFailedException:
-				fallthrough
-			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
-				fallthrough
-			case dynamodb.ErrCodeProvisionedThroughputExceededException:
-				fallthrough
-			case dynamodb.ErrCodeRequestLimitExceeded:
-				fallthrough
+			case dynamodb.ErrCodeRequestLimitExceeded, dynamodb.ErrCodeProvisionedThroughputExceededException:
+				return nil, limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(awsErr)
 			case dynamodb.ErrCodeResourceNotFoundException:
-				return nil, gomerr.Dependency(err, input).AddCulprit(gomerr.Configuration)
+				return nil, gomerr.Missing("Table (or table index)", input).Wrap(awsErr)
 			}
 		}
 
-		return nil, gomerr.Dependency(err, input)
+		return nil, gomerr.Dependency("DynamoDB", input).Wrap(err)
 	}
 
 	return output, nil
@@ -567,9 +563,9 @@ func (t *table) consistencyType(s data.Storable) ConsistencyType {
 	}
 }
 
-func (t *table) limit(maximumPageSize *int) *int64 {
-	if maximumPageSize != nil && *maximumPageSize > 0 {
-		mps64 := int64(*maximumPageSize)
+func (t *table) limit(maximumPageSize int) *int64 {
+	if maximumPageSize > 0 && t.maxLimit != nil {
+		mps64 := int64(maximumPageSize)
 		if mps64 <= *t.maxLimit {
 			return &mps64
 		} else {

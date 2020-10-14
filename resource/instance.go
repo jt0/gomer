@@ -26,9 +26,9 @@ type Instance interface {
 }
 
 func newInstance(resourceType string, subject auth.Subject) (Instance, gomerr.Gomerr) {
-	metadata, ok := resourceMetadata[strings.ToLower(resourceType)]
+	metadata, ok := lowerCaseResourceTypeNameToMetadata[strings.ToLower(resourceType)]
 	if !ok {
-		return nil, gomerr.NotFound("resource type", resourceType).AddCulprit(gomerr.Client)
+		return nil, unknownResourceType(resourceType)
 	}
 
 	instance := reflect.New(metadata.instanceType.Elem()).Interface().(Instance)
@@ -57,7 +57,7 @@ func UnmarshalInstance(resourceType string, subject auth.Subject, bytes []byte) 
 
 	if len(bytes) != 0 {
 		if err := json.Unmarshal(bytes, &instance); err != nil {
-			return nil, gomerr.Unmarshal(err, bytes, instance).AddCulprit(gomerr.Client)
+			return nil, gomerr.Unmarshal("Instance", bytes, instance).Wrap(err)
 		}
 	}
 
@@ -67,6 +67,11 @@ func UnmarshalInstance(resourceType string, subject auth.Subject, bytes []byte) 
 }
 
 func SaveInstance(i Instance) gomerr.Gomerr {
+	// Consider alt form w/ Updatable.Update() that separates resource from data
+	//if ge := u.Update(u); ge != nil {
+	//	return ge
+	//}
+
 	if ge := i.metadata().dataStore.Update(i, nil); ge != nil {
 		return ge
 	}
@@ -76,11 +81,11 @@ func SaveInstance(i Instance) gomerr.Gomerr {
 
 func DoCreate(i Instance) (result interface{}, ge gomerr.Gomerr) {
 	if ge = i.metadata().fields.removeNonWritable(i, createAccess); ge != nil {
-		return nil, ge.AddNotes("unable to clean instance before processing").AddCulprit(gomerr.Configuration)
+		return nil, ge
 	}
 
 	if ge = i.metadata().fields.applyDefaults(i); ge != nil {
-		return nil, ge.AddNotes("could not apply defaults during create")
+		return nil, ge
 	}
 
 	if ge = i.PreCreate(); ge != nil {
@@ -91,10 +96,10 @@ func DoCreate(i Instance) (result interface{}, ge gomerr.Gomerr) {
 	//	return nil, gomerr.ValidationFailure(err)
 	//}
 
-	if limiter, lge := limit(checkAndIncrement, i); lge != nil {
+	if limiter, lge := applyLimitAction(checkAndIncrement, i); lge != nil {
 		return nil, lge
 	} else if limiter != nil {
-		defer saveLimiter(limiter, ge)
+		defer saveLimiterIfDirty(limiter, ge)
 	}
 
 	if ge = i.metadata().dataStore.Create(i); ge != nil {
@@ -128,11 +133,11 @@ func DoUpdate(updateInstance Instance) (interface{}, gomerr.Gomerr) {
 	// copy update to a new instance and read data into it
 	i := shallowCopy(updateInstance)
 	if ge := i.metadata().dataStore.Read(i); ge != nil {
-		return nil, ge.AddNotes("unable to retrieve persisted instance for update")
+		return nil, ge
 	}
 
 	if ge := i.metadata().fields.removeNonWritable(updateInstance, updateAccess); ge != nil {
-		return nil, ge.AddNotes("unable to clean updateInstance before processing").AddCulprit(gomerr.Configuration)
+		return nil, ge
 	}
 
 	if ge := i.PreUpdate(updateInstance); ge != nil {
@@ -154,14 +159,13 @@ func shallowCopy(update Instance) Instance {
 	updateCopy := reflect.ValueOf(update).Elem().Interface()
 	persistedPtr := reflect.New(reflect.TypeOf(updateCopy))
 	persistedPtr.Elem().Set(reflect.ValueOf(updateCopy))
-	persisted := persistedPtr.Interface().(Instance)
 
-	return persisted
+	return persistedPtr.Interface().(Instance)
 }
 
 func scopedResult(i Instance) (interface{}, gomerr.Gomerr) {
 	if result := i.metadata().fields.removeNonReadable(i); result == nil || len(result) == 0 {
-		return nil, gomerr.NotFound(i.PersistableTypeName(), i.Id()).AddCulprit(gomerr.Client)
+		return nil, gomerr.NotFound(i.metadata().instanceName, i.Id())
 	} else {
 		return result, nil
 	}
@@ -172,10 +176,10 @@ func DoDelete(i Instance) (result interface{}, ge gomerr.Gomerr) {
 		return nil, ge
 	}
 
-	if limiter, lge := limit(decrement, i); lge != nil {
+	if limiter, lge := applyLimitAction(decrement, i); lge != nil {
 		return nil, lge
 	} else if limiter != nil {
-		defer saveLimiter(limiter, ge)
+		defer saveLimiterIfDirty(limiter, ge)
 	}
 
 	if ge = i.metadata().dataStore.Delete(i); ge != nil {
@@ -196,22 +200,22 @@ type BaseInstance struct {
 }
 
 func (b *BaseInstance) Id() string {
-	panic(gomerr.Unsupported("shadow Id() from the embedding struct"))
+	panic(gomerr.Configuration("Id() function must be shadowed in Instance types"))
 }
 
 func (b *BaseInstance) PersistableTypeName() string {
-	return b.md.instanceName
+	return b.metadata().InstanceName()
 }
 
 func (b *BaseInstance) NewQueryable() data.Queryable {
-	cqt := b.md.collectionQueryType
+	cqt := b.metadata().collectionQueryType
 	if cqt == nil {
 		return nil
 	}
 
 	collectionQuery := reflect.New(cqt.Elem()).Interface().(CollectionQuery)
-	collectionQuery.setMetadata(b.md)
-	collectionQuery.setSubject(b.sub)
+	collectionQuery.setMetadata(b.metadata())
+	collectionQuery.setSubject(b.Subject())
 	collectionQuery.OnSubject()
 
 	return collectionQuery

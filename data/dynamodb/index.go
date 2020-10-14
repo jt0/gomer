@@ -7,9 +7,9 @@ import (
 
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/gomerr/constraint"
 )
 
 type index struct {
@@ -39,9 +39,9 @@ func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement,
 			keyFieldsByPersistable: make(map[string][]string),
 		}
 
-		key.attributeType, ge = safeAttributeType(attributeTypes[*keySchemaElement.AttributeName])
+		key.attributeType, ge = safeAttributeType(attributeTypes[key.name], key.name)
 		if ge != nil {
-			return
+			return ge
 		}
 
 		switch *keySchemaElement.KeyType {
@@ -55,6 +55,26 @@ func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement,
 	return nil
 }
 
+var safeTypeConstraint = constraint.OneOf(dynamodb.ScalarAttributeTypeS, dynamodb.ScalarAttributeTypeN)
+
+func safeAttributeType(attributeType, name string) (string, gomerr.Gomerr) {
+	ge := gomerr.Test(name, attributeType, safeTypeConstraint)
+	if ge != nil {
+		return "", ge
+	}
+
+	return attributeType, nil
+}
+
+// indexFor attempts to find the best index match for the provided queryable. The definition of "best" is the index
+// that has the greatest number of matching attributes present in the query.
+//
+// If the data.Queryable implements ConsistencyTyper and it states that the query must be strongly consistent, GSIs
+// will be excluded from consideration. On success, the function returns the matching index (if one), and a boolean
+// to include as the 'consistent' value for the ddb query. Possible errors:
+//
+//  gomerr.Missing:
+//      if there is no matching index for the query
 func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 	var consistencyType ConsistencyType
 	if c, ok := q.(ConsistencyTyper); ok {
@@ -78,7 +98,7 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 
 	switch len(candidates) {
 	case 0:
-		return nil, nil, data.IndexNotFound(*t.tableName, q).AddCulprit(gomerr.Configuration)
+		return nil, nil, gomerr.Missing("Index", t).Given(q)
 	case 1:
 		return candidates[0].index, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
 	default:
@@ -87,7 +107,7 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 			c2 := candidates[j]
 
 			if consistencyType == Preferred && c1.index.canReadConsistently != c2.index.canReadConsistently {
-				return c1.index.canReadConsistently
+				return c1.index.canReadConsistently // sorts based on which of c1 or c2 can be read consistently
 			}
 
 			// 4-2 vs 3-1  a_b_c_d  vs a_b_e_d
@@ -146,18 +166,28 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 	return candidate
 }
 
-func (i *index) populateKeyValues(av map[string]*dynamodb.AttributeValue, p data.Persistable, valueSeparator string, mustBeSet bool) (ge gomerr.Gomerr) {
-	if _, present := av[i.pk.name]; !present {
-		av[i.pk.name], ge = i.pk.attributeValue(p, valueSeparator, mustBeSet)
-	}
+func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p data.Persistable, valueSeparator string, mustBeSet bool) gomerr.Gomerr {
+	var av *dynamodb.AttributeValue
 
-	if ge == nil && i.sk != nil {
-		if _, present := av[i.sk.name]; !present {
-			av[i.sk.name], ge = i.sk.attributeValue(p, valueSeparator, mustBeSet)
+	if _, present := avm[i.pk.name]; !present {
+		if av = i.pk.attributeValue(p, valueSeparator); av != nil {
+			avm[i.pk.name] = av
+		} else if mustBeSet {
+			return gomerr.Missing("PK", i.pk.keyFieldsByPersistable[p.PersistableTypeName()]).Given(p)
 		}
 	}
 
-	return
+	if i.sk != nil {
+		if _, present := avm[i.sk.name]; !present {
+			if av = i.sk.attributeValue(p, valueSeparator); av != nil {
+				avm[i.sk.name] = av
+			} else if mustBeSet {
+				return gomerr.Missing("SK", i.sk.keyFieldsByPersistable[p.PersistableTypeName()]).Given(p)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (i *index) keyAttributes() []*keyAttribute {
@@ -168,35 +198,24 @@ func (i *index) keyAttributes() []*keyAttribute {
 	}
 }
 
-func (k *keyAttribute) attributeValue(s data.Storable, valueSeparator string, mustBeSet bool) (*dynamodb.AttributeValue, gomerr.Gomerr) {
+func (k *keyAttribute) attributeValue(s data.Storable, valueSeparator string) *dynamodb.AttributeValue {
 	value := k.buildKeyValue(s, valueSeparator)
 	if value == "" {
-		if mustBeSet {
-			return nil, gomerr.BadValue("storable.keyAttribute", s, constraint.NonZero())
-		}
-
-		return nil, nil
+		return nil
 	}
 
 	switch k.attributeType {
 	case dynamodb.ScalarAttributeTypeS:
 		s := fmt.Sprint(value) // TODO:p1 replace with a better conversion mechanism (e.g. handle times)
-		return &dynamodb.AttributeValue{S: &s}, nil
+		return &dynamodb.AttributeValue{S: &s}
 	case dynamodb.ScalarAttributeTypeN:
 		n := fmt.Sprint(value)
-		return &dynamodb.AttributeValue{N: &n}, nil
+		return &dynamodb.AttributeValue{N: &n}
 	default:
-		// Can only be one of the two explicit types - protected by usage of safeAttributeType() function
-		return nil, gomerr.Unsupported("unexpected key attributeType: " + k.attributeType).AddCulprit(gomerr.Internal)
-	}
-}
-
-func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
-	if attributeType == dynamodb.ScalarAttributeTypeS || attributeType == dynamodb.ScalarAttributeTypeN {
-		return attributeType, nil
+		// Log that safeAttributeType() missed something. received type: k.AttributeType
 	}
 
-	return "", gomerr.BadValue("attributeType", attributeType, constraint.Values("S", "N")).AddNotes("Only supporting string and number attribute types").AddCulprit(gomerr.Configuration)
+	return nil
 }
 
 func (k *keyAttribute) buildKeyValue(s data.Storable, valueSeparator string) string {

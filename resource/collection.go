@@ -27,9 +27,9 @@ type Collection interface {
 }
 
 func newCollectionQuery(resourceType string, subject auth.Subject) (CollectionQuery, gomerr.Gomerr) {
-	metadata, ok := resourceMetadata[strings.ToLower(resourceType)]
+	metadata, ok := lowerCaseResourceTypeNameToMetadata[strings.ToLower(resourceType)]
 	if !ok {
-		return nil, gomerr.NotFound("resource type", resourceType).AddCulprit(gomerr.Client)
+		return nil, unknownResourceType(resourceType)
 	}
 
 	collectionQuery := reflect.New(metadata.collectionQueryType.Elem()).Interface().(CollectionQuery)
@@ -58,7 +58,7 @@ func UnmarshalCollectionQuery(resourceType string, subject auth.Subject, bytes [
 
 	if len(bytes) != 0 {
 		if err := json.Unmarshal(bytes, collectionQuery); err != nil {
-			return nil, gomerr.Unmarshal(err, bytes, collectionQuery)
+			return nil, gomerr.Unmarshal("CollectionQuery", bytes, collectionQuery).Wrap(err)
 		}
 	}
 
@@ -124,16 +124,16 @@ func (b *BaseCollectionQuery) PersistableTypeName() string {
 	return b.md.instanceName
 }
 
-func (b *BaseCollectionQuery) NextPageToken() *string {
-	return nil
+func (b *BaseCollectionQuery) NextPageToken() string {
+	return ""
 }
 
-func (b *BaseCollectionQuery) PrevPageToken() *string {
-	return nil
+func (b *BaseCollectionQuery) PrevPageToken() string {
+	return ""
 }
 
-func (b *BaseCollectionQuery) MaximumPageSize() *int {
-	return nil
+func (b *BaseCollectionQuery) MaximumPageSize() int {
+	return 0
 }
 
 func (b *BaseCollectionQuery) ResponseFields() []string {

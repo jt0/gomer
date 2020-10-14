@@ -13,8 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/kms"
 	"github.com/aws/aws-sdk-go/service/kms/kmsiface"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/gomerr/constraint"
 )
 
 const (
@@ -22,19 +22,24 @@ const (
 	encryptedEncodingFormatVersionByte = byte(encryptedEncodingFormatVersion)
 )
 
-type kmsEncrypter struct {
+type kmsDataKeyEncrypter struct {
 	kms         kmsiface.KMSAPI
 	masterKeyId string
 }
 
-func KmsEncrypter(kmsClient kmsiface.KMSAPI, masterKeyId string) Encrypter {
-	return kmsEncrypter{
+var keyStateConstraint = constraint.Equals("Enabled")
+var keyUsageConstraint = constraint.Equals("ENCRYPT_DECRYPT")
+
+// TODO: add support for asymmetric keys
+func KmsDataKeyEncrypter(kmsClient kmsiface.KMSAPI, masterKeyId string) Encrypter {
+	return kmsDataKeyEncrypter{
 		kms:         kmsClient,
 		masterKeyId: masterKeyId,
 	}
 }
 
-func (k kmsEncrypter) Encrypt(plaintext []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
+// TODO: add support for grant tokens?
+func (k kmsDataKeyEncrypter) Encrypt(plaintext []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
 	input := &kms.GenerateDataKeyInput{
 		KeyId:             &k.masterKeyId,
 		EncryptionContext: encryptionContext,
@@ -46,19 +51,15 @@ func (k kmsEncrypter) Encrypt(plaintext []byte, encryptionContext map[string]*st
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
 			case kms.ErrCodeNotFoundException:
-				return nil, gomerr.NotFound("kms.CustomerMasterKey", k.masterKeyId).WithCause(awsErr)
-			case kms.ErrCodeDisabledException:
-				fallthrough
-			case kms.ErrCodeInvalidStateException:
-				return nil, gomerr.Dependency(err, input).AddNotes("kms.GenerateDataKey()")
-			case kms.ErrCodeInvalidGrantTokenException:
-				fallthrough
+				return nil, gomerr.NotFound("kms.CustomerMasterKey", k.masterKeyId).Wrap(err)
+			case kms.ErrCodeDisabledException, kms.ErrCodeInvalidStateException:
+				return nil, gomerr.NotSatisfied("kms.CustomerMasterKey.KeyState", input.KeyId, keyStateConstraint).Wrap(err)
 			case kms.ErrCodeInvalidKeyUsageException:
-				return nil, gomerr.Dependency(err, input)
+				return nil, gomerr.NotSatisfied("kms.CustomerMasterKey.KeyUsage", input.KeyId, keyUsageConstraint).Wrap(err)
 			}
 		}
 
-		return nil, gomerr.Dependency(err, input)
+		return nil, gomerr.Dependency("KMS", input).Wrap(err)
 	}
 
 	encrypted, nonce, ge := encrypt(dataKey.Plaintext, plaintext)
@@ -72,12 +73,12 @@ func (k kmsEncrypter) Encrypt(plaintext []byte, encryptionContext map[string]*st
 func encrypt(key, plaintext []byte) (encrypted []byte, nonce []byte, ge gomerr.Gomerr) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, nil, CipherFailure(err)
+		return nil, nil, gomerr.Internal("aes.NewCipher").Wrap(err)
 	}
 
 	aead, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, nil, CipherFailure(err)
+		return nil, nil, gomerr.Internal("cipher.NewGCM").Wrap(err)
 	}
 
 	nonce = make([]byte, aead.NonceSize())
@@ -103,18 +104,31 @@ func encode(ciphertext, nonce, ciphertextBlob []byte) []byte {
 	return writer.Bytes()
 }
 
-type kmsDecrypter struct {
+type kmsDataKeyDecrypter struct {
 	kms kmsiface.KMSAPI
 }
 
-func KmsDecrypter(kmsClient kmsiface.KMSAPI) Decrypter {
-	return kmsDecrypter{
+func KmsDataKeyDecrypter(kmsClient kmsiface.KMSAPI) Decrypter {
+	return kmsDataKeyDecrypter{
 		kms: kmsClient,
 	}
 }
 
-func (k kmsDecrypter) Decrypt(encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
-	ciphertext, ciphertextBlob, nonce, ge := decode(encrypted)
+// Decrypt returns the decrypted form of the encrypted content given the optional encryptionContext. If
+//
+//  gomerr.Unprocessable:
+//      The encoding format is not recognized
+//  gomerr.Unmarshal:
+//      There is a problem reading the the encoded data
+//  gomerr.BadValue:
+//      Either the encryption context did not match the encrypted data, or the encrypted data is corrupted
+//  gomerr.NotSatisfied:
+//      Either the required key's state or usage has an unexpected value
+//  gomerr.Dependency:
+//      An unexpected error occurred calling KMS
+// TODO: add support for grant tokens?
+func (k kmsDataKeyDecrypter) Decrypt(encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
+	ciphertext, ciphertextBlob, nonce, ge := k.decode(encrypted)
 	if ge != nil {
 		return nil, ge
 	}
@@ -128,31 +142,36 @@ func (k kmsDecrypter) Decrypt(encrypted []byte, encryptionContext map[string]*st
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
-			case kms.ErrCodeDisabledException:
-				fallthrough
-			case kms.ErrCodeInvalidStateException:
-				return nil, gomerr.Dependency(err, input).AddNotes("kms.Decrypt()")
-			case kms.ErrCodeInvalidGrantTokenException:
-				fallthrough
 			case kms.ErrCodeInvalidCiphertextException:
-				fallthrough
+				return nil, gomerr.NotSatisfied("ciphertext", input, constraint.Invalid).Wrap(err)
+			case kms.ErrCodeDisabledException, kms.ErrCodeInvalidStateException:
+				return nil, gomerr.NotSatisfied("kms.CustomerMasterKey.KeyState", "<embedded>", keyStateConstraint).Wrap(err)
 			case kms.ErrCodeInvalidKeyUsageException:
-				return nil, gomerr.Dependency(err, input)
+				return nil, gomerr.NotSatisfied("kms.CustomerMasterKey.KeyUsage", "<embedded>", keyUsageConstraint).Wrap(err)
 			}
 		}
 
-		return nil, gomerr.Dependency(err, input)
+		return nil, gomerr.Dependency("KMS", input).Wrap(err)
 	}
 
-	return decrypt(dataKey.Plaintext, ciphertext, nonce)
+	return k.decrypt(dataKey.Plaintext, ciphertext, nonce)
 }
 
-func decode(encoded []byte) (ciphertext []byte, ciphertextBlob []byte, nonce []byte, ge gomerr.Gomerr) {
+var validEncodingFormats = constraint.OneOf(encryptedEncodingFormatVersion)
+
+// decode extracts the previously encoded values for ciphertext, ciphertextBlob, and nonce. Possible errors:
+//
+//  gomerr.Unprocessable:
+//      The encoding format is not recognized
+//  gomerr.Unmarshal:
+//      There is a problem reading the the encoded data
+func (k kmsDataKeyDecrypter) decode(encoded []byte) (ciphertext []byte, ciphertextBlob []byte, nonce []byte, ge gomerr.Gomerr) {
 	reader := bytes.NewBuffer(encoded)
 
 	version, _ := reader.ReadByte()
 	if version != encryptedEncodingFormatVersionByte {
-		return nil, nil, nil, gomerr.BadValue("encryptedEncodingFormatVersion", version, constraint.Values(encryptedEncodingFormatVersionByte))
+		return nil, nil, nil, gomerr.Unprocessable("encryptedEncodingFormatVersion", version, validEncodingFormats)
+		// return gomerr.Unexpected
 	}
 
 	var length uint16
@@ -160,38 +179,43 @@ func decode(encoded []byte) (ciphertext []byte, ciphertextBlob []byte, nonce []b
 	_ = binary.Read(reader, binary.LittleEndian, &length)
 	ciphertext = make([]byte, length)
 	if n, err := reader.Read(ciphertext); err != nil || n != int(length) {
-		return nil, nil, nil, gomerr.Unmarshal(err, reader, "ciphertext")
+		return nil, nil, nil, gomerr.Unmarshal("ciphertext", reader, ciphertext).Wrap(err)
 	}
 
 	_ = binary.Read(reader, binary.LittleEndian, &length)
 	ciphertextBlob = make([]byte, length)
 	if n, err := reader.Read(ciphertextBlob); err != nil || n != int(length) {
-		return nil, nil, nil, gomerr.Unmarshal(err, reader, "ciphertextBlob")
+		return nil, nil, nil, gomerr.Unmarshal("ciphertextBlob", reader, ciphertextBlob).Wrap(err)
 	}
 
 	_ = binary.Read(reader, binary.LittleEndian, &length)
 	nonce = make([]byte, length)
 	if n, err := reader.Read(nonce); err != nil || n != int(length) {
-		return nil, nil, nil, gomerr.Unmarshal(err, reader, "nonce")
+		return nil, nil, nil, gomerr.Unmarshal("nonce", reader, nonce).Wrap(err)
 	}
 
 	return
 }
 
-func decrypt(key []byte, ciphertext []byte, nonce []byte) ([]byte, gomerr.Gomerr) {
+// decrypt performs the ciphertext decryption using the provided key and nonce. The response contains the decrypted
+// value or:
+//
+//  gomerr.Internal:
+//      An error wrapping the underlying Go crypto error.
+func (k kmsDataKeyDecrypter) decrypt(key []byte, ciphertext []byte, nonce []byte) ([]byte, gomerr.Gomerr) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, CipherFailure(err)
+		return nil, gomerr.Internal("aes.NewCipher").Wrap(err)
 	}
 
 	aead, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, CipherFailure(err)
+		return nil, gomerr.Internal("cipher.NewGCM").Wrap(err)
 	}
 
 	plaintext, err := aead.Open(ciphertext[:0], nonce, ciphertext, nil)
 	if err != nil {
-		return nil, CipherFailure(err)
+		return nil, gomerr.Internal("aead.Open").Wrap(err)
 	}
 
 	return plaintext, nil

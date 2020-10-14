@@ -1,8 +1,8 @@
 package gomerr
 
 import (
+	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -11,42 +11,25 @@ import (
 	"github.com/jt0/gomer/util"
 )
 
-type Culprit string
-
-const (
-	Unspecified   Culprit = ""
-	Client        Culprit = "Client"
-	Internal      Culprit = "Internal"
-	Configuration Culprit = "Configuration"
-)
-
 type Gomerr interface {
-	error
-	Unwrap() error
-
-	Cause() error
-	Culprit() Culprit
-	Notes() []string
-	Location() Location
-	Attributes() map[string]interface{}
-
-	WithCause(err error) Gomerr
-	AddCulprit(source Culprit) Gomerr
-	AddNotes(note ...string) Gomerr
+	Wrap(err error) Gomerr
+	AddAttribute(key string, value interface{}) Gomerr
+	AddAttributes(keysAndValues ...interface{}) Gomerr
+	WithAttributes(attributes map[string]interface{}) Gomerr
 	//Retryable(retryable bool) Gomerr
+
+	Unwrap() error
+	Attributes() map[string]interface{}
+	Stack() []string
+	ToMap() map[string]interface{}
+	Error() string
 	//IsRetryable() bool
 }
 
 var gomerrType = reflect.TypeOf((*Gomerr)(nil)).Elem()
 
 func Build(g Gomerr, attributes ...interface{}) Gomerr {
-	build(reflect.ValueOf(g).Elem(), attributes, _newGomerr(3, nil, g))
-
-	return g
-}
-
-func BuildWithCause(cause error, g Gomerr, attributes ...interface{}) Gomerr {
-	build(reflect.ValueOf(g).Elem(), attributes, _newGomerr(3, cause, g))
+	build(reflect.ValueOf(g).Elem(), attributes, newGomerr(4, g))
 
 	return g
 }
@@ -85,106 +68,153 @@ func build(v reflect.Value, attributes []interface{}, gomerr *gomerr) (attribute
 	return
 }
 
-type BatchError struct {
-	Gomerr
-	Errors []Gomerr
-}
-
-func Batch(errors []Gomerr) Gomerr {
-	return Build(&BatchError{}, errors)
-}
-
-type Location struct {
-	File     string
-	Line     int
-	Function string
-}
-
-func (l Location) equal(l2 Location) bool {
-	return l.File == l2.File && l.Line == l2.Line
-}
-
-func (l Location) string() string {
-	if l.Function == "" {
-		return fmt.Sprintf("\n --- at %v:%v ---", l.File, l.Line)
-	} else {
-		return fmt.Sprintf("\n --- at %v:%v (%v) ---", l.File, l.Line, l.Function)
-	}
-}
-
 type gomerr struct {
-	self     Gomerr
-	cause    error
-	culprit  Culprit
-	notes    []string
-	location Location
+	self       Gomerr
+	wrapped    error
+	attributes map[string]interface{}
+	stack      []string
 	//retryable    bool
 }
 
-func _newGomerr(stackSkip int, cause error, self Gomerr) *gomerr {
-	g := &gomerr{cause: cause}
+func newGomerr(stackSkip int, self Gomerr) *gomerr {
+	g := &gomerr{}
 	if self == nil {
 		g.self = g
 	} else {
 		g.self = self
 	}
 
-	if cg, ok := cause.(Gomerr); ok {
-		g.culprit = cg.Culprit()
-	}
-
-	pc, file, line, ok := runtime.Caller(stackSkip)
-	if !ok {
-		return g
-	}
-	g.location = Location{
-		File: relative(file),
-		Line: line,
-	}
-
-	f := runtime.FuncForPC(pc)
-	if f == nil {
-		return g
-	}
-	fullFunctionName := f.Name()
-	g.location.Function = fullFunctionName[strings.LastIndex(fullFunctionName, "/")+1:]
+	g.stack = fillStack(stackSkip)
 
 	return g
 }
 
-func relative(file string) string {
-	_, thisFile, _, _ := runtime.Caller(0)
+func fillStack(stackSkip int) []string {
+	callers := make([]uintptr, 30)
+	depth := runtime.Callers(stackSkip+1, callers) // +1 for compared to runtime.Caller()
+	callers = callers[:depth]
 
-	gomerPath := thisFile[:strings.LastIndex(thisFile, "/gomerr/")]
-	basePath := gomerPath[:strings.LastIndex(gomerPath, "/")]
-	rel, err := filepath.Rel(basePath, file)
-	if err != nil {
-		return file
+	stack := make([]string, depth)
+	frames := runtime.CallersFrames(callers)
+	for i := 0; i < depth; i++ {
+		frame, _ := frames.Next()
+		if strings.HasPrefix(frame.Function, "runtime.") {
+			stack = stack[:i]
+			break
+		}
+		function := frame.Function[strings.LastIndexByte(frame.Function, '/')+1:]
+		stack[i] = fmt.Sprintf("%s -- %s:%d", function, frame.File, frame.Line)
 	}
 
-	return strings.TrimLeft(rel, "./")
+	return stack
 }
 
-func (g *gomerr) Cause() error {
-	return g.cause
+//func relative(file string) string {
+//	_, thisFile, _, _ := runtime.Caller(0)
+//
+//	gomerPath := thisFile[:strings.LastIndex(thisFile, "/gomerr/")]
+//	basePath := gomerPath[:strings.LastIndex(gomerPath, "/")]
+//	rel, err := filepath.Rel(basePath, file)
+//	if err != nil {
+//		return file
+//	}
+//
+//	return strings.TrimLeft(rel, "./")
+//}
+
+func (g *gomerr) Wrap(err error) Gomerr {
+	if g.wrapped != nil {
+		panic("cannot change wrapped error once set")
+	}
+
+	g.wrapped = err
+	return g.self // Ensure we don't lose the actual error struct
 }
 
-func (g *gomerr) Culprit() Culprit {
-	return g.culprit
+func (g *gomerr) AddAttribute(key string, value interface{}) Gomerr {
+	// XXX newGomerr? (or maybe we can just always add to g itself)
+	//gw := newGomerr(2, g.self) // wrap first to get line/file info
+	//
+	//// If the notes are being added in the same place g is introduced, use g instead of the new one
+	//if g.stack[0].Line == gw.stack[0].Line && g.stack[0].File == gw.stack[0].File {
+	//	gw = g
+	//}
+
+	if g.attributes == nil {
+		g.attributes = make(map[string]interface{})
+	}
+
+	addAttribute(key, value, &g.attributes)
+
+	return g.self
 }
 
-func (g *gomerr) Notes() []string {
-	return g.notes
+func (g *gomerr) AddAttributes(keysAndValues ...interface{}) Gomerr {
+	if len(keysAndValues)%2 != 0 {
+		return Configuration("AddAttributes() requires an even number of arguments for keysAndValues").AddAttributes("Input", keysAndValues, "TargetedError", g)
+	}
+
+	if g.attributes == nil {
+		g.attributes = make(map[string]interface{})
+	}
+
+	for i := 0; i < len(keysAndValues); i += 2 {
+		key, ok := keysAndValues[i].(string)
+		if !ok {
+			keyStringer, ok := keysAndValues[i].(fmt.Stringer)
+			if !ok {
+				key = fmt.Sprintf("[Non-string key type %T]: %v", keysAndValues[i], keysAndValues[i])
+			}
+			key = keyStringer.String()
+		}
+
+		addAttribute(key, keysAndValues[i+1], &g.attributes)
+	}
+
+	return g
 }
 
-func (g *gomerr) Location() Location {
-	return g.location
+func (g *gomerr) WithAttributes(attributes map[string]interface{}) Gomerr {
+	// Short-circuit if no attributes yet
+	if g.attributes == nil {
+		g.attributes = attributes
+		return g.self
+	}
+
+	// Add each individually to handle potential name conflict
+	for k, v := range attributes {
+		addAttribute(k, v, &g.attributes)
+	}
+
+	return g.self
+}
+
+func addAttribute(key string, value interface{}, m *map[string]interface{}) {
+	_, exists := (*m)[key]
+	if exists {
+		// TODO: generate alternate key
+	}
+
+	(*m)[key] = value
+}
+
+// Implicitly used by errors.Is()/errors.As()
+func (g *gomerr) Unwrap() error {
+	return g.wrapped
 }
 
 func (g *gomerr) Attributes() map[string]interface{} {
+	return g.attributes
+}
+
+func (g *gomerr) Stack() []string {
+	return g.stack
+}
+
+func (g *gomerr) ToMap() map[string]interface{} {
 	gt := reflect.TypeOf(g.self).Elem()
 	gv := reflect.ValueOf(g.self).Elem()
-	attributes := make(map[string]interface{}, gt.NumField())
+	m := make(map[string]interface{}, gt.NumField())
 
 	for i := 0; i < gt.NumField(); i++ {
 		ft := gt.Field(i)
@@ -194,46 +224,49 @@ func (g *gomerr) Attributes() map[string]interface{} {
 			continue
 		}
 
-		// TODO: Access levels - remove here or (perhaps) creator could retract non-accessible data.
-		attributes[ft.Name] = fv.Interface()
+		name := ft.Name
+		// conventionally, strip of trailing underscore when calling ToMap()
+		if strings.HasSuffix(name, "_") {
+			name = name[0 : len(name)-1]
+		}
+
+		fi := fv.Interface()
+		m[name] = fi
+		if tag := ft.Tag.Get("gomerr"); tag != "" {
+			if tag == "include_type" {
+				m["_"+name+"Type"] = util.UnqualifiedTypeName(fi)
+			}
+		}
 	}
 
-	return attributes
+	m["_Gomerr"] = util.UnqualifiedTypeName(g.self)
+	m["_Stack"] = g.stack //  XXX: make sure not repeated...maybe remove overlapping parts from child...
+
+	if g.attributes != nil && len(g.attributes) > 0 {
+		m["_Attributes"] = g.attributes
+	}
+
+	if wrapped := g.Unwrap(); wrapped != nil {
+		if g, ok := wrapped.(Gomerr); ok {
+			m["_Cause"] = g.ToMap()
+		} else {
+			m["_Cause"] = map[string]interface{}{util.UnqualifiedTypeName(wrapped): wrapped}
+		}
+	}
+
+	return m
 }
 
-func (g *gomerr) WithCause(err error) Gomerr {
-	if g.cause != nil {
-		panic("cannot change cause once set")
-	}
-
-	g.cause = err
-	return g.self
+func (g *gomerr) Error() string {
+	return g.String()
 }
 
-func (g *gomerr) AddCulprit(culprit Culprit) Gomerr {
-	gw := _newGomerr(2, g.self, nil) // wrap first to get line/file info
-
-	// If the culprit is being added in the same place g is introduced, use g instead of the new one
-	if g.location.equal(gw.location) {
-		gw = g
+func (g *gomerr) String() string {
+	if bytes, err := json.MarshalIndent(g.ToMap(), "  ", "  "); err != nil {
+		return "Failed to create gomerr string representation: " + err.Error()
+	} else {
+		return string(bytes)
 	}
-
-	gw.culprit = culprit
-
-	return gw.self
-}
-
-func (g *gomerr) AddNotes(notes ...string) Gomerr {
-	gw := _newGomerr(2, g.self, nil) // wrap first to get line/file info
-
-	// If the notes are being added in the same place g is introduced, use g instead of the new one
-	if g.location.equal(gw.location) {
-		gw = g
-	}
-
-	gw.notes = append(gw.notes, notes...)
-
-	return gw.self
 }
 
 //func (g *gomerr) Retryable(retryable bool) Gomerr {
@@ -244,61 +277,3 @@ func (g *gomerr) AddNotes(notes ...string) Gomerr {
 //func (g *gomerr) IsRetryable() bool {
 //	return g.retryable
 //}
-
-func (g *gomerr) Error() string {
-	return fmt.Sprintf("%+s", g)
-}
-
-// Implicitly used by errors.Is()/errors.As()
-func (g *gomerr) Unwrap() error {
-	return g.cause
-}
-
-func (g *gomerr) Format(f fmt.State, c rune) {
-	var text = format(g)
-
-	formatString := "%"
-	// keep the flags recognized by fmt package
-	for _, flag := range "-+# 0" {
-		if f.Flag(int(flag)) {
-			formatString += string(flag)
-		}
-	}
-	if width, has := f.Width(); has {
-		formatString += fmt.Sprint(width)
-	}
-	if precision, has := f.Precision(); has {
-		formatString += "."
-		formatString += fmt.Sprint(precision)
-	}
-	formatString += string(c)
-	_, _ = fmt.Fprintf(f, formatString, text)
-}
-
-func format(g Gomerr) string {
-	s := util.UnqualifiedTypeName(g)
-
-	if g.Culprit() == Unspecified {
-		s += ":"
-	} else {
-		s += "(due to " + string(g.Culprit()) + ")"
-	}
-
-	if len(g.Notes()) > 0 {
-		s += "\n\t" + strings.Join(g.Notes(), "\n\t")
-	}
-
-	s += g.Location().string()
-
-	if g.Cause() != nil {
-		s += "\nCaused by: "
-
-		if gCause, ok := g.Cause().(Gomerr); ok {
-			s += format(gCause)
-		} else {
-			s += g.Cause().Error()
-		}
-	}
-
-	return s
-}

@@ -4,7 +4,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/util"
@@ -13,21 +12,22 @@ import (
 type Metadata interface {
 	InstanceName() string
 	CollectionQueryName() string
-	Parent() Metadata
+	//Parent() Metadata
 	Children() []Metadata
-	IdExternalName() string
+	//IdExternalName() string
 	ExternalNameToFieldName(externalName string) (string, bool)
 }
 
 func Register(instance Instance, collectionQuery CollectionQuery, dataStore data.Store, parentMetadata Metadata) (md *metadata, ge gomerr.Gomerr) {
 	if instance == nil {
-		return nil, gomerr.BadValue("instance", instance, constraint.NonZero()).AddNotes("A resource requires an Instance type").AddCulprit(gomerr.Configuration)
+		return nil, gomerr.Configuration("Must register with an Instance type")
 	}
 
 	it := reflect.TypeOf(instance)
-	instanceName := strings.ToLower(util.UnqualifiedTypeName(it))
+	instanceName := util.UnqualifiedTypeName(it)
+	lcInstanceName := strings.ToLower(instanceName)
 
-	md = resourceMetadata[instanceName]
+	md = lowerCaseResourceTypeNameToMetadata[lcInstanceName]
 	if md != nil {
 		return
 	}
@@ -47,7 +47,7 @@ func Register(instance Instance, collectionQuery CollectionQuery, dataStore data
 		instanceType:        it,
 		instanceName:        instanceName,
 		collectionQueryType: cqt,
-		collectionQueryName: strings.ToLower(util.UnqualifiedTypeName(cqt)),
+		collectionQueryName: util.UnqualifiedTypeName(cqt),
 		dataStore:           dataStore,
 		parent:              nilSafeParentMetadata,
 		children:            make([]Metadata, 0),
@@ -58,7 +58,7 @@ func Register(instance Instance, collectionQuery CollectionQuery, dataStore data
 		return nil, ge // don't want to return metadata value
 	}
 
-	resourceMetadata[instanceName] = md
+	lowerCaseResourceTypeNameToMetadata[lcInstanceName] = md
 	if nilSafeParentMetadata != nil {
 		nilSafeParentMetadata.children = append(nilSafeParentMetadata.children, md)
 	}
@@ -66,7 +66,7 @@ func Register(instance Instance, collectionQuery CollectionQuery, dataStore data
 	return
 }
 
-var resourceMetadata = make(map[string]*metadata)
+var lowerCaseResourceTypeNameToMetadata = make(map[string]*metadata)
 
 type metadata struct {
 	instanceType        reflect.Type
@@ -89,21 +89,21 @@ func (m *metadata) CollectionQueryName() string {
 	return m.collectionQueryName
 }
 
-func (m *metadata) Parent() Metadata {
-	if m.parent == nil {
-		return nil
-	}
-
-	return m.parent
-}
+//func (m *metadata) Parent() Metadata {
+//	if m.parent == nil {
+//		return nil
+//	}
+//
+//	return m.parent
+//}
 
 func (m *metadata) Children() []Metadata {
 	return m.children
 }
 
-func (m *metadata) IdExternalName() string {
-	return m.fields.idExternalName()
-}
+//func (m *metadata) IdExternalName() string {
+//	return m.fields.idExternalName()
+//}
 
 func (m *metadata) ExternalNameToFieldName(externalName string) (string, bool) {
 	return m.fields.externalNameToFieldName(externalName)

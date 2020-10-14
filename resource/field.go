@@ -8,8 +8,8 @@ import (
 	"unicode"
 
 	"github.com/jt0/gomer/auth"
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/gomerr/constraint"
 )
 
 type fields struct {
@@ -41,7 +41,7 @@ func newFields(structType reflect.Type) (*fields, gomerr.Gomerr) {
 	}
 
 	if errors := fields.process(structType, "", make([]gomerr.Gomerr, 0)); len(errors) > 0 {
-		return nil, gomerr.Batch(errors).AddCulprit(gomerr.Configuration)
+		return nil, gomerr.Configuration("Failed to process fields for " + structType.Name()).Wrap(gomerr.Batch(errors))
 	}
 
 	return fields, nil
@@ -81,7 +81,7 @@ func (fs *fields) process(structType reflect.Type, path string, errors []gomerr.
 				}
 
 				if fs.idField != nil {
-					errors = append(errors, gomerr.BadValue(structType.Name()+"."+sFieldName, []*field{f, fs.idField}, constraint.ExactlyOnce()).AddNotes("multiple fields with `id`"))
+					errors = append(errors, gomerr.Configuration(structType.Name()+" should only one field should have an `id` struct tag"))
 				}
 
 				fs.idField = f
@@ -104,7 +104,7 @@ func (fs *fields) process(structType reflect.Type, path string, errors []gomerr.
 	}
 
 	if path == "" && fs.idField == nil {
-		errors = append(errors, gomerr.BadValue(structType.Name()+".<idField>", nil, constraint.ExactlyOnce()))
+		errors = append(errors, gomerr.Configuration(structType.Name()+" does not have a field with an `id` struct tag"))
 	}
 
 	return errors
@@ -144,7 +144,7 @@ func (fs *fields) applyDefaults(i Instance) gomerr.Gomerr {
 		}
 
 		if ge := setDefaultValue(fieldValue, defaultValue); ge != nil {
-			return ge.AddNotes(fmt.Sprintf("Unable to set %s's default value (%v)", field.location, defaultValue))
+			return gomerr.Configuration("Cannot set field to default").AddAttributes("Field", field.location, "Default", defaultValue).Wrap(ge)
 		}
 	}
 
@@ -192,7 +192,7 @@ func (fs *fields) removeNonWritable(i Instance, accessType fieldAccessBits) gome
 			}
 
 			if !fv.CanSet() {
-				return gomerr.BadValue(i.PersistableTypeName()+"."+field.name+".CanSet()", fv, constraint.Function(canSet)).AddNotes("Can't zero field").AddCulprit(gomerr.Configuration)
+				return gomerr.Configuration("Unable to zero field: " + i.metadata().instanceName + "." + field.name)
 			}
 
 			fv.Set(field.zeroVal)
@@ -202,9 +202,13 @@ func (fs *fields) removeNonWritable(i Instance, accessType fieldAccessBits) gome
 	return nil
 }
 
-func canSet(i interface{}) bool {
-	return i.(reflect.Value).CanSet()
-}
+var parsableKindConstraint = constraint.OneOf(
+	reflect.Bool,
+	reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+	reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+	reflect.Uintptr,
+	reflect.Float32, reflect.Float64,
+)
 
 func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) gomerr.Gomerr {
 	defaultValueValue := reflect.ValueOf(defaultValue)
@@ -218,7 +222,7 @@ func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) gomerr.
 
 	stringValue, ok := defaultValue.(string)
 	if !ok {
-		return gomerr.BadValue("defaultValue type", defaultValue, constraint.TypeOf("")).AddNotes("Non-string representations should have already been handled").AddCulprit(gomerr.Configuration)
+		return gomerr.Unprocessable("defaultValue", defaultValue, constraint.Or(constraint.TypeOf(fieldValue.Type()), constraint.TypeOf(stringValue)))
 	}
 
 	var typedDefaultValue interface{}
@@ -298,16 +302,11 @@ func setDefaultValue(fieldValue reflect.Value, defaultValue interface{}) gomerr.
 	case reflect.Float64:
 		typedDefaultValue, err = strconv.ParseFloat(stringValue, 64)
 	default:
-		return gomerr.BadValue("Unsupported defaultValue type", fieldValue.Kind().String(), constraint.Values(
-			reflect.Bool.String(),
-			reflect.Int.String(), reflect.Int8.String(), reflect.Int16.String(), reflect.Int32.String(), reflect.Int64.String(),
-			reflect.Uint.String(), reflect.Uint8.String(), reflect.Uint16.String(), reflect.Uint32.String(), reflect.Uint64.String(), reflect.Uintptr.String(),
-			reflect.Float32.String, reflect.Float64.String(),
-		)).AddCulprit(gomerr.Configuration)
+		return gomerr.Unprocessable("fieldValue.Kind", fieldValue.Kind().String(), parsableKindConstraint)
 	}
 
 	if err != nil {
-		return gomerr.Unmarshal(err, defaultValue, fieldValue.Kind().String()).AddCulprit(gomerr.Configuration)
+		return gomerr.Unmarshal("defaultValue", defaultValue, fieldValue.Interface()).Wrap(err)
 	}
 
 	fieldValue.Set(reflect.ValueOf(typedDefaultValue))
@@ -337,11 +336,10 @@ func isSet(v reflect.Value) bool {
 }
 
 func (f *field) idTag(idTag string) gomerr.Gomerr {
-	// Format: (<defaultTagValue>)?(,<externalName>)?
 	parts := strings.Split(idTag, ",")
 
 	if len(parts) > 2 {
-		return gomerr.BadValue("'id' tag", parts, constraint.Length(1, 2)).AddCulprit(gomerr.Configuration)
+		return gomerr.Configuration("Expected format '(<defaultTagValue>)?(,<externalName>)?', but got: " + idTag)
 	}
 
 	f.defaultTag(parts[0])
@@ -374,7 +372,7 @@ const (
 	readAccess = fieldAccessBits(1 << iota)
 	createAccess
 	updateAccess
-	numAccessTypes = iota
+	numAccessTypes = iota // iota is not reset, so this is the number of access types starting w/ readAccess
 
 	readChar   = 'r'
 	writeChar  = 'w'
@@ -397,9 +395,9 @@ func (f *field) accessTag(accessTag string) gomerr.Gomerr {
 	if len(access) == 0 {
 		return nil
 	} else if len(access) > 16 {
-		return gomerr.BadValue("'access' tag", access, constraint.Length(0, 16)).AddNotes("can only support up to 8 field access principals pairs").AddCulprit(gomerr.Configuration)
+		return gomerr.Configuration("'access' tag can support up to 8 field access principals, but got: " + strconv.Itoa(len(access)/2))
 	} else if !mod2(access) {
-		return gomerr.BadValue("'access' tag", access, constraint.Function(mod2)).AddNotes("each field access principal needs a specified 'read' and 'write' value").AddCulprit(gomerr.Configuration)
+		return gomerr.Configuration("'access' tag must have two parts for each field access principals, but got: " + access)
 	}
 
 	var accessBits fieldAccessBits
@@ -412,7 +410,7 @@ func (f *field) accessTag(accessTag string) gomerr.Gomerr {
 		case dashChar:
 			// nothing to set
 		default:
-			return gomerr.BadValue("'access' tag", access[i], constraint.Values(readChar, dashChar)).AddCulprit(gomerr.Configuration)
+			return gomerr.Configuration("Expected one of read access values (r, -), but got: " + string(access[i]))
 		}
 
 		switch access[i+1] {
@@ -425,7 +423,7 @@ func (f *field) accessTag(accessTag string) gomerr.Gomerr {
 		case dashChar:
 			// nothing to set
 		default:
-			return gomerr.BadValue("'access' tag", access[i], constraint.Values(writeChar, createChar, updateChar, dashChar)).AddCulprit(gomerr.Configuration)
+			return gomerr.Configuration("Expected one of write access values (w, c, u, -), but got: " + string(access[i]))
 		}
 	}
 
@@ -502,7 +500,7 @@ func (f FieldAccessPrincipal) Release(_ bool) gomerr.Gomerr {
 }
 
 var bitsLocationForPrincipal = make(map[auth.Principal]uint)
-var reservedPrincipalsConstraint = constraint.Values(ReadWriteAll, ReadAll, NoAccess)
+var notReservedPrincipalsConstraint = constraint.Not(constraint.OneOf(ReadWriteAll, ReadAll, NoAccess))
 
 func RegisterFieldAccessPrincipals(fieldAccessPrincipals ...FieldAccessPrincipal) {
 	if len(fieldAccessPrincipals) > 7 {
@@ -510,8 +508,8 @@ func RegisterFieldAccessPrincipals(fieldAccessPrincipals ...FieldAccessPrincipal
 	}
 
 	for i, r := range fieldAccessPrincipals {
-		if reservedPrincipalsConstraint.Evaluate(r) {
-			panic(fmt.Sprintf("cannot register a predefined FieldAccessPrincipal: %s (predefined: %v)", r, reservedPrincipalsConstraint))
+		if ge := gomerr.Test("FieldAccessPrincipal.Id()", r, notReservedPrincipalsConstraint); ge != nil {
+			panic(ge)
 		}
 
 		bitsLocationForPrincipal[r] = uint(i)
@@ -521,7 +519,7 @@ func RegisterFieldAccessPrincipals(fieldAccessPrincipals ...FieldAccessPrincipal
 var fieldDefaultFunctions map[string]FieldDefaultFunction
 
 func RegisterFieldDefaultFunctions(functions map[string]FieldDefaultFunction) {
-	for k, _ := range functions {
+	for k := range functions {
 		if k[:1] != "$" {
 			panic("Default functions must start with a '$' symbol")
 		}

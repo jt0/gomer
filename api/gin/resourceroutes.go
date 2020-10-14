@@ -123,7 +123,7 @@ func getBytes(c *gin.Context, externalToFieldName func(string) (string, bool), r
 	if len(bytes) == 0 {
 		jsonMap = make(map[string]interface{}, len(c.Params)+len(queryParams))
 	} else if err := json.Unmarshal(bytes, &jsonMap); err != nil {
-		return nil, gomerr.Unmarshal(err, bytes, jsonMap)
+		return nil, gomerr.Unmarshal("Request body", bytes, jsonMap)
 	}
 
 	for key, value := range queryParams {

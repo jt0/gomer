@@ -2,6 +2,7 @@ package resource
 
 import (
 	"github.com/jt0/gomer/auth"
+	"github.com/jt0/gomer/gomerr"
 )
 
 type resource interface {
@@ -41,4 +42,13 @@ func (b *BaseResource) metadata() *metadata {
 
 func (b *BaseResource) setMetadata(metadata *metadata) {
 	b.md = metadata
+}
+
+type UnknownResourceTypeError struct {
+	gomerr.Gomerr
+	Type string
+}
+
+func unknownResourceType(type_ string) gomerr.Gomerr {
+	return gomerr.Build(new(UnknownResourceTypeError), type_)
 }

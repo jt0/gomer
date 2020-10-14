@@ -10,10 +10,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/crypto"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/gomerr/constraint"
 )
 
 type nextTokenizer struct {
@@ -33,6 +33,7 @@ const (
 	numberPrefix           = "N:"
 )
 
+// TODO: add queryable details into token
 func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*dynamodb.AttributeValue) (*string, gomerr.Gomerr) {
 	if lastEvaluatedKey == nil {
 		return nil, nil
@@ -47,9 +48,10 @@ func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*
 
 	toEncrypt, err := json.Marshal(nextToken)
 	if err != nil {
-		return nil, gomerr.Marshal(err, nextToken).AddCulprit(gomerr.Internal)
+		return nil, gomerr.Marshal("nextToken", nextToken).Wrap(err)
 	}
 
+	// TODO: provide an encryption context - probably w/ q data
 	encrypted, ge := t.cipher.Encrypt(toEncrypt, nil)
 	if ge != nil {
 		return nil, ge
@@ -59,14 +61,26 @@ func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*
 	return &encoded, nil
 }
 
+// untokenize will pull the NextPageToken from the queryable and (if there is one) decode the value. Possible errors:
+//
+//  gomerr.BadValue:
+//      The 'NextPageToken' is not base64-encoded
+//  gomerr.Unprocessable:
+//      The token's 'nextTokenFormatVersion' is not valid
+//  gomerr.Unmarshal:
+//      Failed to extract the token data into an internal data structure
+//  gomerr.Expired:
+//      If the 'NextPageToken' was generated more than 24 hours ago (a hard-coded duration)
+//
+// See the crypto.kmsDataKeyDecrypter Decrypt operation for additional errors types.
 func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.AttributeValue, gomerr.Gomerr) {
-	if q.NextPageToken() == nil {
+	if q.NextPageToken() == "" {
 		return nil, nil
 	}
 
-	encrypted, err := base64.RawURLEncoding.DecodeString(*q.NextPageToken())
+	encrypted, err := base64.RawURLEncoding.DecodeString(q.NextPageToken())
 	if err != nil {
-		return nil, gomerr.Unmarshal(err, *q.NextPageToken(), encrypted).AddCulprit(gomerr.Client)
+		return nil, gomerr.NotSatisfied("NextPageToken", q.NextPageToken(), constraint.Base64).Wrap(err)
 	}
 
 	toUnmarshal, ge := t.cipher.Decrypt(encrypted, nil)
@@ -76,15 +90,15 @@ func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.Attri
 
 	nt := &nextToken{}
 	if err := json.Unmarshal(toUnmarshal, nt); err != nil {
-		return nil, gomerr.Unmarshal(err, toUnmarshal, nt).AddCulprit(gomerr.Internal)
+		return nil, gomerr.Unmarshal("NextPageToken", toUnmarshal, nt).Wrap(err)
 	}
 
 	if nt.Version != nextTokenFormatVersion {
-		return nil, gomerr.BadValue("nextTokenFormatVersion", nt.Version, constraint.Values(nextTokenFormatVersion)).AddCulprit(gomerr.Internal)
+		return nil, gomerr.Unprocessable("nextTokenFormatVersion", nt.Version, constraint.OneOf(nextTokenFormatVersion))
 	}
 
 	if nt.expired() {
-		return nil, gomerr.TokenExpired(nt.Expiration).AddCulprit(gomerr.Client)
+		return nil, gomerr.Expired("NextPageToken", nt.Expiration)
 	}
 
 	// TODO: validate filter

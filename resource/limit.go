@@ -5,29 +5,14 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/limit"
 	"github.com/jt0/gomer/util"
 )
 
-type Limited interface {
-	Limiter() (Limiter, gomerr.Gomerr)
-	DefaultLimit() util.Amount
-	LimitAmount() util.Amount
-}
+type limitAction func(limit.Limiter, limit.Limited) gomerr.Gomerr
 
-type Limiter interface {
-	util.Dirtyable
-	Current(limited Limited) util.Amount
-	SetCurrent(limited Limited, current util.Amount)
-	Override(limited Limited) util.Amount
-	SetOverride(limited Limited, override util.Amount)
-	Maximum(limited Limited) util.Amount
-}
-
-type limitAction func(Limiter, Limited) gomerr.Gomerr
-
-func checkAndIncrement(limiter Limiter, limited Limited) gomerr.Gomerr {
+func checkAndIncrement(limiter limit.Limiter, limited limit.Limited) gomerr.Gomerr {
 	current := limiter.Current(limited)
 	maximum := limiter.Maximum(limited)
 	newAmount := current.Increment(limited.LimitAmount())
@@ -37,7 +22,7 @@ func checkAndIncrement(limiter Limiter, limited Limited) gomerr.Gomerr {
 	}
 
 	if newAmount.Exceeds(maximum) {
-		return gomerr.LimitExceeded(util.UnqualifiedTypeName(reflect.TypeOf(limited)), maximum, current, newAmount)
+		return limit.Exceeded(limiter, limited, maximum, current, newAmount)
 	}
 
 	limiter.SetCurrent(limited, newAmount)
@@ -45,7 +30,7 @@ func checkAndIncrement(limiter Limiter, limited Limited) gomerr.Gomerr {
 	return nil
 }
 
-func decrement(limiter Limiter, limited Limited) gomerr.Gomerr {
+func decrement(limiter limit.Limiter, limited limit.Limited) gomerr.Gomerr {
 	current := limiter.Current(limited)
 	newAmount := current.Decrement(limited.LimitAmount())
 
@@ -59,29 +44,29 @@ func decrement(limiter Limiter, limited Limited) gomerr.Gomerr {
 	return nil
 }
 
-func limit(limitAction limitAction, i Instance) (Limiter, gomerr.Gomerr) {
-	limited, ok := i.(Limited)
+func applyLimitAction(limitAction limitAction, i Instance) (limit.Limiter, gomerr.Gomerr) {
+	limited, ok := i.(limit.Limited)
 	if !ok {
 		return nil, nil
 	}
 
 	limiter, ge := limited.Limiter()
 	if ge != nil {
-		return nil, ge.AddCulprit(gomerr.Configuration)
+		return nil, gomerr.Configuration(i.metadata().instanceName + " did not provide a Limiter for itself.").Wrap(ge)
 	}
 
 	limiterInstance, ok := limiter.(Instance)
 	if !ok {
-		return nil, gomerr.BadValue("limiter", limiter, constraint.TypeOf(limiterInstance)).AddNotes("limiter does not implement Instance").AddCulprit(gomerr.Configuration)
+		return nil, gomerr.Configuration("Limiter from " + i.metadata().instanceName + " does not implement resource.Instance")
 	}
 
 	// If the metadata isn't set, then this is a new object and needs to be loaded
 	var loaded bool
 	if limiterInstance.metadata() == nil {
-		resourceType := strings.ToLower(util.UnqualifiedTypeName(reflect.TypeOf(limiter)))
-		metadata, ok := resourceMetadata[resourceType]
+		resourceType := util.UnqualifiedTypeName(reflect.TypeOf(limiter)) // PersistableTypeName() not yet available.
+		metadata, ok := lowerCaseResourceTypeNameToMetadata[strings.ToLower(resourceType)]
 		if !ok {
-			return nil, gomerr.NotFound("resource type", resourceType).AddCulprit(gomerr.Configuration)
+			return nil, gomerr.Configuration("Unregistered resource type.").Wrap(unknownResourceType(resourceType))
 		}
 
 		limiterInstance.setMetadata(metadata)
@@ -100,7 +85,7 @@ func limit(limitAction limitAction, i Instance) (Limiter, gomerr.Gomerr) {
 		return nil, ge
 	}
 
-	// If we didn't load the limiterInstance, we'll let other code handle the save
+	// If we didn't load the updatable, we'll let other code handle the save
 	if !loaded {
 		limiter = nil
 	}
@@ -108,7 +93,7 @@ func limit(limitAction limitAction, i Instance) (Limiter, gomerr.Gomerr) {
 	return limiter, nil
 }
 
-func saveLimiter(limiter Limiter, ge gomerr.Gomerr) {
+func saveLimiterIfDirty(limiter limit.Limiter, ge gomerr.Gomerr) {
 	// TODO: need an optimistic lock mechanism to avoid overwriting
 	if limiter == nil || !limiter.IsDirty() || ge != nil {
 		return
@@ -118,6 +103,9 @@ func saveLimiter(limiter Limiter, ge gomerr.Gomerr) {
 	ge = limiterInstance.metadata().dataStore.Update(limiterInstance, nil)
 	if ge != nil {
 		// TODO: use provided logger
-		fmt.Println("Failed to save limiter (type: %s, id: %s). Error: %s"+limiterInstance.PersistableTypeName(), limiterInstance.Id(), ge)
+		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", limiterInstance.metadata().instanceName, limiterInstance.Id(), ge)
+		return
 	}
+
+	limiter.ClearDirty()
 }

@@ -9,8 +9,8 @@ import (
 
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/gomerr/constraint"
 	"github.com/jt0/gomer/util"
 )
 
@@ -28,7 +28,7 @@ func newPersistableType(persistableName string, pType reflect.Type, indexes map[
 	}
 
 	if errors := pt.processFields(pType, "", indexes, make([]gomerr.Gomerr, 0)); len(errors) > 0 {
-		return nil, gomerr.Batch(errors).AddNotes("'db' tag errors found for type: " + persistableName).AddCulprit(gomerr.Configuration)
+		return nil, gomerr.Configuration("'db' tag errors found for type: " + persistableName).Wrap(gomerr.Batch(errors))
 	}
 
 	return pt, nil
@@ -71,7 +71,7 @@ func (pt *persistableType) processConstraintsTag(fieldName string, tag string, e
 
 	constraints := constraintsRegex.FindAllStringSubmatch(tag, -1)
 	if constraints == nil {
-		return append(errors, gomerr.BadValue("'constraints' tag", tag, constraint.Regexp(constraintsRegex)).AddNotes("field: "+fieldName))
+		return append(errors, gomerr.Unprocessable("`db.constraints`", tag, constraint.Regexp(constraintsRegex)).AddAttribute("Field", fieldName))
 	}
 
 	for _, c := range constraints {
@@ -98,12 +98,12 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 	for _, keyStatement := range strings.Split(strings.ReplaceAll(tag, " ", ""), ",") {
 		groups := ddbKeyStatementRegex.FindStringSubmatch(keyStatement)
 		if groups == nil {
-			return append(errors, gomerr.BadValue("'ddbKey' tag", tag, constraint.Regexp(ddbKeyStatementRegex)).AddNotes("field: "+fieldName))
+			return append(errors, gomerr.Unprocessable("`db.keys`", keyStatement, constraint.Regexp(ddbKeyStatementRegex)).AddAttribute("Field", fieldName))
 		}
 
 		index, ok := indexes[groups[2]]
 		if !ok {
-			return append(errors, gomerr.NotFound("ddb.Index", groups[2]).AddNotes("field: "+fieldName).AddCulprit(gomerr.Configuration))
+			return append(errors, gomerr.Missing(groups[2], indexes).AddAttribute("Field", fieldName))
 		}
 
 		var key *keyAttribute

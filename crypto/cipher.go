@@ -16,11 +16,3 @@ type Cipher struct {
 	Encrypter
 	Decrypter
 }
-
-type CipherError struct {
-	gomerr.Gomerr
-}
-
-func CipherFailure(cause error) gomerr.Gomerr {
-	return gomerr.BuildWithCause(cause, new(CipherError))
-}
