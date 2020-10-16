@@ -14,21 +14,22 @@ import (
 
 func BuildRoutes(r *gin.Engine, resourceMetadata ...resource.Metadata) {
 	for _, md := range resourceMetadata {
-		buildRoutes(r, md, "", []string{})
+		buildRoutes(r, md, "")
 	}
 }
 
-func buildRoutes(r *gin.Engine, md resource.Metadata, path string, pathKeys []string) {
+func buildRoutes(r *gin.Engine, md resource.Metadata, path string) {
 	resourceType := md.InstanceName()
 
 	if md.CollectionQueryName() != "" {
+		lowerCaseCollectionQueryName := strings.ToLower(md.CollectionQueryName())
 		var collectionName string
-		if strings.HasSuffix(md.CollectionQueryName(), "collectionquery") {
-			collectionName = strings.TrimSuffix(md.CollectionQueryName(), "collectionquery")
-		} else if strings.HasSuffix(md.CollectionQueryName(), "query") {
-			collectionName = strings.TrimSuffix(md.CollectionQueryName(), "query")
+		if strings.HasSuffix(lowerCaseCollectionQueryName, "collectionquery") {
+			collectionName = strings.TrimSuffix(lowerCaseCollectionQueryName, "collectionquery")
+		} else if strings.HasSuffix(lowerCaseCollectionQueryName, "query") {
+			collectionName = strings.TrimSuffix(lowerCaseCollectionQueryName, "query")
 		} else {
-			collectionName = md.CollectionQueryName()
+			collectionName = lowerCaseCollectionQueryName
 		}
 		path = path + "/" + collectionName
 
@@ -40,7 +41,6 @@ func buildRoutes(r *gin.Engine, md resource.Metadata, path string, pathKeys []st
 	// FIXME: support singleton (non-query) types that don't have an identifier
 	pathKey := resourceType + "Id"
 	path = path + "/:" + pathKey
-	pathKeys = append(pathKeys, pathKey)
 
 	// TODO: Examine metadata to determine if put/get/patch/delete are supported and if special handlers are needed
 	r.GET(path, instanceHandler(resourceType, md.ExternalNameToFieldName, resource.DoGet, false, http.StatusOK))
@@ -48,7 +48,7 @@ func buildRoutes(r *gin.Engine, md resource.Metadata, path string, pathKeys []st
 	r.DELETE(path, instanceHandler(resourceType, md.ExternalNameToFieldName, resource.DoDelete, false, http.StatusNoContent))
 
 	for _, childMetadata := range md.Children() {
-		buildRoutes(r, childMetadata, path, pathKeys)
+		buildRoutes(r, childMetadata, path)
 	}
 }
 
