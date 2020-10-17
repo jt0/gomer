@@ -13,20 +13,10 @@ import (
 type Instance interface {
 	resource
 	data.Persistable
-
-	PreCreate() gomerr.Gomerr
-	PostCreate() gomerr.Gomerr
-	PreGet() gomerr.Gomerr
-	PostGet() gomerr.Gomerr
-	PreUpdate(updateInstance Instance) gomerr.Gomerr
-	PostUpdate(updateInstance Instance) gomerr.Gomerr
-	PreDelete() gomerr.Gomerr
-	PostDelete() gomerr.Gomerr
-	PostQuery() gomerr.Gomerr
 }
 
 func newInstance(resourceType string, subject auth.Subject) (Instance, gomerr.Gomerr) {
-	metadata, ok := lowerCaseResourceTypeNameToMetadata[strings.ToLower(resourceType)]
+	metadata, ok := lowerCaseResourceTypeToMetadata[strings.ToLower(resourceType)]
 	if !ok {
 		return nil, unknownResourceType(resourceType)
 	}
@@ -79,127 +69,13 @@ func SaveInstance(i Instance) gomerr.Gomerr {
 	return nil
 }
 
-func DoCreate(i Instance) (result interface{}, ge gomerr.Gomerr) {
-	if ge = i.metadata().fields.removeNonWritable(i, createAccess); ge != nil {
-		return nil, ge
-	}
-
-	if ge = i.metadata().fields.applyDefaults(i); ge != nil {
-		return nil, ge
-	}
-
-	if ge = i.PreCreate(); ge != nil {
-		return nil, ge
-	}
-
-	//if err := validate.Struct(i); err != nil {
-	//	return nil, gomerr.ValidationFailure(err)
-	//}
-
-	if limiter, lge := applyLimitAction(checkAndIncrement, i); lge != nil {
-		return nil, lge
-	} else if limiter != nil {
-		defer saveLimiterIfDirty(limiter, ge)
-	}
-
-	if ge = i.metadata().dataStore.Create(i); ge != nil {
-		return nil, ge
-	}
-
-	if ge = i.PostCreate(); ge != nil {
-		return nil, ge
-	}
-
-	return scopedResult(i)
-}
-
-func DoGet(i Instance) (interface{}, gomerr.Gomerr) {
-	if ge := i.PreGet(); ge != nil {
-		return nil, ge
-	}
-
-	if ge := i.metadata().dataStore.Read(i); ge != nil {
-		return nil, ge
-	}
-
-	if ge := i.PostGet(); ge != nil {
-		return nil, ge
-	}
-
-	return scopedResult(i)
-}
-
-func DoUpdate(updateInstance Instance) (interface{}, gomerr.Gomerr) {
-	// copy update to a new instance and read data into it
-	i := shallowCopy(updateInstance)
-	if ge := i.metadata().dataStore.Read(i); ge != nil {
-		return nil, ge
-	}
-
-	if ge := i.metadata().fields.removeNonWritable(updateInstance, updateAccess); ge != nil {
-		return nil, ge
-	}
-
-	if ge := i.PreUpdate(updateInstance); ge != nil {
-		return nil, ge
-	}
-
-	if ge := i.metadata().dataStore.Update(i, updateInstance); ge != nil {
-		return nil, ge
-	}
-
-	if ge := i.PostUpdate(updateInstance); ge != nil {
-		return nil, ge
-	}
-
-	return scopedResult(i)
-}
-
-func shallowCopy(update Instance) Instance {
-	updateCopy := reflect.ValueOf(update).Elem().Interface()
-	persistedPtr := reflect.New(reflect.TypeOf(updateCopy))
-	persistedPtr.Elem().Set(reflect.ValueOf(updateCopy))
-
-	return persistedPtr.Interface().(Instance)
-}
-
-func scopedResult(i Instance) (interface{}, gomerr.Gomerr) {
-	if result := i.metadata().fields.removeNonReadable(i); result == nil || len(result) == 0 {
-		return nil, gomerr.NotFound(i.metadata().instanceName, i.Id())
-	} else {
-		return result, nil
-	}
-}
-
-func DoDelete(i Instance) (result interface{}, ge gomerr.Gomerr) {
-	if ge = i.PreDelete(); ge != nil {
-		return nil, ge
-	}
-
-	if limiter, lge := applyLimitAction(decrement, i); lge != nil {
-		return nil, lge
-	} else if limiter != nil {
-		defer saveLimiterIfDirty(limiter, ge)
-	}
-
-	if ge = i.metadata().dataStore.Delete(i); ge != nil {
-		return nil, ge
-	}
-
-	if ge = i.PostDelete(); ge != nil {
-		return nil, ge
-	}
-
-	return scopedResult(i)
-}
-
 type BaseInstance struct {
 	BaseResource
 
 	//persistedValues map[string]interface{}
 }
 
-func (b *BaseInstance) Id() string {
+func (*BaseInstance) Id() string {
 	panic(gomerr.Configuration("Id() function must be shadowed in Instance types"))
 }
 
@@ -221,38 +97,38 @@ func (b *BaseInstance) NewQueryable() data.Queryable {
 	return collectionQuery
 }
 
-func (b *BaseInstance) PreCreate() gomerr.Gomerr {
+func (*BaseInstance) PreCreate() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PostCreate() gomerr.Gomerr {
+func (*BaseInstance) PostCreate() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PreGet() gomerr.Gomerr {
+func (*BaseInstance) PreRead() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PostGet() gomerr.Gomerr {
+func (*BaseInstance) PostRead() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PreUpdate(_ Instance) gomerr.Gomerr {
+func (*BaseInstance) PreUpdate(Instance) gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PostUpdate(_ Instance) gomerr.Gomerr {
+func (*BaseInstance) PostUpdate(Instance) gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PreDelete() gomerr.Gomerr {
+func (*BaseInstance) PreDelete() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PostDelete() gomerr.Gomerr {
+func (*BaseInstance) PostDelete() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseInstance) PostQuery() gomerr.Gomerr {
+func (*BaseInstance) PostQuery() gomerr.Gomerr {
 	return nil
 }

@@ -168,35 +168,50 @@ func (fs *fields) removeNonReadable(i Instance) map[string]interface{} { // TODO
 }
 
 func (fs *fields) removeNonWritable(i Instance, accessType fieldAccessBits) gomerr.Gomerr {
-	uv := reflect.ValueOf(i).Elem()
+	iv := reflect.ValueOf(i).Elem()
 
 	for _, field := range fs.fieldMap {
-		if field.provided {
+		// TODO: handle nested/embedded structs
+		if field.provided || strings.Contains(field.location, ".") || field.access(i.Subject().Principal(FieldAccess), accessType) {
 			continue
 		}
 
-		willOverwrite := (field.defaultValueFunction != nil || field.defaultValue != "") && !field.bypassDefaultIfSet
-		if accessType == createAccess && willOverwrite {
-			// If present, will be overwritten when the default is applied
+		fv := iv.FieldByName(field.name)
+		if !fv.IsValid() || fv.IsZero() {
 			continue
 		}
 
-		if !field.access(i.Subject().Principal(FieldAccess), accessType) {
-			if strings.Contains(field.location, ".") {
-				continue // TODO: handle nested/embedded structs
-			}
-
-			fv := uv.FieldByName(field.name)
-			if !fv.IsValid() || fv.IsZero() {
-				continue
-			}
-
-			if !fv.CanSet() {
-				return gomerr.Configuration("Unable to zero field: " + i.metadata().instanceName + "." + field.name)
-			}
-
-			fv.Set(field.zeroVal)
+		if !fv.CanSet() {
+			return gomerr.Configuration("Unable to zero field: " + i.metadata().instanceName + "." + field.name)
 		}
+
+		fv.Set(field.zeroVal)
+	}
+
+	return nil
+}
+
+func (fs *fields) copyProvided(from, to Instance) gomerr.Gomerr {
+	fv := reflect.ValueOf(from).Elem()
+	tv := reflect.ValueOf(to).Elem() // Support non-pointer types?
+
+	for _, field := range fs.fieldMap {
+		// TODO: handle nested/embedded structs
+		if !field.provided || strings.Contains(field.location, ".") {
+			continue
+		}
+
+		ffv := fv.FieldByName(field.name)
+		if !ffv.IsValid() || ffv.IsZero() {
+			continue
+		}
+
+		tfv := tv.FieldByName(field.name)
+		if !tfv.CanSet() {
+			return gomerr.Configuration("Unable to copy provided field value: " + to.metadata().instanceName + "." + field.name)
+		}
+
+		tfv.Set(ffv)
 	}
 
 	return nil

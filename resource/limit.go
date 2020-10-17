@@ -64,7 +64,7 @@ func applyLimitAction(limitAction limitAction, i Instance) (limit.Limiter, gomer
 	var loaded bool
 	if limiterInstance.metadata() == nil {
 		resourceType := util.UnqualifiedTypeName(reflect.TypeOf(limiter)) // PersistableTypeName() not yet available.
-		metadata, ok := lowerCaseResourceTypeNameToMetadata[strings.ToLower(resourceType)]
+		metadata, ok := lowerCaseResourceTypeToMetadata[strings.ToLower(resourceType)]
 		if !ok {
 			return nil, gomerr.Configuration("Unregistered resource type.").Wrap(unknownResourceType(resourceType))
 		}
@@ -93,14 +93,14 @@ func applyLimitAction(limitAction limitAction, i Instance) (limit.Limiter, gomer
 	return limiter, nil
 }
 
-func saveLimiterIfDirty(limiter limit.Limiter, ge gomerr.Gomerr) {
+func saveLimiterIfDirty(limiter limit.Limiter) {
 	// TODO: need an optimistic lock mechanism to avoid overwriting
-	if limiter == nil || !limiter.IsDirty() || ge != nil {
+	if limiter == nil || !limiter.IsDirty() {
 		return
 	}
 
 	limiterInstance := limiter.(Instance) // Should always be true
-	ge = limiterInstance.metadata().dataStore.Update(limiterInstance, nil)
+	ge := limiterInstance.metadata().dataStore.Update(limiterInstance, nil)
 	if ge != nil {
 		// TODO: use provided logger
 		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", limiterInstance.metadata().instanceName, limiterInstance.Id(), ge)

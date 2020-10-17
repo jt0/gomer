@@ -250,7 +250,10 @@ func (g *gomerr) ToMap() map[string]interface{} {
 		if g, ok := wrapped.(Gomerr); ok {
 			m["_Cause"] = g.ToMap()
 		} else {
-			m["_Cause"] = map[string]interface{}{util.UnqualifiedTypeName(wrapped): wrapped}
+			m["_Cause"] = map[string]interface{}{
+				util.UnqualifiedTypeName(wrapped): wrapped,
+				"_Error()":                        wrapped.Error(),
+			}
 		}
 	}
 

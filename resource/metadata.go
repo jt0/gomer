@@ -11,6 +11,7 @@ import (
 
 type Metadata interface {
 	InstanceName() string
+	InstanceActions() InstanceActions
 	CollectionQueryName() string
 	//Parent() Metadata
 	Children() []Metadata
@@ -18,7 +19,18 @@ type Metadata interface {
 	ExternalNameToFieldName(externalName string) (string, bool)
 }
 
-func Register(instance Instance, collectionQuery CollectionQuery, dataStore data.Store, parentMetadata Metadata) (md *metadata, ge gomerr.Gomerr) {
+type InstanceActions map[string]func() InstanceAction
+
+var emptyActions = InstanceActions{}
+
+func Register(
+	instance Instance,
+	instanceActions InstanceActions,
+	collectionQuery CollectionQuery,
+	// collectionActions map[string]func() CollectionAction,
+	dataStore data.Store,
+	parentMetadata Metadata,
+) (md *metadata, ge gomerr.Gomerr) {
 	if instance == nil {
 		return nil, gomerr.Configuration("Must register with an Instance type")
 	}
@@ -27,7 +39,7 @@ func Register(instance Instance, collectionQuery CollectionQuery, dataStore data
 	instanceName := util.UnqualifiedTypeName(it)
 	lcInstanceName := strings.ToLower(instanceName)
 
-	md = lowerCaseResourceTypeNameToMetadata[lcInstanceName]
+	md = lowerCaseResourceTypeToMetadata[lcInstanceName]
 	if md != nil {
 		return
 	}
@@ -43,9 +55,14 @@ func Register(instance Instance, collectionQuery CollectionQuery, dataStore data
 	cqt := reflect.TypeOf(collectionQuery)
 	nilSafeParentMetadata, _ := parentMetadata.(*metadata)
 
+	if instanceActions == nil {
+		instanceActions = emptyActions
+	}
+
 	md = &metadata{
 		instanceType:        it,
 		instanceName:        instanceName,
+		instanceActions:     instanceActions,
 		collectionQueryType: cqt,
 		collectionQueryName: util.UnqualifiedTypeName(cqt),
 		dataStore:           dataStore,
@@ -58,7 +75,7 @@ func Register(instance Instance, collectionQuery CollectionQuery, dataStore data
 		return nil, ge // don't want to return metadata value
 	}
 
-	lowerCaseResourceTypeNameToMetadata[lcInstanceName] = md
+	lowerCaseResourceTypeToMetadata[lcInstanceName] = md
 	if nilSafeParentMetadata != nil {
 		nilSafeParentMetadata.children = append(nilSafeParentMetadata.children, md)
 	}
@@ -66,11 +83,12 @@ func Register(instance Instance, collectionQuery CollectionQuery, dataStore data
 	return
 }
 
-var lowerCaseResourceTypeNameToMetadata = make(map[string]*metadata)
+var lowerCaseResourceTypeToMetadata = make(map[string]*metadata)
 
 type metadata struct {
 	instanceType        reflect.Type
 	instanceName        string
+	instanceActions     InstanceActions
 	collectionQueryType reflect.Type
 	collectionQueryName string
 	fields              *fields
@@ -83,6 +101,10 @@ type metadata struct {
 
 func (m *metadata) InstanceName() string {
 	return m.instanceName
+}
+
+func (m *metadata) InstanceActions() InstanceActions {
+	return m.instanceActions
 }
 
 func (m *metadata) CollectionQueryName() string {

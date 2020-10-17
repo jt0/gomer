@@ -2,14 +2,12 @@ package resource
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"strings"
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/util"
 )
 
 type CollectionQuery interface {
@@ -17,7 +15,12 @@ type CollectionQuery interface {
 	data.Queryable
 
 	PreQuery() gomerr.Gomerr
+	PostQuery() gomerr.Gomerr
 	Collection() Collection
+}
+
+type Collectible interface {
+	OnCollect(CollectionQuery) gomerr.Gomerr
 }
 
 type Collection interface {
@@ -27,7 +30,7 @@ type Collection interface {
 }
 
 func newCollectionQuery(resourceType string, subject auth.Subject) (CollectionQuery, gomerr.Gomerr) {
-	metadata, ok := lowerCaseResourceTypeNameToMetadata[strings.ToLower(resourceType)]
+	metadata, ok := lowerCaseResourceTypeToMetadata[strings.ToLower(resourceType)]
 	if !ok {
 		return nil, unknownResourceType(resourceType)
 	}
@@ -73,36 +76,33 @@ func DoQuery(c CollectionQuery) (Collection, gomerr.Gomerr) {
 		return nil, ge
 	}
 
-	items := util.EmptySliceForType(c.metadata().instanceType)
-	nextToken, ge := c.metadata().dataStore.Query(c, items)
+	items, nextToken, ge := c.metadata().dataStore.Query(c)
 	if ge != nil {
 		return nil, ge
 	}
 
-	iv := reflect.ValueOf(items).Elem()
-	resultsArray := make([]interface{}, 0, iv.Len())
-	for i := 0; i < iv.Len(); i++ {
-		instance := iv.Index(i).Interface().(Instance)
+	lenItems := len(items)
+	resultsArray := make([]interface{}, 0, lenItems)
+	for i := 0; i < lenItems; i++ {
+		instance := items[i].(Instance)
 		instance.setMetadata(c.metadata())
 		instance.setSubject(c.Subject())
 		instance.OnSubject()
 
-		ge := instance.PostQuery()
-		if ge != nil {
-			return nil, ge
-		}
-
-		scoped, ge := scopedResult(instance)
-		if ge != nil {
-			var nfe *gomerr.NotFoundError
-			if errors.As(ge, &nfe) {
-				continue
-			} else {
+		if collectible, ok := instance.(Collectible); ok {
+			ge := collectible.OnCollect(c)
+			if ge != nil {
 				return nil, ge
 			}
 		}
 
-		resultsArray = append(resultsArray, scoped)
+		rendered, nfe := renderInstance(instance)
+		if nfe != nil {
+			// Ignore because the item's rendered view contains no visible data so is just excluded from the results
+			continue
+		}
+
+		resultsArray = append(resultsArray, rendered)
 	}
 
 	collection := c.Collection()
@@ -116,30 +116,26 @@ type BaseCollectionQuery struct {
 	BaseResource
 }
 
-func (b *BaseCollectionQuery) OnSubject() {
-	// ignore
-}
-
 func (b *BaseCollectionQuery) PersistableTypeName() string {
-	return b.md.instanceName
+	return b.metadata().instanceName
 }
 
-func (b *BaseCollectionQuery) NextPageToken() string {
+func (*BaseCollectionQuery) NextPageToken() string {
 	return ""
 }
 
-func (b *BaseCollectionQuery) PrevPageToken() string {
+func (*BaseCollectionQuery) PrevPageToken() string {
 	return ""
 }
 
-func (b *BaseCollectionQuery) MaximumPageSize() int {
+func (*BaseCollectionQuery) MaximumPageSize() int {
 	return 0
 }
 
-func (b *BaseCollectionQuery) ResponseFields() []string {
+func (*BaseCollectionQuery) PreQuery() gomerr.Gomerr {
 	return nil
 }
 
-func (b *BaseCollectionQuery) PreQuery() gomerr.Gomerr {
+func (*BaseCollectionQuery) PostQuery() gomerr.Gomerr {
 	return nil
 }

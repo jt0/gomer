@@ -12,8 +12,54 @@ import (
 	"github.com/jt0/gomer/resource"
 )
 
-func BuildRoutes(r *gin.Engine, resourceMetadata ...resource.Metadata) {
-	for _, md := range resourceMetadata {
+const (
+	PutCollection    = "PutCollection"
+	PostCollection   = "PostCollection"
+	GetCollection    = "GetCollection"
+	PatchCollection  = "PatchCollection"
+	DeleteCollection = "DeleteCollection"
+
+	PutInstance    = "PutInstance"
+	PostInstance   = "PostInstance"
+	GetInstance    = "GetInstance"
+	PatchInstance  = "PatchInstance"
+	DeleteInstance = "DeleteInstance"
+)
+
+type HttpSpec struct {
+	Method            string
+	SuccessStatusCode int
+}
+
+var unqualifiedOps = map[string]HttpSpec{
+	PutCollection:    {"PUT", http.StatusAccepted},
+	PostCollection:   {"POST", http.StatusCreated},
+	GetCollection:    {"GET", http.StatusOK},
+	PatchCollection:  {"PATCH", http.StatusOK},
+	DeleteCollection: {"DELETE", http.StatusAccepted},
+}
+
+var qualifiedOps = map[string]HttpSpec{
+	PutInstance:    {"PUT", http.StatusOK},
+	PostInstance:   {"POST", http.StatusCreated},
+	GetInstance:    {"GET", http.StatusOK},
+	PatchInstance:  {"PATCH", http.StatusOK},
+	DeleteInstance: {"DELETE", http.StatusNoContent},
+}
+
+var defaultInstanceActions = resource.InstanceActions{
+	PostCollection: resource.CreateInstance,
+	GetInstance:    resource.ReadInstance,
+	PatchInstance:  resource.UpdateInstance,
+	DeleteInstance: resource.DeleteInstance,
+}
+
+func CrudActions() resource.InstanceActions {
+	return defaultInstanceActions
+}
+
+func BuildRoutes(r *gin.Engine, topLevelResources ...resource.Metadata) {
+	for _, md := range topLevelResources {
 		buildRoutes(r, md, "")
 	}
 }
@@ -22,39 +68,53 @@ func buildRoutes(r *gin.Engine, md resource.Metadata, path string) {
 	resourceType := md.InstanceName()
 
 	if md.CollectionQueryName() != "" {
-		lowerCaseCollectionQueryName := strings.ToLower(md.CollectionQueryName())
-		var collectionName string
-		if strings.HasSuffix(lowerCaseCollectionQueryName, "collectionquery") {
-			collectionName = strings.TrimSuffix(lowerCaseCollectionQueryName, "collectionquery")
-		} else if strings.HasSuffix(lowerCaseCollectionQueryName, "query") {
-			collectionName = strings.TrimSuffix(lowerCaseCollectionQueryName, "query")
-		} else {
-			collectionName = lowerCaseCollectionQueryName
-		}
-		path = path + "/" + collectionName
+		path = collectionPathFor(md.CollectionQueryName(), path)
 
-		// FIXME: Examine metadata to determine if create/get are supported
-		r.POST(path, instanceHandler(resourceType, md.ExternalNameToFieldName, resource.DoCreate, true, http.StatusCreated))
+		if action, ok := md.InstanceActions()[PostCollection]; ok {
+			r.POST(path, instanceHandler(resourceType, action, md.ExternalNameToFieldName, true, http.StatusCreated))
+		}
+
 		r.GET(path, collectionQueryHandler(resourceType))
+
+		path = instancePathFor(resourceType, path)
+	} else {
+		path = singletonPathFor(resourceType, path)
 	}
 
-	// FIXME: support singleton (non-query) types that don't have an identifier
-	pathKey := resourceType + "Id"
-	path = path + "/:" + pathKey
+	for k, op := range qualifiedOps {
+		if action, ok := md.InstanceActions()[k]; ok {
+			r.Handle(op.Method, path, instanceHandler(resourceType, action, md.ExternalNameToFieldName, true, op.SuccessStatusCode))
+		}
+	}
 
-	// TODO: Examine metadata to determine if put/get/patch/delete are supported and if special handlers are needed
-	r.GET(path, instanceHandler(resourceType, md.ExternalNameToFieldName, resource.DoGet, false, http.StatusOK))
-	r.PATCH(path, instanceHandler(resourceType, md.ExternalNameToFieldName, resource.DoUpdate, true, http.StatusOK))
-	r.DELETE(path, instanceHandler(resourceType, md.ExternalNameToFieldName, resource.DoDelete, false, http.StatusNoContent))
-
-	for _, childMetadata := range md.Children() {
-		buildRoutes(r, childMetadata, path)
+	if md.CollectionQueryName() != "" { // Cannot have resources other than instances under a collection
+		for _, childMetadata := range md.Children() {
+			buildRoutes(r, childMetadata, path)
+		}
 	}
 }
 
-type instanceAction func(i resource.Instance) (result interface{}, ge gomerr.Gomerr)
+func collectionPathFor(resourceName, path string) string {
+	lowerCaseCollectionQueryName := strings.ToLower(resourceName)
 
-func instanceHandler(resourceType string, externalToFieldName func(string) (string, bool), doAction instanceAction, readBody bool, successStatus int) func(c *gin.Context) {
+	if strings.HasSuffix(lowerCaseCollectionQueryName, "collectionquery") {
+		return path + "/" + strings.TrimSuffix(lowerCaseCollectionQueryName, "collectionquery")
+	} else if strings.HasSuffix(lowerCaseCollectionQueryName, "query") {
+		return path + "/" + strings.TrimSuffix(lowerCaseCollectionQueryName, "query")
+	} else {
+		return path + "/" + lowerCaseCollectionQueryName
+	}
+}
+
+func instancePathFor(resourceName string, path string) string {
+	return path + "/:" + resourceName + "Id"
+}
+
+func singletonPathFor(resourceName string, path string) string {
+	return path + "/" + strings.ToLower(resourceName)
+}
+
+func instanceHandler(resourceType string, action func() resource.InstanceAction, externalToFieldName func(string) (string, bool), readBody bool, successStatus int) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -74,7 +134,7 @@ func instanceHandler(resourceType string, externalToFieldName func(string) (stri
 			return
 		}
 
-		if result, ge := doAction(instance); ge != nil {
+		if result, ge := resource.DoInstanceAction(instance, action()); ge != nil {
 			_ = c.Error(ge)
 		} else {
 			c.IndentedJSON(successStatus, result)
@@ -82,7 +142,7 @@ func instanceHandler(resourceType string, externalToFieldName func(string) (stri
 	}
 }
 
-func collectionQueryHandler(resourceType string) func(c *gin.Context) {
+func collectionQueryHandler(resourceType string /*, action resource.CollectionAction */) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		defer func() {
 			if r := recover(); r != nil {

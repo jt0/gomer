@@ -9,7 +9,7 @@ type Store interface {
 	Read(p Persistable) gomerr.Gomerr
 	Update(p Persistable, update Persistable) gomerr.Gomerr
 	Delete(p Persistable) gomerr.Gomerr
-	Query(q Queryable, persistableSlice interface{}) (nextToken *string, ge gomerr.Gomerr)
+	Query(q Queryable) (items []interface{}, nextToken *string, ge gomerr.Gomerr)
 }
 
 type Storable interface {
@@ -26,8 +26,6 @@ type Persistable interface {
 type Queryable interface {
 	Storable
 	Paginatable
-
-	ResponseFields() []string
 }
 
 type Paginatable interface {

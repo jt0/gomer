@@ -28,7 +28,7 @@ func (b *BaseResource) Subject() auth.Subject {
 	return b.sub
 }
 
-func (b *BaseInstance) OnSubject() {
+func (b *BaseResource) OnSubject() {
 	// No-op by default
 }
 

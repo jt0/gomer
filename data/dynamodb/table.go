@@ -61,7 +61,14 @@ type ConsistencyTyper interface {
 	SetConsistencyType(consistencyType ConsistencyType)
 }
 
-func Store(tableName string, config *Configuration, persistables ...data.Persistable) (data.Store, gomerr.Gomerr) {
+type ItemResolver func(interface{}) (interface{}, gomerr.Gomerr)
+
+func Store(
+	tableName string,
+	config *Configuration,
+	/* resolver data.ItemResolver,*/
+	persistables ...data.Persistable,
+) (data.Store, gomerr.Gomerr) {
 	table := &table{
 		tableName:              &tableName,
 		index:                  index{canReadConsistently: true},
@@ -143,10 +150,11 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 	}
 
 	for _, persistable := range persistables {
-		pType := reflect.TypeOf(persistable).Elem()
-		pName := util.UnqualifiedTypeName(pType)
+		pType := reflect.TypeOf(persistable)
+		pElem := pType.Elem()
+		pName := util.UnqualifiedTypeName(pElem)
 
-		pt, ge := newPersistableType(pName, pType, t.indexes)
+		pt, ge := newPersistableType(pName, pElem, t.indexes)
 		if ge != nil {
 			return ge
 		}
@@ -383,7 +391,7 @@ func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
 	return nil
 }
 
-func (t *table) Query(q data.Queryable, outSlice interface{}) (nextToken *string, ge gomerr.Gomerr) {
+func (t *table) Query(q data.Queryable) (items []interface{}, nextToken *string, ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
 			ge = gomerr.Data("Query", q).Wrap(ge)
@@ -393,26 +401,28 @@ func (t *table) Query(q data.Queryable, outSlice interface{}) (nextToken *string
 	var input *dynamodb.QueryInput
 	input, ge = t.buildQueryInput(q)
 	if ge != nil {
-		return nil, ge
+		return nil, nil, ge
 	}
 
 	var output *dynamodb.QueryOutput
 	output, ge = t.runQuery(input)
 	if ge != nil {
-		return nil, ge
+		return nil, nil, ge
 	}
 
 	nextToken, ge = t.nextTokenizer.tokenize(q, output.LastEvaluatedKey)
 	if ge != nil {
-		return nil, gomerr.Internal("Unable to generate nextToken").Wrap(ge)
+		return nil, nil, gomerr.Internal("Unable to generate nextToken").Wrap(ge)
 	}
 
-	err := dynamodbattribute.UnmarshalListOfMaps(output.Items, outSlice)
-	if err != nil {
-		return nil, gomerr.Unmarshal("[]"+q.PersistableTypeName(), output.Items, outSlice).Wrap(err)
+	items = make([]interface{}, len(output.Items))
+	for i, item := range output.Items {
+		if items[i], ge = t.persistableTypes[q.PersistableTypeName()].resolver(item); ge != nil {
+			return nil, nil, ge
+		}
 	}
 
-	return nextToken, nil
+	return items, nextToken, nil
 }
 
 func (t *table) constraintsCheck(p data.Persistable, fieldName string, additionalFields []string) gomerr.Gomerr {
