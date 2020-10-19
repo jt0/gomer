@@ -4,8 +4,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/jt0/gomer/auth"
+	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/resource/fields"
 )
 
 var Subject = NilSubject

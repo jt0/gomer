@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/jt0/gomer/data"
+	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/resource/fields"
 	"github.com/jt0/gomer/util"
 )
 

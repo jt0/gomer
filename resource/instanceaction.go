@@ -3,10 +3,10 @@ package resource
 import (
 	"reflect"
 
+	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/gomerr/constraint"
 	"github.com/jt0/gomer/limit"
-	"github.com/jt0/gomer/resource/fields"
 	"github.com/jt0/gomer/util"
 )
 
