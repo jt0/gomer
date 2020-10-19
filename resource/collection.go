@@ -96,7 +96,7 @@ func DoQuery(c CollectionQuery) (Collection, gomerr.Gomerr) {
 			}
 		}
 
-		rendered, nfe := renderInstance(instance)
+		rendered, nfe := render(instance)
 		if nfe != nil {
 			// Ignore because the item's rendered view contains no visible data so is just excluded from the results
 			continue
