@@ -1,4 +1,4 @@
-package resource
+package fields
 
 import (
 	"fmt"
@@ -8,9 +8,10 @@ import (
 
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/gomerr/constraint"
 )
 
-type fields struct {
+type Fields struct {
 	fieldMap map[string]*field
 	idField  *field
 
@@ -18,19 +19,19 @@ type fields struct {
 	//keyFields []*field
 }
 
-func newFields(structType reflect.Type) (*fields, gomerr.Gomerr) {
-	fields := &fields{
+func NewFields(structType reflect.Type) (*Fields, gomerr.Gomerr) {
+	fields := &Fields{
 		fieldMap: make(map[string]*field),
 	}
 
 	if errors := fields.process(structType, "", make([]gomerr.Gomerr, 0)); len(errors) > 0 {
-		return nil, gomerr.Configuration("Failed to process fields for " + structType.Name()).Wrap(gomerr.Batch(errors))
+		return nil, gomerr.Configuration("Failed to process Fields for " + structType.Name()).Wrap(gomerr.Batch(errors))
 	}
 
 	return fields, nil
 }
 
-func (fs *fields) process(structType reflect.Type, path string, errors []gomerr.Gomerr) []gomerr.Gomerr {
+func (fs *Fields) process(structType reflect.Type, path string, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	for i := 0; i < structType.NumField(); i++ {
 		sField := structType.Field(i)
 		sFieldName := sField.Name
@@ -93,11 +94,11 @@ func (fs *fields) process(structType reflect.Type, path string, errors []gomerr.
 	return errors
 }
 
-func (fs *fields) idExternalName() string {
+func (fs *Fields) idExternalName() string {
 	return fs.idField.externalName
 }
 
-func (fs *fields) externalNameToFieldName(externalName string) (string, bool) {
+func (fs *Fields) ExternalNameToFieldName(externalName string) (string, bool) {
 	if field, ok := fs.fieldMap[externalName]; ok {
 		return field.name, ok
 	} else {
@@ -105,23 +106,21 @@ func (fs *fields) externalNameToFieldName(externalName string) (string, bool) {
 	}
 }
 
-func (fs *fields) applyDefaults(i Instance) gomerr.Gomerr {
-	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
-
+func (fs *Fields) ApplyDefaults(v reflect.Value) gomerr.Gomerr {
 	// TODO: handle nested/embedded structs
 	for _, field := range fs.fieldMap {
 		if field.defaultValueFunction == nil && field.defaultValue == "" {
 			continue
 		}
 
-		fieldValue := resource.FieldByName(field.name)
+		fieldValue := v.FieldByName(field.name)
 		if field.bypassDefaultIfSet && flect.IsSet(fieldValue) {
 			continue
 		}
 
 		var defaultValue interface{}
 		if field.defaultValueFunction != nil {
-			defaultValue = field.defaultValueFunction(i)
+			defaultValue = field.defaultValueFunction(v)
 		} else {
 			defaultValue = field.defaultValue
 		}
@@ -134,13 +133,11 @@ func (fs *fields) applyDefaults(i Instance) gomerr.Gomerr {
 	return nil
 }
 
-func (fs *fields) removeNonReadable(i Instance) map[string]interface{} { // TODO: clear fields w/in instance
-	resource := reflect.ValueOf(i).Elem() // Support non-pointer types?
+func (fs *Fields) RemoveNonReadable(v reflect.Value, principal AccessPrincipal) map[string]interface{} { // TODO: clear Fields w/in instance
 	readView := make(map[string]interface{})
-
 	for _, field := range fs.fieldMap {
-		if field.access(i.Subject().Principal(FieldAccess), readAccess) {
-			fieldValue := resource.FieldByName(field.name)
+		if field.access(principal, ReadAccess) {
+			fieldValue := v.FieldByName(field.name)
 			if flect.IsSet(fieldValue) {
 				readView[field.externalName] = fieldValue.Interface()
 			}
@@ -150,22 +147,22 @@ func (fs *fields) removeNonReadable(i Instance) map[string]interface{} { // TODO
 	return readView
 }
 
-func (fs *fields) removeNonWritable(i Instance, accessType fieldAccessBits) gomerr.Gomerr {
-	iv := reflect.ValueOf(i).Elem()
+var canSet = constraint.NewConstrainer(func(value interface{}) bool { return value.(reflect.Value).CanSet() }, "CanSet", true)
 
+func (fs *Fields) RemoveNonWritable(v reflect.Value, accessType fieldAccessBits, accessPrincipal AccessPrincipal) gomerr.Gomerr {
 	for _, field := range fs.fieldMap {
 		// TODO: handle nested/embedded structs
-		if field.provided || strings.Contains(field.location, ".") || field.access(i.Subject().Principal(FieldAccess), accessType) {
+		if field.provided || strings.Contains(field.location, ".") || field.access(accessPrincipal, accessType) {
 			continue
 		}
 
-		fv := iv.FieldByName(field.name)
+		fv := v.FieldByName(field.name)
 		if !fv.IsValid() || fv.IsZero() {
 			continue
 		}
 
-		if !fv.CanSet() {
-			return gomerr.Configuration("Unable to zero field: " + i.metadata().instanceName + "." + field.name)
+		if ge := gomerr.Test("Field is settable", fv, canSet); ge != nil {
+			return ge.AddAttribute("FieldName", field.name)
 		}
 
 		fv.Set(field.zeroVal)
@@ -174,24 +171,21 @@ func (fs *fields) removeNonWritable(i Instance, accessType fieldAccessBits) gome
 	return nil
 }
 
-func (fs *fields) copyProvided(from, to Instance) gomerr.Gomerr {
-	fv := reflect.ValueOf(from).Elem()
-	tv := reflect.ValueOf(to).Elem() // Support non-pointer types?
-
+func (fs *Fields) CopyProvided(from, to reflect.Value) gomerr.Gomerr {
 	for _, field := range fs.fieldMap {
 		// TODO: handle nested/embedded structs
 		if !field.provided || strings.Contains(field.location, ".") {
 			continue
 		}
 
-		ffv := fv.FieldByName(field.name)
+		ffv := from.FieldByName(field.name)
 		if !ffv.IsValid() || ffv.IsZero() {
 			continue
 		}
 
-		tfv := tv.FieldByName(field.name)
-		if !tfv.CanSet() {
-			return gomerr.Configuration("Unable to copy provided field value: " + to.metadata().instanceName + "." + field.name)
+		tfv := to.FieldByName(field.name)
+		if ge := gomerr.Test("Field is settable", tfv, canSet); ge != nil {
+			return ge.AddAttribute("FieldName", field.name)
 		}
 
 		tfv.Set(ffv)

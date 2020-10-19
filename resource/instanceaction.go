@@ -1,9 +1,12 @@
 package resource
 
 import (
+	"reflect"
+
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/gomerr/constraint"
 	"github.com/jt0/gomer/limit"
+	"github.com/jt0/gomer/resource/fields"
 	"github.com/jt0/gomer/util"
 )
 
@@ -49,11 +52,13 @@ type createAction struct {
 }
 
 func (*createAction) Pre(i Instance) gomerr.Gomerr {
-	if ge := i.metadata().fields.removeNonWritable(i, createAccess); ge != nil {
+	iValue := reflect.ValueOf(i).Elem() // Support non-pointer types?
+
+	if ge := i.metadata().fields.RemoveNonWritable(iValue, fields.CreateAccess, i.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal)); ge != nil {
 		return ge
 	}
 
-	if ge := i.metadata().fields.applyDefaults(i); ge != nil {
+	if ge := i.metadata().fields.ApplyDefaults(iValue); ge != nil {
 		return ge
 	}
 
@@ -155,8 +160,10 @@ type updateAction struct {
 }
 
 func (a *updateAction) Pre(ui Instance) gomerr.Gomerr {
+	uv := reflect.ValueOf(ui).Elem()
+
 	// Clear out the update's non-writable fields (will keep 'provided' fields)
-	if ge := ui.metadata().fields.removeNonWritable(ui, updateAccess); ge != nil {
+	if ge := ui.metadata().fields.RemoveNonWritable(uv, fields.UpdateAccess, ui.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal)); ge != nil {
 		return ge
 	}
 
@@ -165,12 +172,11 @@ func (a *updateAction) Pre(ui Instance) gomerr.Gomerr {
 		return ge
 	}
 
-	// Copy the 'provided' fields to the new instance
-	if ge := i.metadata().fields.copyProvided(ui, i); ge != nil {
+	if ge := i.metadata().fields.CopyProvided(uv, reflect.ValueOf(i).Elem()); ge != nil {
 		return ge
 	}
 
-	// Populate other fields with data from the underlying store
+	// Populate other fields with data uv the underlying store
 	if ge := i.metadata().dataStore.Read(i); ge != nil {
 		return ge
 	}
@@ -266,7 +272,7 @@ func render(i interface{}) (interface{}, gomerr.Gomerr) {
 	case Renderer:
 		return t.Render()
 	case Instance:
-		if result := t.metadata().fields.removeNonReadable(t); result == nil || len(result) == 0 {
+		if result := t.metadata().fields.RemoveNonReadable(reflect.ValueOf(t).Elem(), t.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal)); result == nil || len(result) == 0 {
 			return nil, gomerr.NotFound(t.metadata().instanceName, t.Id())
 		} else {
 			return result, nil

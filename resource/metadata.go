@@ -6,6 +6,7 @@ import (
 
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/resource/fields"
 	"github.com/jt0/gomer/util"
 )
 
@@ -70,7 +71,7 @@ func Register(
 		children:            make([]Metadata, 0),
 	}
 
-	md.fields, ge = newFields(structType)
+	md.fields, ge = fields.NewFields(structType)
 	if ge != nil {
 		return nil, ge // don't want to return metadata value
 	}
@@ -91,7 +92,7 @@ type metadata struct {
 	instanceActions     InstanceActions
 	collectionQueryType reflect.Type
 	collectionQueryName string
-	fields              *fields
+	fields              *fields.Fields
 	dataStore           data.Store
 	parent              *metadata
 	children            []Metadata // Using interface type since we aren't currently using child attributes
@@ -128,7 +129,7 @@ func (m *metadata) Children() []Metadata {
 //}
 
 func (m *metadata) ExternalNameToFieldName(externalName string) (string, bool) {
-	return m.fields.externalNameToFieldName(externalName)
+	return m.fields.ExternalNameToFieldName(externalName)
 }
 
 func (m *metadata) emptyItems() interface{} {

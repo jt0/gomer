@@ -10,6 +10,10 @@ type Constrainer struct {
 	details map[string]interface{}
 }
 
+func NewConstrainer(test func(value interface{}) bool, detailParts ...interface{}) Constrainer {
+	return Constrainer{test: test}.setDetails(detailParts...)
+}
+
 func (c Constrainer) Test(value interface{}) bool {
 	return c.test(value)
 }

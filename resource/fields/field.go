@@ -1,14 +1,11 @@
-package resource
+package fields
 
 import (
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
 
-	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/gomerr/constraint"
 )
 
 type field struct {
@@ -18,13 +15,13 @@ type field struct {
 	accessBits           fieldAccessBits
 	provided             bool
 	defaultValue         string
-	defaultValueFunction FieldDefaultFunction
+	defaultValueFunction DefaultFunction
 	bypassDefaultIfSet   bool
 	zeroVal              reflect.Value
 }
 
 type fieldAccessBits uint32
-type FieldDefaultFunction func(Instance) interface{}
+type DefaultFunction func(reflect.Value) interface{}
 
 func (f *field) idTag(idTag string) gomerr.Gomerr {
 	parts := strings.Split(idTag, ",")
@@ -60,16 +57,16 @@ func (f *field) externalNameTag(nameTag string) {
 }
 
 const (
-	readAccess = fieldAccessBits(1 << iota)
-	createAccess
-	updateAccess
-	numAccessTypes = iota // iota is not reset, so this is the number of access types starting w/ readAccess
+	ReadAccess = fieldAccessBits(1 << iota)
+	CreateAccess
+	UpdateAccess
+	numAccessTypes = iota // iota is not reset, so this is the number of access types starting w/ ReadAccess
 
-	readChar   = 'r'
-	writeChar  = 'w'
-	createChar = 'c'
-	updateChar = 'u'
-	dashChar   = '-'
+	ReadChar   = 'r'
+	WriteChar  = 'w'
+	CreateChar = 'c'
+	UpdateChar = 'u'
+	DenyChar   = '-'
 )
 
 func (f *field) accessTag(accessTag string) gomerr.Gomerr {
@@ -96,22 +93,22 @@ func (f *field) accessTag(accessTag string) gomerr.Gomerr {
 		accessBits <<= numAccessTypes // Prepare to write the next access bits.  The first time this still results in no set bits
 
 		switch access[i] {
-		case readChar:
-			accessBits |= readAccess
-		case dashChar:
+		case ReadChar:
+			accessBits |= ReadAccess
+		case DenyChar:
 			// nothing to set
 		default:
 			return gomerr.Configuration("Expected one of read access values (r, -), but got: " + string(access[i]))
 		}
 
 		switch access[i+1] {
-		case writeChar:
-			accessBits |= createAccess | updateAccess
-		case createChar:
-			accessBits |= createAccess
-		case updateChar:
-			accessBits |= updateAccess
-		case dashChar:
+		case WriteChar:
+			accessBits |= CreateAccess | UpdateAccess
+		case CreateChar:
+			accessBits |= CreateAccess
+		case UpdateChar:
+			accessBits |= UpdateAccess
+		case DenyChar:
 			// nothing to set
 		default:
 			return gomerr.Configuration("Expected one of write access values (w, c, u, -), but got: " + string(access[i]))
@@ -123,18 +120,18 @@ func (f *field) accessTag(accessTag string) gomerr.Gomerr {
 	return nil
 }
 
-func (f *field) access(fieldAccessPrincipal auth.Principal, accessType fieldAccessBits) bool {
-	switch fieldAccessPrincipal {
+func (f *field) access(accessPrincipal AccessPrincipal, accessType fieldAccessBits) bool {
+	switch accessPrincipal {
 	case ReadWriteAll:
 		return true
 	case ReadAll:
-		return accessType&readAccess == readAccess
+		return accessType&ReadAccess == ReadAccess
 	case NoAccess:
 		fallthrough
-	case nil:
+	case "":
 		return false
 	default:
-		bitsIndex, ok := bitsLocationForPrincipal[fieldAccessPrincipal]
+		bitsIndex, ok := bitsLocationForPrincipal[accessPrincipal]
 		if !ok {
 			return false // no matching principal
 		}
@@ -166,59 +163,4 @@ func (f *field) defaultTag(defaultTag string) {
 	}
 
 	f.defaultValue = defaultTag
-}
-
-type FieldAccessPrincipal string
-
-const (
-	FieldAccess auth.PrincipalType = "FieldAccess"
-
-	ReadWriteAll FieldAccessPrincipal = "ReadWriteAll"
-	ReadAll      FieldAccessPrincipal = "ReadAll"
-	NoAccess     FieldAccessPrincipal = "NoAccess"
-)
-
-func (f FieldAccessPrincipal) Id() string {
-	return string(f)
-}
-
-func (f FieldAccessPrincipal) Type() auth.PrincipalType {
-	return FieldAccess
-}
-
-func (f FieldAccessPrincipal) Release(_ bool) gomerr.Gomerr {
-	return nil
-}
-
-var bitsLocationForPrincipal = make(map[auth.Principal]uint)
-var notReservedPrincipalsConstraint = constraint.Not(constraint.OneOf(ReadWriteAll, ReadAll, NoAccess))
-
-func RegisterFieldAccessPrincipals(fieldAccessPrincipals ...FieldAccessPrincipal) {
-	if len(fieldAccessPrincipals) > 7 {
-		panic(fmt.Sprintf("too many fieldAccessPrincipals (maximum = 7): %v", fieldAccessPrincipals))
-	}
-
-	for i, r := range fieldAccessPrincipals {
-		if ge := gomerr.Test("FieldAccessPrincipal.Id()", r, notReservedPrincipalsConstraint); ge != nil {
-			panic(ge)
-		}
-
-		bitsLocationForPrincipal[r] = uint(i)
-	}
-}
-
-var fieldDefaultFunctions map[string]FieldDefaultFunction
-
-func RegisterFieldDefaultFunctions(functions map[string]FieldDefaultFunction) {
-	for k := range functions {
-		if k[:1] != "$" {
-			panic("Default functions must start with a '$' symbol")
-		}
-
-		if k[1:2] == "_" {
-			panic("Default function names must not begin with an underscore")
-		}
-	}
-
-	fieldDefaultFunctions = functions
 }

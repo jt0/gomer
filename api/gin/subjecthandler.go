@@ -5,7 +5,7 @@ import (
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/resource"
+	"github.com/jt0/gomer/resource/fields"
 )
 
 var Subject = NilSubject
@@ -19,7 +19,7 @@ type SubjectProvider func(*gin.Context) (auth.Subject, gomerr.Gomerr)
 func SubjectHandler(subjectProvider SubjectProvider) gin.HandlerFunc {
 	if subjectProvider == nil {
 		subjectProvider = func(*gin.Context) (auth.Subject, gomerr.Gomerr) {
-			return auth.NewSubject(resource.NoAccess), nil
+			return auth.NewSubject(fields.NoAccess), nil
 		}
 	}
 
