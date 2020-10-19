@@ -10,7 +10,7 @@ import (
 type InstanceAction interface {
 	Pre(Instance) gomerr.Gomerr
 	Do(Instance) gomerr.Gomerr
-	OnDoSuccess(Instance) gomerr.Gomerr
+	OnDoSuccess(Instance) (interface{}, gomerr.Gomerr)
 	OnDoFailure(Instance, gomerr.Gomerr) gomerr.Gomerr
 }
 
@@ -23,11 +23,12 @@ func DoInstanceAction(i Instance, instanceAction InstanceAction) (interface{}, g
 		return nil, instanceAction.OnDoFailure(i, ge)
 	}
 
-	if ge := instanceAction.OnDoSuccess(i); ge != nil {
+	output, ge := instanceAction.OnDoSuccess(i)
+	if ge != nil {
 		return nil, ge
 	}
 
-	return renderInstance(i)
+	return render(output)
 }
 
 type Creatable interface {
@@ -77,11 +78,11 @@ func (a *createAction) Do(i Instance) (ge gomerr.Gomerr) {
 	return i.metadata().dataStore.Create(i)
 }
 
-func (a *createAction) OnDoSuccess(i Instance) gomerr.Gomerr {
+func (a *createAction) OnDoSuccess(i Instance) (interface{}, gomerr.Gomerr) {
 	defer saveLimiterIfDirty(a.limiter)
 
 	// If we made it this far, we know i is a Creatable
-	return i.(Creatable).PostCreate()
+	return i, i.(Creatable).PostCreate()
 }
 
 func (*createAction) OnDoFailure(i Instance, ge gomerr.Gomerr) gomerr.Gomerr {
@@ -122,9 +123,9 @@ func (a readAction) Do(i Instance) (ge gomerr.Gomerr) {
 	return i.metadata().dataStore.Read(i)
 }
 
-func (a readAction) OnDoSuccess(i Instance) gomerr.Gomerr {
+func (a readAction) OnDoSuccess(i Instance) (interface{}, gomerr.Gomerr) {
 	// If we made it this far, we know i is a Readable
-	return i.(Readable).PostRead()
+	return i, i.(Readable).PostRead()
 }
 
 func (a readAction) OnDoFailure(i Instance, ge gomerr.Gomerr) gomerr.Gomerr {
@@ -188,8 +189,8 @@ func (a *updateAction) Do(ui Instance) (ge gomerr.Gomerr) {
 	return ui.metadata().dataStore.Update(a.actual, ui)
 }
 
-func (a *updateAction) OnDoSuccess(ui Instance) gomerr.Gomerr {
-	return a.actual.PostUpdate(ui)
+func (a *updateAction) OnDoSuccess(ui Instance) (interface{}, gomerr.Gomerr) {
+	return a.actual, a.actual.PostUpdate(ui)
 }
 
 func (a *updateAction) OnDoFailure(_ Instance, ge gomerr.Gomerr) gomerr.Gomerr {
@@ -235,11 +236,11 @@ func (a *deleteAction) Do(i Instance) (ge gomerr.Gomerr) {
 	return i.metadata().dataStore.Delete(i)
 }
 
-func (a *deleteAction) OnDoSuccess(i Instance) gomerr.Gomerr {
+func (a *deleteAction) OnDoSuccess(i Instance) (interface{}, gomerr.Gomerr) {
 	defer saveLimiterIfDirty(a.limiter)
 
 	// If we made it this far, we know i is a Deletable
-	return i.(Deletable).PostDelete()
+	return i, i.(Deletable).PostDelete()
 }
 
 func (*deleteAction) OnDoFailure(i Instance, ge gomerr.Gomerr) gomerr.Gomerr {
@@ -260,15 +261,18 @@ func (NoContentRenderer) Render() (interface{}, gomerr.Gomerr) {
 	return nil, nil
 }
 
-func renderInstance(i Instance) (interface{}, gomerr.Gomerr) {
-	if r, ok := i.(Renderer); ok {
-		return r.Render()
-	}
-
-	if result := i.metadata().fields.removeNonReadable(i); result == nil || len(result) == 0 {
-		return nil, gomerr.NotFound(i.metadata().instanceName, i.Id())
-	} else {
-		return result, nil
+func render(i interface{}) (interface{}, gomerr.Gomerr) {
+	switch t := i.(type) {
+	case Renderer:
+		return t.Render()
+	case Instance:
+		if result := t.metadata().fields.removeNonReadable(t); result == nil || len(result) == 0 {
+			return nil, gomerr.NotFound(t.metadata().instanceName, t.Id())
+		} else {
+			return result, nil
+		}
+	default:
+		return i, nil
 	}
 }
 
@@ -282,8 +286,8 @@ func (NoOpInstanceAction) Do(Instance) gomerr.Gomerr {
 	return nil
 }
 
-func (NoOpInstanceAction) OnDoSuccess(Instance) gomerr.Gomerr {
-	return nil
+func (NoOpInstanceAction) OnDoSuccess(Instance) (interface{}, gomerr.Gomerr) {
+	return nil, nil
 }
 
 func (NoOpInstanceAction) OnDoFailure(_ Instance, ge gomerr.Gomerr) gomerr.Gomerr {
