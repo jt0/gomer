@@ -36,5 +36,5 @@ type NotSatisfiedError struct {
 }
 
 func NotSatisfied(what string, value interface{}, constraint Constraint) *NotSatisfiedError {
-	return Build(new(NotSatisfiedError), what, value, constraint).(*NotSatisfiedError)
+	return Build(new(NotSatisfiedError), what, value, constraint.Details()).(*NotSatisfiedError)
 }

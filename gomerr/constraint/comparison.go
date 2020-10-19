@@ -3,12 +3,12 @@ package constraint
 type ComparisonType string
 
 const (
-	EQ  ComparisonType = "Equals"
-	NEQ                = "NotEquals"
-	GT                 = "GreaterThan"
-	GTE                = "GreaterThanOrEquals"
-	LT                 = "LessThan"
-	LTE                = "LessThanOrEquals"
+	EQ  ComparisonType = "EQ"
+	NEQ                = "NEQ"
+	GT                 = "GT"
+	GTE                = "GTE"
+	LT                 = "LT"
+	LTE                = "LTE"
 )
 
 // IntCompare compares the tested value to compareTo. While compareTo is an int64, the
@@ -30,7 +30,7 @@ func IntCompare(comparisonType ComparisonType, compareTo int64) Constrainer {
 		default:
 			return false
 		}
-	}}.setDetails(comparisonType, compareTo)
+	}}.setDetails(string(comparisonType), compareTo)
 }
 
 // IntBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
@@ -67,7 +67,7 @@ func UintCompare(comparisonType ComparisonType, compareTo uint64) Constrainer {
 		default:
 			return false
 		}
-	}}.setDetails(comparisonType, compareTo)
+	}}.setDetails(string(comparisonType), compareTo)
 }
 
 // UintBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
@@ -105,7 +105,7 @@ func FloatCompare(comparisonType ComparisonType, compareTo float64) Constrainer 
 		default:
 			return false
 		}
-	}}.setDetails(comparisonType, compareTo)
+	}}.setDetails(string(comparisonType), compareTo)
 }
 
 // FloatBetween determines whether the provided value is (inclusively) between the lower and upper values provided.

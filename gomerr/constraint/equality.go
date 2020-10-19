@@ -30,5 +30,5 @@ func TypeOf(i interface{}) Constrainer {
 
 	return Constrainer{test: func(value interface{}) bool {
 		return reflect.TypeOf(value) == t
-	}}.setDetails("reflect.TypeOf ==", t.Name())
+	}}.setDetails("TypeOf", t.Name())
 }
