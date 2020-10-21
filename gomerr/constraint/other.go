@@ -8,8 +8,8 @@ var Required = required()
 
 func required() Constrainer {
 	return Constrainer{test: func(value interface{}) bool {
-		v := reflect.ValueOf(value)
-		return v.IsValid() && !v.IsZero()
+		vv := reflect.ValueOf(value)
+		return vv.IsValid() && (vv.Kind() != reflect.Ptr || !vv.IsNil())
 	}}.setDetails("Required", true)
 }
 

@@ -1,6 +1,13 @@
 package constraint
 
 func And(operands ...Constrainer) Constrainer {
+	switch len(operands) {
+	case 0:
+		return Invalid
+	case 1:
+		return operands[0]
+	}
+
 	return Constrainer{test: func(value interface{}) bool {
 		for _, operand := range operands {
 			if !operand.test(value) {
@@ -8,10 +15,17 @@ func And(operands ...Constrainer) Constrainer {
 			}
 		}
 		return true
-	}}.setDetails("AND", operandDetails(operands))
+	}}.setDetails("And", operandDetails(operands))
 }
 
 func Or(operands ...Constrainer) Constrainer {
+	switch len(operands) {
+	case 0:
+		return Invalid
+	case 1:
+		return operands[0]
+	}
+
 	return Constrainer{test: func(value interface{}) bool {
 		for _, operand := range operands {
 			if operand.test(value) {
@@ -19,13 +33,13 @@ func Or(operands ...Constrainer) Constrainer {
 			}
 		}
 		return false
-	}}.setDetails("OR", operandDetails(operands))
+	}}.setDetails("Or", operandDetails(operands))
 }
 
 func Not(operand Constrainer) Constrainer {
 	return Constrainer{test: func(value interface{}) bool {
 		return !operand.test(value)
-	}}.setDetails("NOT", operand.details)
+	}}.setDetails("Not", operand.details)
 }
 
 func operandDetails(operands []Constrainer) []map[string]interface{} {

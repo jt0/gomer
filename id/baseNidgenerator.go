@@ -3,6 +3,7 @@ package id
 import (
 	"math"
 	"math/rand"
+	"time"
 )
 
 //goland:noinspection SpellCheckingInspection
@@ -20,22 +21,22 @@ func Bits(count int, base uint64) (bits int, chars int) {
 
 // TODO: add support for either count(chars) or count(bits)
 func NewBase36IdGenerator(count int, charsOrBits CharsOrBits) Generator {
-	return NewBaseNIdGenerator(count, charsOrBits, AsciiEncodingCharacters[0:36])
+	return NewBaseNIdGenerator(count, charsOrBits, AsciiEncodingCharacters[0:36], time.Now().UnixNano())
 }
 
 func NewBase62IdGenerator(count int, charsOrBits CharsOrBits) Generator {
-	return NewBaseNIdGenerator(count, charsOrBits, AsciiEncodingCharacters)
+	return NewBaseNIdGenerator(count, charsOrBits, AsciiEncodingCharacters, time.Now().UnixNano())
 }
 
 func NewBase16IdGenerator(count int, charsOrBits CharsOrBits) Generator {
-	return NewBaseNIdGenerator(count, charsOrBits, AsciiEncodingCharacters[0:16])
+	return NewBaseNIdGenerator(count, charsOrBits, AsciiEncodingCharacters[0:16], time.Now().UnixNano())
 }
 
 func NewBase10IdGenerator(count int, charsOrBits CharsOrBits) Generator {
-	return NewBaseNIdGenerator(count, charsOrBits, AsciiEncodingCharacters[0:10])
+	return NewBaseNIdGenerator(count, charsOrBits, AsciiEncodingCharacters[0:10], time.Now().UnixNano())
 }
 
-func NewBaseNIdGenerator(count int, charsOrBits CharsOrBits, encodingCharacters []byte) Generator {
+func NewBaseNIdGenerator(count int, charsOrBits CharsOrBits, encodingCharacters []byte, seed int64) Generator {
 	if count < 1 {
 		panic("count must be >= 1")
 	}
@@ -46,6 +47,8 @@ func NewBaseNIdGenerator(count int, charsOrBits CharsOrBits, encodingCharacters 
 	}
 
 	bitsPerId, charsPerId := charsOrBits(count, base)
+
+	rand.Seed(seed)
 
 	return baseNIdGenerator{
 		base:           base,

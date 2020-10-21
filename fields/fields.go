@@ -19,13 +19,28 @@ type Fields struct {
 	//keyFields []*field
 }
 
+type field struct {
+	name                 string
+	externalName         string
+	location             string
+	accessBits           fieldAccessBits
+	provided             bool
+	defaultValue         string
+	defaultValueFunction DefaultFunction
+	bypassDefaultIfSet   bool
+	zeroVal              reflect.Value
+	constraints          map[string]constraint.Constrainer
+}
+
+var dollarNameConstraint = constraint.And(constraint.Length(2, 64), constraint.StartsWith("$"))
+
 func NewFields(structType reflect.Type) (*Fields, gomerr.Gomerr) {
 	fields := &Fields{
 		fieldMap: make(map[string]*field),
 	}
 
 	if errors := fields.process(structType, "", make([]gomerr.Gomerr, 0)); len(errors) > 0 {
-		return nil, gomerr.Configuration("Failed to process Fields for " + structType.Name()).Wrap(gomerr.Batch(errors))
+		return nil, gomerr.Configuration("Failed to process Fields for " + structType.Name()).Wrap(gomerr.Batcher(errors))
 	}
 
 	return fields, nil
@@ -73,6 +88,10 @@ func (fs *Fields) process(structType reflect.Type, path string, errors []gomerr.
 				f.defaultTag(sField.Tag.Get("default"))
 			}
 
+			if ge := f.validateTag(sField.Tag.Get("validate")); ge != nil {
+				errors = append(errors, ge)
+			}
+
 			if current, exists := fs.fieldMap[f.externalName]; exists {
 				if strings.Count(current.location, ".") == 0 && strings.Count(current.location, "+") == 0 {
 					fmt.Printf("Info: skipping duplicate field found at '%s'\n", f.location)
@@ -92,10 +111,6 @@ func (fs *Fields) process(structType reflect.Type, path string, errors []gomerr.
 	}
 
 	return errors
-}
-
-func (fs *Fields) idExternalName() string {
-	return fs.idField.externalName
 }
 
 func (fs *Fields) ExternalNameToFieldName(externalName string) (string, bool) {
@@ -139,6 +154,9 @@ func (fs *Fields) RemoveNonReadable(v reflect.Value, principal AccessPrincipal) 
 		if field.access(principal, ReadAccess) {
 			fieldValue := v.FieldByName(field.name)
 			if flect.IsSet(fieldValue) {
+				if fieldValue.Kind() == reflect.Ptr {
+					fieldValue = fieldValue.Elem()
+				}
 				readView[field.externalName] = fieldValue.Interface()
 			}
 		}
@@ -192,4 +210,35 @@ func (fs *Fields) CopyProvided(from, to reflect.Value) gomerr.Gomerr {
 	}
 
 	return nil
+}
+
+const matchImplicitly = "*"
+
+func (fs *Fields) Validate(v reflect.Value, context string) gomerr.Gomerr {
+	var errors []gomerr.Gomerr
+
+	for _, field := range fs.fieldMap {
+		if field.constraints == nil || strings.Contains(field.location, ".") { // TODO: handle nested/embedded structs
+			continue
+		}
+
+		c, ok := field.constraints[context]
+		if !ok {
+			if c, ok = field.constraints[matchImplicitly]; !ok {
+				continue
+			}
+		}
+
+		fv := v.FieldByName(field.name)
+		if fv.Kind() == reflect.Ptr && !fv.IsNil() {
+			fv = fv.Elem()
+		}
+
+		fvi := fv.Interface()
+		if ge := gomerr.Test(field.name, fvi, c); ge != nil {
+			errors = append(errors, ge)
+		}
+	}
+
+	return gomerr.Batcher(errors)
 }

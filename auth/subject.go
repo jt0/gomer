@@ -37,7 +37,7 @@ func (b *basicSubject) Release(errored bool) gomerr.Gomerr {
 	}
 
 	if len(errors) > 0 {
-		return gomerr.Batch(errors)
+		return gomerr.Batcher(errors)
 	}
 
 	return nil

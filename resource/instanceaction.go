@@ -52,19 +52,19 @@ type createAction struct {
 }
 
 func (*createAction) Pre(i Instance) gomerr.Gomerr {
-	iValue := reflect.ValueOf(i).Elem() // Support non-pointer types?
+	iv := reflect.ValueOf(i).Elem() // Support non-pointer types?
 
-	if ge := i.metadata().fields.RemoveNonWritable(iValue, fields.CreateAccess, i.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal)); ge != nil {
+	if ge := i.metadata().fields.RemoveNonWritable(iv, fields.CreateAccess, i.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal)); ge != nil {
 		return ge
 	}
 
-	if ge := i.metadata().fields.ApplyDefaults(iValue); ge != nil {
+	if ge := i.metadata().fields.ApplyDefaults(iv); ge != nil {
 		return ge
 	}
 
-	//if err := validate.Struct(i); err != nil {
-	//	return nil, gomerr.ValidationFailure(err)
-	//}
+	if ge := i.metadata().fields.Validate(iv, "create"); ge != nil {
+		return ge
+	}
 
 	creatable, ok := i.(Creatable)
 	if !ok {
@@ -116,6 +116,10 @@ var readActionSingleton = &readAction{}
 type readAction struct{}
 
 func (a readAction) Pre(i Instance) gomerr.Gomerr {
+	if ge := i.metadata().fields.Validate(reflect.ValueOf(i).Elem(), "read"); ge != nil {
+		return ge
+	}
+
 	readable, ok := i.(Readable)
 	if !ok {
 		return gomerr.Unprocessable("Instance", i, constraint.TypeOf(readable))
@@ -164,6 +168,10 @@ func (a *updateAction) Pre(ui Instance) gomerr.Gomerr {
 
 	// Clear out the update's non-writable fields (will keep 'provided' fields)
 	if ge := ui.metadata().fields.RemoveNonWritable(uv, fields.UpdateAccess, ui.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal)); ge != nil {
+		return ge
+	}
+
+	if ge := ui.metadata().fields.Validate(uv, "update"); ge != nil {
 		return ge
 	}
 
@@ -225,6 +233,10 @@ type deleteAction struct {
 }
 
 func (*deleteAction) Pre(i Instance) gomerr.Gomerr {
+	if ge := i.metadata().fields.Validate(reflect.ValueOf(i).Elem(), "delete"); ge != nil {
+		return ge
+	}
+
 	deletable, ok := i.(Deletable)
 	if !ok {
 		return gomerr.Unprocessable("Instance", i, constraint.TypeOf(deletable))

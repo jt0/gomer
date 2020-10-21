@@ -234,7 +234,10 @@ func fieldValue(fieldName string, sv reflect.Value) string {
 		return fieldName[1 : len(fieldName)-1]
 	} else {
 		v := sv.FieldByName(fieldName)
-		if v.IsValid() {
+		if v.IsValid() && !v.IsZero() {
+			if v.Kind() == reflect.Ptr && !v.IsNil() {
+				v = v.Elem()
+			}
 			return fmt.Sprint(v.Interface())
 		} else {
 			return ""

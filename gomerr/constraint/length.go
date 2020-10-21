@@ -43,14 +43,13 @@ func length(min, max *int) Constrainer {
 	}
 
 	return Constrainer{test: func(value interface{}) bool {
-		ct := reflect.TypeOf(value)
-		if ct == nil {
-			return false
-		}
+		vv := reflect.ValueOf(value)
 
-		switch ct.Kind() {
+		switch vv.Kind() {
+		case reflect.Ptr:
+			return vv.IsNil() && min != nil && *min == 0 // len(nil) == 0
 		case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
-			length := reflect.ValueOf(value).Len()
+			length := vv.Len()
 			return (min == nil || length >= *min) && (max == nil || length <= *max)
 		default:
 			return false

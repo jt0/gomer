@@ -211,25 +211,25 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 	updatedUniqueFields := make(map[string][]string)
 
 	if update != nil {
-		pv := reflect.ValueOf(p).Elem()
 		uv := reflect.ValueOf(update).Elem()
+		pv := reflect.ValueOf(p).Elem()
 
 		for i := 0; i < uv.NumField(); i++ {
 			uField := uv.Field(i)
-			if !uField.CanSet() || uField.IsZero() {
+			if !uField.CanSet() || uField.Kind() == reflect.Struct || (uField.Kind() == reflect.Ptr && uField.Elem().Kind() == reflect.Struct) { // TODO: structs
 				continue
 			}
 
-			if pv.Field(i).Interface() == uv.Field(i).Interface() { // TODO: deal w/ pointers and structs
+			pField := pv.Field(i)
+			if uField.Interface() == pField.Interface() {
 				uField.Set(reflect.Zero(uField.Type()))
-			} else {
-				pv.Field(i).Set(uField)
+			} else if uField.Kind() != reflect.Ptr || !uField.IsNil() { // Only update if there's a different (first clause == false) and non-nil value
+				pField.Set(uField)
 			}
 		}
 
 		for fieldName, additionalFields := range t.persistableTypes[p.PersistableTypeName()].uniqueFields {
-			uField := uv.FieldByName(fieldName)
-			if uField != zeroValue && !uField.IsZero() {
+			if !uv.FieldByName(fieldName).IsZero() {
 				updatedUniqueFields[fieldName] = additionalFields
 			}
 		}

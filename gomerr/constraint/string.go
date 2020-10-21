@@ -28,6 +28,10 @@ func EndsWith(suffix string) Constrainer {
 	}}.setDetails("Suffix", suffix)
 }
 
+func RegexpMust(r string) Constrainer {
+	return Regexp(regexp.MustCompile(r))
+}
+
 func Regexp(regexp *regexp.Regexp) Constrainer {
 	return Constrainer{test: func(value interface{}) bool {
 		s, ok := value.(string)

@@ -13,7 +13,7 @@ func Test(what string, value interface{}, constraint Constraint) *NotSatisfiedEr
 	return nil
 }
 
-func TestEach(what string, value interface{}, constraints ...Constraint) *BatchError {
+func TestEach(what string, value interface{}, constraints ...Constraint) Gomerr {
 	errors := make([]Gomerr, 0)
 	for _, constraint := range constraints {
 		if !constraint.Test(value) {
@@ -21,11 +21,7 @@ func TestEach(what string, value interface{}, constraints ...Constraint) *BatchE
 		}
 	}
 
-	if len(errors) > 0 {
-		return Batch(errors)
-	}
-
-	return nil
+	return Batcher(errors)
 }
 
 type NotSatisfiedError struct {

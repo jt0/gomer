@@ -32,7 +32,7 @@ func newPersistableType(persistableName string, pType reflect.Type, indexes map[
 	}
 
 	if errors := pt.processFields(pType, "", indexes, make([]gomerr.Gomerr, 0)); len(errors) > 0 {
-		return nil, gomerr.Configuration("'db' tag errors found for type: " + persistableName).Wrap(gomerr.Batch(errors))
+		return nil, gomerr.Configuration("'db' tag errors found for type: " + persistableName).Wrap(gomerr.Batcher(errors))
 	}
 
 	return pt, nil
