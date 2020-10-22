@@ -5,6 +5,10 @@ import (
 	"os"
 )
 
+const (
+	LookupName = "LookupName"
+)
+
 type Constrainer struct {
 	test    func(value interface{}) bool
 	details map[string]interface{}

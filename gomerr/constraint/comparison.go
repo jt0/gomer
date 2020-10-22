@@ -1,6 +1,10 @@
 package constraint
 
-type ComparisonType string
+import (
+	"reflect"
+)
+
+type ComparisonType = string
 
 const (
 	EQ  ComparisonType = "EQ"
@@ -16,27 +20,28 @@ const (
 // an integer type, the constraint will return false.
 func IntCompare(comparisonType ComparisonType, compareTo int64) Constrainer {
 	return Constrainer{test: func(value interface{}) bool {
-		switch value.(type) {
+		switch vt := value.(type) {
 		case int:
-			return intComparators[comparisonType](int64(value.(int)), compareTo)
+			return intComparators[comparisonType](int64(vt), compareTo)
 		case int8:
-			return intComparators[comparisonType](int64(value.(int8)), compareTo)
+			return intComparators[comparisonType](int64(vt), compareTo)
 		case int16:
-			return intComparators[comparisonType](int64(value.(int16)), compareTo)
+			return intComparators[comparisonType](int64(vt), compareTo)
 		case int32:
-			return intComparators[comparisonType](int64(value.(int32)), compareTo)
+			return intComparators[comparisonType](int64(vt), compareTo)
 		case int64:
-			return intComparators[comparisonType](value.(int64), compareTo)
+			return intComparators[comparisonType](vt, compareTo)
 		default:
-			return false
+			vv := reflect.ValueOf(value) // ignore nil; can be marked as required if needed
+			return vv.Kind() == reflect.Ptr && vv.IsNil()
 		}
-	}}.setDetails(string(comparisonType), compareTo)
+	}}.setDetails(string(comparisonType), compareTo, LookupName, "int")
 }
 
 // IntBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func IntBetween(lower, upper int64) Constrainer {
-	return And(IntCompare(GTE, lower), IntCompare(LTE, upper))
+	return And(IntCompare(GTE, lower), IntCompare(LTE, upper)).setDetails(LookupName, "intbetween")
 }
 
 var intComparators = map[ComparisonType]func(value, compareTo int64) bool{
@@ -53,27 +58,28 @@ var intComparators = map[ComparisonType]func(value, compareTo int64) bool{
 // is not an unsigned integer type, the constraint will return false.
 func UintCompare(comparisonType ComparisonType, compareTo uint64) Constrainer {
 	return Constrainer{test: func(value interface{}) bool {
-		switch value.(type) {
+		switch vt := value.(type) {
 		case uint:
-			return uintComparators[comparisonType](uint64(value.(uint)), compareTo)
+			return uintComparators[comparisonType](uint64(vt), compareTo)
 		case uint8:
-			return uintComparators[comparisonType](uint64(value.(uint8)), compareTo)
+			return uintComparators[comparisonType](uint64(vt), compareTo)
 		case uint16:
-			return uintComparators[comparisonType](uint64(value.(uint16)), compareTo)
+			return uintComparators[comparisonType](uint64(vt), compareTo)
 		case uint32:
-			return uintComparators[comparisonType](uint64(value.(uint32)), compareTo)
+			return uintComparators[comparisonType](uint64(vt), compareTo)
 		case uint64:
-			return uintComparators[comparisonType](value.(uint64), compareTo)
+			return uintComparators[comparisonType](vt, compareTo)
 		default:
-			return false
+			vv := reflect.ValueOf(value) // ignore nil; can be marked as required if needed
+			return vv.Kind() == reflect.Ptr && vv.IsNil()
 		}
-	}}.setDetails(string(comparisonType), compareTo)
+	}}.setDetails(string(comparisonType), compareTo, LookupName, "uint")
 }
 
 // UintBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func UintBetween(lower, upper uint64) Constrainer {
-	return And(UintCompare(GTE, lower), UintCompare(LTE, upper))
+	return And(UintCompare(GTE, lower), UintCompare(LTE, upper)).setDetails(LookupName, "uintbetween")
 }
 
 var uintComparators = map[ComparisonType]func(value, compareTo uint64) bool{
@@ -86,32 +92,33 @@ var uintComparators = map[ComparisonType]func(value, compareTo uint64) bool{
 }
 
 func ByteCompare(comparisonType ComparisonType, compareTo byte) Constrainer {
-	return UintCompare(comparisonType, uint64(compareTo))
+	return UintCompare(comparisonType, uint64(compareTo)).setDetails(LookupName, "byte")
 }
 
 func ByteBetween(lower, upper byte) Constrainer {
-	return UintBetween(uint64(lower), uint64(upper))
+	return UintBetween(uint64(lower), uint64(upper)).setDetails(LookupName, "bytebetween")
 }
 
 // FloatCompare compares a tested value to compareTo. While compareTo is an float64, the
 // tested value can be either float32/float64. If the value is not a float type, the constraint will return false.
 func FloatCompare(comparisonType ComparisonType, compareTo float64) Constrainer {
 	return Constrainer{test: func(value interface{}) bool {
-		switch value.(type) {
+		switch vt := value.(type) {
 		case float32:
-			return floatComparators[comparisonType](float64(value.(float32)), compareTo)
+			return floatComparators[comparisonType](float64(vt), compareTo)
 		case float64:
-			return floatComparators[comparisonType](value.(float64), compareTo)
+			return floatComparators[comparisonType](vt, compareTo)
 		default:
-			return false
+			vv := reflect.ValueOf(value) // ignore nil; can be marked as required if needed
+			return vv.Kind() == reflect.Ptr && vv.IsNil()
 		}
-	}}.setDetails(string(comparisonType), compareTo)
+	}}.setDetails(string(comparisonType), compareTo, LookupName, "float")
 }
 
 // FloatBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func FloatBetween(lower, upper float64) Constrainer {
-	return And(FloatCompare(GTE, lower), FloatCompare(LTE, upper))
+	return And(FloatCompare(GTE, lower), FloatCompare(LTE, upper)).setDetails(LookupName, "floatbetween")
 }
 
 var floatComparators = map[ComparisonType]func(value, compareTo float64) bool{

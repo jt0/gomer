@@ -1,16 +1,11 @@
 package constraint
 
-import (
-	"reflect"
-)
-
 var Required = required()
 
 func required() Constrainer {
 	return Constrainer{test: func(value interface{}) bool {
-		vv := reflect.ValueOf(value)
-		return vv.IsValid() && (vv.Kind() != reflect.Ptr || !vv.IsNil())
-	}}.setDetails("Required", true)
+		return !Nil.Test(value)
+	}}.setDetails("Required", true, LookupName, "required")
 }
 
 var Invalid = invalid()

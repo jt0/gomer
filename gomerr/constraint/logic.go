@@ -15,7 +15,7 @@ func And(operands ...Constrainer) Constrainer {
 			}
 		}
 		return true
-	}}.setDetails("And", operandDetails(operands))
+	}}.setDetails("And", operandDetails(operands), LookupName, "and")
 }
 
 func Or(operands ...Constrainer) Constrainer {
@@ -33,13 +33,13 @@ func Or(operands ...Constrainer) Constrainer {
 			}
 		}
 		return false
-	}}.setDetails("Or", operandDetails(operands))
+	}}.setDetails("Or", operandDetails(operands), LookupName, "or")
 }
 
 func Not(operand Constrainer) Constrainer {
 	return Constrainer{test: func(value interface{}) bool {
 		return !operand.test(value)
-	}}.setDetails("Not", operand.details)
+	}}.setDetails("Not", operand.details, LookupName, "not")
 }
 
 func operandDetails(operands []Constrainer) []map[string]interface{} {

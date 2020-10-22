@@ -9,26 +9,22 @@ var Nil = isNil()
 func isNil() Constrainer {
 	return Constrainer{test: func(value interface{}) bool {
 		vv := reflect.ValueOf(value)
+		if !vv.IsValid() {
+			return false
+		}
 		switch vv.Kind() {
 		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
-			return reflect.ValueOf(value).IsNil()
+			return vv.IsNil()
 		default:
 			return false
 		}
-	}}.setDetails("Nil", true)
+	}}.setDetails("Nil", true, LookupName, "nil")
 }
 
 var NotNil = notNil()
 
-//goland:noinspection GoBoolExpressions
 func notNil() Constrainer {
 	return Constrainer{test: func(value interface{}) bool {
-		vv := reflect.ValueOf(value)
-		switch vv.Kind() {
-		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
-			return !reflect.ValueOf(value).IsNil()
-		default:
-			return !false
-		}
-	}}.setDetails("Nil", false)
+		return !Nil.Test(value)
+	}}.setDetails("Nil", false, LookupName, "notnil")
 }

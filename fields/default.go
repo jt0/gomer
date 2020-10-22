@@ -43,7 +43,3 @@ func (f *field) defaultTag(defaultTag string) {
 
 	f.defaultValue = defaultTag
 }
-
-func default_() {
-
-}

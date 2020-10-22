@@ -223,7 +223,16 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 			pField := pv.Field(i)
 			if uField.Interface() == pField.Interface() {
 				uField.Set(reflect.Zero(uField.Type()))
-			} else if uField.Kind() != reflect.Ptr || !uField.IsNil() { // Only update if there's a different (first clause == false) and non-nil value
+			} else if uField.Kind() == reflect.Ptr {
+				if uField.IsNil() {
+					continue
+				}
+				if !pField.IsNil() && pField.Elem().Interface() == uField.Elem().Interface() {
+					uField.Set(reflect.Zero(uField.Type()))
+				} else {
+					pField.Set(uField)
+				}
+			} else {
 				pField.Set(uField)
 			}
 		}

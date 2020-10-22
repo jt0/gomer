@@ -265,7 +265,7 @@ func (g *gomerr) Error() string {
 }
 
 func (g *gomerr) String() string {
-	if bytes, err := json.MarshalIndent(g.ToMap(), "  ", "  "); err != nil {
+	if bytes, err := json.MarshalIndent(g.self.ToMap(), "  ", "  "); err != nil {
 		return "Failed to create gomerr string representation: " + err.Error()
 	} else {
 		return string(bytes)
