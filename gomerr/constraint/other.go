@@ -2,16 +2,16 @@ package constraint
 
 var Required = required()
 
-func required() Constrainer {
-	return Constrainer{test: func(value interface{}) bool {
+func required() *constraint {
+	return (&constraint{test: func(value interface{}) bool {
 		return !Nil.Test(value)
-	}}.setDetails("Required", true, LookupName, "required")
+	}}).setDetails("Required", true, TagStructName, "required")
 }
 
 var Invalid = invalid()
 
-func invalid() Constrainer {
-	return Constrainer{test: func(interface{}) bool {
+func invalid() *constraint {
+	return (&constraint{test: func(interface{}) bool {
 		return false
-	}}.setDetails("Invalid", true)
+	}}).setDetails("Invalid", true)
 }

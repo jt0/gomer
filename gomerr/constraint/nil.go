@@ -6,8 +6,8 @@ import (
 
 var Nil = isNil()
 
-func isNil() Constrainer {
-	return Constrainer{test: func(value interface{}) bool {
+func isNil() *constraint {
+	return (&constraint{test: func(value interface{}) bool {
 		vv := reflect.ValueOf(value)
 		if !vv.IsValid() {
 			return false
@@ -18,13 +18,13 @@ func isNil() Constrainer {
 		default:
 			return false
 		}
-	}}.setDetails("Nil", true, LookupName, "nil")
+	}}).setDetails("Nil", true, TagStructName, "nil")
 }
 
 var NotNil = notNil()
 
-func notNil() Constrainer {
-	return Constrainer{test: func(value interface{}) bool {
+func notNil() *constraint {
+	return (&constraint{test: func(value interface{}) bool {
 		return !Nil.Test(value)
-	}}.setDetails("Nil", false, LookupName, "notnil")
+	}}).setDetails("Nil", false, TagStructName, "notnil")
 }

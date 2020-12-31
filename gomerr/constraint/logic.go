@@ -1,6 +1,6 @@
 package constraint
 
-func And(operands ...Constrainer) Constrainer {
+func And(operands ...Constraint) Constraint {
 	switch len(operands) {
 	case 0:
 		return Invalid
@@ -8,17 +8,17 @@ func And(operands ...Constrainer) Constrainer {
 		return operands[0]
 	}
 
-	return Constrainer{test: func(value interface{}) bool {
+	return (&constraint{test: func(value interface{}) bool {
 		for _, operand := range operands {
-			if !operand.test(value) {
+			if !operand.Test(value) {
 				return false
 			}
 		}
 		return true
-	}}.setDetails("And", operandDetails(operands), LookupName, "and")
+	}}).setDetails("And", operandDetails(operands), TagStructName, "and")
 }
 
-func Or(operands ...Constrainer) Constrainer {
+func Or(operands ...Constraint) Constraint {
 	switch len(operands) {
 	case 0:
 		return Invalid
@@ -26,26 +26,26 @@ func Or(operands ...Constrainer) Constrainer {
 		return operands[0]
 	}
 
-	return Constrainer{test: func(value interface{}) bool {
+	return (&constraint{test: func(value interface{}) bool {
 		for _, operand := range operands {
-			if operand.test(value) {
+			if operand.Test(value) {
 				return true
 			}
 		}
 		return false
-	}}.setDetails("Or", operandDetails(operands), LookupName, "or")
+	}}).setDetails("Or", operandDetails(operands), TagStructName, "or")
 }
 
-func Not(operand Constrainer) Constrainer {
-	return Constrainer{test: func(value interface{}) bool {
-		return !operand.test(value)
-	}}.setDetails("Not", operand.details, LookupName, "not")
+func Not(operand Constraint) Constraint {
+	return (&constraint{test: func(value interface{}) bool {
+		return !operand.Test(value)
+	}}).setDetails("Not", operand.Details(), TagStructName, "not")
 }
 
-func operandDetails(operands []Constrainer) []map[string]interface{} {
+func operandDetails(operands []Constraint) []map[string]interface{} {
 	operandDetails := make([]map[string]interface{}, len(operands))
 	for i, operand := range operands {
-		operandDetails[i] = operand.details
+		operandDetails[i] = operand.Details()
 	}
 	return operandDetails
 }

@@ -8,8 +8,8 @@ import (
 
 type stringPtr *string
 
-func StartsWith(prefix string) Constrainer {
-	return Constrainer{test: func(value interface{}) bool {
+func StartsWith(prefix string) *constraint {
+	return (&constraint{test: func(value interface{}) bool {
 		switch vt := value.(type) {
 		case string:
 			return strings.HasPrefix(vt, prefix)
@@ -18,11 +18,11 @@ func StartsWith(prefix string) Constrainer {
 		default:
 			return false
 		}
-	}}.setDetails("Prefix", prefix, LookupName, "startswith")
+	}}).setDetails("Prefix", prefix, TagStructName, "startswith")
 }
 
-func EndsWith(suffix string) Constrainer {
-	return Constrainer{test: func(value interface{}) bool {
+func EndsWith(suffix string) *constraint {
+	return (&constraint{test: func(value interface{}) bool {
 		switch vt := value.(type) {
 		case string:
 			return strings.HasSuffix(vt, suffix)
@@ -31,15 +31,15 @@ func EndsWith(suffix string) Constrainer {
 		default:
 			return false
 		}
-	}}.setDetails("Suffix", suffix, LookupName, "endswith")
+	}}).setDetails("Suffix", suffix, TagStructName, "endswith")
 }
 
-func RegexpMust(r string) Constrainer {
-	return Regexp(regexp.MustCompile(r))
+func Regexp(r string) *constraint {
+	return RegexpMatch(regexp.MustCompile(r))
 }
 
-func Regexp(regexp *regexp.Regexp) Constrainer {
-	return Constrainer{test: func(value interface{}) bool {
+func RegexpMatch(regexp *regexp.Regexp) *constraint {
+	return (&constraint{test: func(value interface{}) bool {
 		switch vt := value.(type) {
 		case string:
 			return regexp.MatchString(vt)
@@ -48,13 +48,13 @@ func Regexp(regexp *regexp.Regexp) Constrainer {
 		default:
 			return false
 		}
-	}}.setDetails("Regexp", regexp.String(), LookupName, "regexp")
+	}}).setDetails("Regexp", regexp.String(), TagStructName, "regexp")
 }
 
 var Base64 = base64()
 
-func base64() Constrainer {
-	return Constrainer{test: func(value interface{}) bool {
+func base64() *constraint {
+	return (&constraint{test: func(value interface{}) bool {
 		var err error
 		switch vt := value.(type) {
 		case string:
@@ -66,5 +66,5 @@ func base64() Constrainer {
 		}
 
 		return err != nil
-	}}.setDetails("Base64Encoded", true, LookupName, "base64")
+	}}).setDetails("Base64Encoded", true, TagStructName, "base64")
 }

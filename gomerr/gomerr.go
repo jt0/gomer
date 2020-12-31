@@ -16,14 +16,12 @@ type Gomerr interface {
 	AddAttribute(key string, value interface{}) Gomerr
 	AddAttributes(keysAndValues ...interface{}) Gomerr
 	WithAttributes(attributes map[string]interface{}) Gomerr
-	//Retryable(retryable bool) Gomerr
 
 	Unwrap() error
 	Attributes() map[string]interface{}
 	Stack() []string
 	ToMap() map[string]interface{}
 	Error() string
-	//IsRetryable() bool
 }
 
 var gomerrType = reflect.TypeOf((*Gomerr)(nil)).Elem()
@@ -73,7 +71,6 @@ type gomerr struct {
 	wrapped    error
 	attributes map[string]interface{}
 	stack      []string
-	//retryable    bool
 }
 
 func newGomerr(stackSkip int, self Gomerr) *gomerr {

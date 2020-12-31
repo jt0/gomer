@@ -1,12 +1,16 @@
 package gomerr
 
+import (
+	"github.com/jt0/gomer/gomerr/constraint"
+)
+
 type UnprocessableError struct {
 	Gomerr
 	Name       string
 	Value      interface{} `gomerr:"include_type"`
-	Constraint Constraint
+	Constraint constraint.Constraint
 }
 
-func Unprocessable(name string, value interface{}, constraint Constraint) *UnprocessableError {
+func Unprocessable(name string, value interface{}, constraint constraint.Constraint) *UnprocessableError {
 	return Build(new(UnprocessableError), name, value, constraint).(*UnprocessableError)
 }
