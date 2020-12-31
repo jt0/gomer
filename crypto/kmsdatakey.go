@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -38,24 +39,28 @@ func KmsDataKeyEncrypter(kmsClient kmsiface.KMSAPI, masterKeyId string) Encrypte
 	}
 }
 
-// TODO: add support for grant tokens?
 func (k kmsDataKeyEncrypter) Encrypt(plaintext []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
+	return k.EncryptWithContext(context.Background(), plaintext, encryptionContext)
+}
+
+// TODO: add support for grant tokens?
+func (k kmsDataKeyEncrypter) EncryptWithContext(context context.Context, plaintext []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
 	input := &kms.GenerateDataKeyInput{
 		KeyId:             &k.masterKeyId,
 		EncryptionContext: encryptionContext,
 		KeySpec:           aws.String(kms.DataKeySpecAes256),
 	}
 
-	dataKey, err := k.kms.GenerateDataKey(input)
+	dataKey, err := k.kms.GenerateDataKeyWithContext(context, input)
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
 			case kms.ErrCodeNotFoundException:
 				return nil, gomerr.NotFound("kms.CustomerMasterKey", k.masterKeyId).Wrap(err)
 			case kms.ErrCodeDisabledException, kms.ErrCodeInvalidStateException:
-				return nil, gomerr.NotSatisfied("kms.CustomerMasterKey.KeyState", input.KeyId, keyStateConstraint).Wrap(err)
+				return nil, constraint.NotSatisfied(keyStateConstraint, "kms.CustomerMasterKey.KeyState", input.KeyId).Wrap(err)
 			case kms.ErrCodeInvalidKeyUsageException:
-				return nil, gomerr.NotSatisfied("kms.CustomerMasterKey.KeyUsage", input.KeyId, keyUsageConstraint).Wrap(err)
+				return nil, constraint.NotSatisfied(keyUsageConstraint, "kms.CustomerMasterKey.KeyUsage", input.KeyId).Wrap(err)
 			}
 		}
 
@@ -126,8 +131,13 @@ func KmsDataKeyDecrypter(kmsClient kmsiface.KMSAPI) Decrypter {
 //      Either the required key's state or usage has an unexpected value
 //  gomerr.Dependency:
 //      An unexpected error occurred calling KMS
-// TODO: add support for grant tokens?
+
 func (k kmsDataKeyDecrypter) Decrypt(encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
+	return k.DecryptWithContext(context.Background(), encrypted, encryptionContext)
+}
+
+// TODO: add support for grant tokens?
+func (k kmsDataKeyDecrypter) DecryptWithContext(context context.Context, encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
 	ciphertext, ciphertextBlob, nonce, ge := k.decode(encrypted)
 	if ge != nil {
 		return nil, ge
@@ -138,16 +148,16 @@ func (k kmsDataKeyDecrypter) Decrypt(encrypted []byte, encryptionContext map[str
 		EncryptionContext: encryptionContext,
 	}
 
-	dataKey, err := k.kms.Decrypt(input)
+	dataKey, err := k.kms.DecryptWithContext(context, input)
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
 			case kms.ErrCodeInvalidCiphertextException:
-				return nil, gomerr.NotSatisfied("ciphertext", input, constraint.Invalid).Wrap(err)
+				return nil, constraint.NotSatisfied(constraint.Invalid, "ciphertext", input).Wrap(err)
 			case kms.ErrCodeDisabledException, kms.ErrCodeInvalidStateException:
-				return nil, gomerr.NotSatisfied("kms.CustomerMasterKey.KeyState", "<embedded>", keyStateConstraint).Wrap(err)
+				return nil, constraint.NotSatisfied(keyStateConstraint, "kms.CustomerMasterKey.KeyState", "<embedded>").Wrap(err)
 			case kms.ErrCodeInvalidKeyUsageException:
-				return nil, gomerr.NotSatisfied("kms.CustomerMasterKey.KeyUsage", "<embedded>", keyUsageConstraint).Wrap(err)
+				return nil, constraint.NotSatisfied(keyUsageConstraint, "kms.CustomerMasterKey.KeyUsage", "<embedded>").Wrap(err)
 			}
 		}
 
