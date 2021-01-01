@@ -10,7 +10,7 @@ import (
 	"github.com/jt0/gomer/gomerr/constraint"
 )
 
-var built = map[string]constraint.Constrainer{
+var built = map[string]constraint.Constraint{
 	"base64":   constraint.Base64,
 	"empty":    constraint.Empty,
 	"nil":      constraint.Nil,
@@ -30,22 +30,23 @@ var available = map[string]interface{}{
 	"maxlen":       constraint.MaxLength,
 	"minlen":       constraint.MinLength,
 	"not":          constraint.Not,
+	"notequals":    constraint.NotEquals,
 	"oneof":        constraint.OneOf,
 	"or":           constraint.Or,
-	"regexp":       constraint.RegexpMust,
+	"regexp":       constraint.Regexp,
 	"startswith":   constraint.StartsWith,
 	"typeof":       constraint.TypeOf,
 	"uint":         constraint.UintCompare,
 	"uintbetween":  constraint.UintBetween,
 }
 
-func RegisterConstraints(constraints map[string]constraint.Constrainer) {
-	for validationName, constrainer := range constraints {
-		if ge := gomerr.Test("Custom validation names must start with a '$' symbol and between 2 and 64 characters long", validationName, dollarNameConstraint); ge != nil {
-			panic(ge)
+func RegisterConstraints(constraints map[string]constraint.Constraint) {
+	for validationName, c := range constraints {
+		if ge := dollarNameConstraint.On("Constraint name").Validate(validationName); ge != nil {
+			panic(ge.AddAttribute("Note", "Custom validation names must start with a '$' symbol and between 2 and 64 characters long"))
 		}
 
-		built[strings.ToLower(validationName)] = constrainer
+		built[strings.ToLower(validationName)] = c
 	}
 }
 
@@ -59,7 +60,7 @@ func (f *field) validateTag(validateTag string) (ge gomerr.Gomerr) {
 	// Convert all escaped semi-colons (i.e. '\;') into ' '. Since we trimmed out spaces above, we can re-use them now as a
 	// placeholder which we'll convert back on each section of the tag we process in the loop below.
 	validateTag = strings.ReplaceAll(validateTag, "\\;", " ")
-	f.constraints = make(map[string]constraint.Constrainer)
+	f.constraints = make(map[string]constraint.Constraint)
 	for _, contextValidations := range strings.Split(validateTag, ";") {
 		// create:len(1,3),required,or[$id,regexp('^AppConfig\\.[A-Za-z0-9]{9,40}$')],len(1,3)
 		// convert spaces back to no-longer-escaped semi-colons
@@ -75,7 +76,7 @@ func (f *field) validateTag(validateTag string) (ge gomerr.Gomerr) {
 		}
 
 		// context = create; validations = required,or($id,regexp('^AppConfig\\.[A-Za-z0-9]{9,40}$')),len(1,3)
-		if f.constraints[context], ge = constrainerFor(validations, ""); ge != nil {
+		if f.constraints[context], ge = constraintFor(validations, ""); ge != nil {
 			return ge.AddAttributes("Field", f.name, "Validations", validations)
 		}
 	}
@@ -83,17 +84,17 @@ func (f *field) validateTag(validateTag string) (ge gomerr.Gomerr) {
 	return nil
 }
 
-var emptyConstrainer = constraint.Constrainer{}
+var emptyConstraint = constraint.NewType(nil)
 
-func constrainerFor(validationsString string, logicalOp string) (constraint.Constrainer, gomerr.Gomerr) {
-	var constrainers []constraint.Constrainer
+func constraintFor(validationsString string, logicalOp string) (constraint.Constraint, gomerr.Gomerr) {
+	var constraints []constraint.Constraint
 	var ovs string
 
 	if built, ok := built[validationsString]; ok {
-		if built.Details()[constraint.LookupName] == logicalOp {
+		if built.Details()[constraint.TagStructName] == logicalOp {
 			return built, nil
 		}
-		constrainers = append(constrainers, built)
+		constraints = append(constraints, built)
 		ovs = logicalOp + "(" + validationsString + ")"
 		validationsString = ""
 	} else {
@@ -112,12 +113,12 @@ func constrainerFor(validationsString string, logicalOp string) (constraint.Cons
 			constraintName := strings.ToLower(validationsString[:openParenIndex])
 			validations := validationsString[openParenIndex+1:] // '1,2)', 'required,len(1,2))
 
-			constrainer, ge := parameterizedConstrainer(constraintName, &validations)
+			constrainer, ge := parameterizedConstraint(constraintName, &validations)
 			if ge != nil {
-				return emptyConstrainer, ge
+				return emptyConstraint, ge
 			}
 
-			constrainers = append(constrainers, constrainer)
+			constraints = append(constraints, constrainer)
 			validationsString = validations
 		} else { // true for 2
 			var constraintName string
@@ -132,37 +133,37 @@ func constrainerFor(validationsString string, logicalOp string) (constraint.Cons
 				validationsString = ""
 			}
 
-			constrainer, ge := constrainerFor(constraintName, "")
+			constrainer, ge := constraintFor(constraintName, "")
 			if ge != nil {
-				return emptyConstrainer, ge
+				return emptyConstraint, ge
 			}
 
-			constrainers = append(constrainers, constrainer)
+			constraints = append(constraints, constrainer)
 		}
 	}
 
-	switch len(constrainers) {
+	switch len(constraints) {
 	case 0:
-		return emptyConstrainer, gomerr.Configuration("No constraints found")
+		return emptyConstraint, gomerr.Configuration("No constraints found")
 	case 1:
 		if logicalOp == "not" {
-			not := constraint.Not(constrainers[0])
+			not := constraint.Not(constraints[0])
 			built[ovs] = not
 			return not, nil
 		} // ignore other logicalOps since they
-		return constrainers[0], nil
+		return constraints[0], nil
 	default:
 		switch logicalOp {
 		case "or":
-			or := constraint.Or(constrainers...)
+			or := constraint.Or(constraints...)
 			built[ovs] = or
 			return or, nil
 		case "not":
-			not := constraint.Not(constraint.And(constrainers...))
+			not := constraint.Not(constraint.And(constraints...))
 			built[ovs] = not
 			return not, nil
 		default:
-			and := constraint.And(constrainers...)
+			and := constraint.And(constraints...)
 			built[ovs] = and
 			return and, nil
 		}
@@ -170,12 +171,12 @@ func constrainerFor(validationsString string, logicalOp string) (constraint.Cons
 }
 
 // Called w/ first open paren "consumed", e.g. '1,2)', 'required,len(1,2))
-func parameterizedConstrainer(constraintName string, parenthetical *string) (constraint.Constrainer, gomerr.Gomerr) {
+func parameterizedConstraint(constraintName string, parenthetical *string) (constraint.Constraint, gomerr.Gomerr) {
 	remainder := *parenthetical
 	var accumulator int
 	for parenCounter := 1; parenCounter != 0; {
 		if closeIndex := strings.Index(remainder, ")"); closeIndex < 0 {
-			return emptyConstrainer, gomerr.Configuration("Unable to find a balanced expression: (" + *parenthetical)
+			return emptyConstraint, gomerr.Configuration("Unable to find a balanced expression: (" + *parenthetical)
 		} else if openIndex := strings.Index(remainder, "("); openIndex >= 0 && openIndex < closeIndex {
 			parenCounter++
 			accumulator += openIndex + 1
@@ -192,16 +193,16 @@ func parameterizedConstrainer(constraintName string, parenthetical *string) (con
 
 	switch constraintName {
 	case "and", "or", "not":
-		return constrainerFor(parametersString, constraintName)
+		return constraintFor(parametersString, constraintName)
 	default:
-		return buildConstrainer(constraintName, parametersString)
+		return buildConstraint(constraintName, parametersString)
 	}
 }
 
-func buildConstrainer(constraintName, parameterString string) (constraint.Constrainer, gomerr.Gomerr) {
+func buildConstraint(constraintName, parameterString string) (constraint.Constraint, gomerr.Gomerr) {
 	constrainerFunction, ok := available[constraintName]
 	if !ok {
-		return emptyConstrainer, gomerr.Configuration("Unknown validation type: " + constraintName)
+		return emptyConstraint, gomerr.Configuration("Unknown validation type: " + constraintName)
 	}
 
 	cfv := reflect.ValueOf(constrainerFunction)
@@ -218,10 +219,10 @@ func buildConstrainer(constraintName, parameterString string) (constraint.Constr
 	parametersLen := len(parameters)
 	if isVariadic {
 		if parametersLen < numIn {
-			return emptyConstrainer, gomerr.Configuration(fmt.Sprintf("Expecting at least %d parameters, but found %d in %v", numIn, parametersLen, parameters))
+			return emptyConstraint, gomerr.Configuration(fmt.Sprintf("Expecting at least %d parameters, but found %d in %v", numIn, parametersLen, parameters))
 		}
 	} else if parametersLen != numIn {
-		return emptyConstrainer, gomerr.Configuration(fmt.Sprintf("Expecting %d parameters, but found %d in %v", numIn, parametersLen, parameters))
+		return emptyConstraint, gomerr.Configuration(fmt.Sprintf("Expecting %d parameters, but found %d in %v", numIn, parametersLen, parameters))
 	}
 
 	in := make([]reflect.Value, parametersLen)
@@ -231,7 +232,7 @@ func buildConstrainer(constraintName, parameterString string) (constraint.Constr
 		parameter := strings.ReplaceAll(parameters[pIndex], " ", ",")
 		pElem := reflect.New(cft.In(pIndex)).Elem()
 		if ge := flect.SetValue(pElem, parameter); ge != nil {
-			return emptyConstrainer, gomerr.Configuration(fmt.Sprintf("Unable to set input parameter %d for %s with: %s", pIndex, constraintName, parameter))
+			return emptyConstraint, gomerr.Configuration(fmt.Sprintf("Unable to set input parameter %d for %s with: %s", pIndex, constraintName, parameter))
 		}
 		in[pIndex] = pElem
 	}
@@ -243,18 +244,53 @@ func buildConstrainer(constraintName, parameterString string) (constraint.Constr
 			parameter := strings.ReplaceAll(parameters[pIndex], " ", ",")
 			pElem := reflect.New(elemType).Elem()
 			if ge := flect.SetValue(pElem, parameter); ge != nil {
-				return emptyConstrainer, gomerr.Configuration(fmt.Sprintf("Unable to set variadic parameter element for %s with: %s", constraintName, parameter))
+				return emptyConstraint, gomerr.Configuration(fmt.Sprintf("Unable to set variadic parameter element for %s with: %s", constraintName, parameter))
 			}
 			in[pIndex] = pElem
 		}
 	}
 
-	// The set of "available" values all result in a single response element which is a constraint.Constrainer.
+	// The set of "available" values all result in a single response element which is a constraint.constrainer.
 	// If something goes sideways, this will panic (and indicates bug in Gomer).
 
 	results := cfv.Call(in)
-	constrainer := results[0].Interface().(constraint.Constrainer)
+	constrainer := results[0].Interface().(constraint.Constraint)
 	built[constraintName+"("+parameterString+")"] = constrainer
 
 	return constrainer, nil
+}
+
+const matchImplicitly = "*"
+
+func (fs *Fields) Validate(v reflect.Value, context string) gomerr.Gomerr {
+	var errors []gomerr.Gomerr
+
+	for _, field := range fs.fieldMap {
+		if field.constraints == nil || strings.Contains(field.location, ".") { // TODO: handle nested/embedded structs
+			continue
+		}
+
+		c, ok := field.constraints[context]
+		if !ok {
+			if c, ok = field.constraints[matchImplicitly]; !ok {
+				continue
+			}
+		}
+
+		fv := v.FieldByName(field.name)
+		if !fv.IsValid() {
+			continue
+		}
+
+		if fv.Kind() == reflect.Ptr && !fv.IsZero() {
+			fv = fv.Elem()
+		}
+
+		fvi := fv.Interface()
+		if ge := c.Validate(fvi); ge != nil {
+			errors = append(errors, ge.AddAttribute("field.name", field.name))
+		}
+	}
+
+	return gomerr.Batcher(errors)
 }

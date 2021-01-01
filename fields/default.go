@@ -2,7 +2,9 @@ package fields
 
 import (
 	"reflect"
+	"strings"
 
+	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 )
 
@@ -10,8 +12,8 @@ type DefaultFunction func(reflect.Value) interface{}
 
 func RegisterDefaultFunctions(functions map[string]DefaultFunction) {
 	for fnName := range functions {
-		if ge := gomerr.Test("Function names must start with a '$' symbol and between 2 and 64 characters long", fnName, dollarNameConstraint); ge != nil {
-			panic(ge)
+		if ge := dollarNameConstraint.Validate(fnName); ge != nil {
+			panic(ge.AddAttribute("Issue", "Function names must start with a '$' symbol and between 2 and 64 characters long"))
 		}
 
 		if fnName[1:2] == "_" {
@@ -29,17 +31,72 @@ func (f *field) defaultTag(defaultTag string) {
 		return
 	}
 
-	if defaultTag[:1] == "?" {
-		f.bypassDefaultIfSet = true
-		defaultTag = defaultTag[1:]
-	}
+	f.defaultValues = make(map[string]defaultValue)
+	for _, contextDefault := range strings.Split(defaultTag, ";") {
+		contextDefault = strings.TrimSpace(contextDefault)
 
-	if defaultTag[:1] == "$" {
-		if fn, ok := registeredDefaultFunctions[defaultTag]; ok {
-			f.defaultValueFunction = fn
-			return
+		var context, valueText string
+		if separatorIndex := strings.Index(contextDefault, ":"); separatorIndex <= 0 {
+			context = matchImplicitly
+			valueText = contextDefault
+		} else {
+			context = contextDefault[:separatorIndex]
+			valueText = contextDefault[separatorIndex+1:]
+		}
+
+		dv := defaultValue{}
+
+		if valueText[:1] == "?" {
+			dv.bypassIfSet = true
+			valueText = valueText[1:]
+		}
+
+		if valueText[:1] != "$" {
+			dv.value = valueText
+		} else if fn, ok := registeredDefaultFunctions[valueText]; ok {
+			dv.function = fn
+		} else {
+			dv.value = valueText
+		}
+
+		f.defaultValues[context] = dv
+	}
+}
+
+func (fs *Fields) ApplyDefaults(v reflect.Value, context string) gomerr.Gomerr {
+	// TODO: handle nested/embedded structs
+	for _, field := range fs.fieldMap {
+		defaultValue, ok := field.defaultValues[context]
+		if !ok {
+			if defaultValue, ok = field.defaultValues[matchImplicitly]; !ok {
+				continue
+			}
+		}
+
+		if ge := defaultValue.apply(v, field.name); ge != nil {
+			return ge
 		}
 	}
 
-	f.defaultValue = defaultTag
+	return nil
+}
+
+func (dv defaultValue) apply(v reflect.Value, name string) gomerr.Gomerr {
+	fv := v.FieldByName(name)
+	if !fv.IsValid() || (dv.bypassIfSet && flect.IsSet(fv)) {
+		return nil
+	}
+
+	var val interface{}
+	if dv.function != nil {
+		val = dv.function(v)
+	} else {
+		val = dv.value
+	}
+
+	if ge := flect.SetValue(fv, val); ge != nil {
+		return gomerr.Configuration("Unable to set field to default value").AddAttributes("Field", name, "Value", val).Wrap(ge)
+	}
+
+	return nil
 }

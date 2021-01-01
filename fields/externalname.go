@@ -20,3 +20,11 @@ func (f *field) externalNameTag(nameTag string) {
 
 	f.externalName = name
 }
+
+func (fs *Fields) ExternalNameToFieldName(externalName string) (string, bool) {
+	if field, ok := fs.fieldMap[externalName]; ok {
+		return field.name, ok
+	} else {
+		return externalName, ok
+	}
+}

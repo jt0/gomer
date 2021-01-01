@@ -1,6 +1,7 @@
 package fields
 
 import (
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -32,27 +33,33 @@ const (
 	ReadAll      AccessPrincipal = "ReadAll"
 	NoAccess     AccessPrincipal = "NoAccess"
 
-	ReadChar   = 'r'
-	WriteChar  = 'w'
-	CreateChar = 'c'
-	UpdateChar = 'u'
-	DenyChar   = '-'
+	ReadChar     = 'r'
+	WriteChar    = 'w'
+	CreateChar   = 'c'
+	UpdateChar   = 'u'
+	ProvidedChar = 'p'
+	DenyChar     = '-'
+)
 
-	ReadAccess = fieldAccessBits(1 << iota)
+const (
+	ReadAccess fieldAccessBits = 1 << iota
 	CreateAccess
 	UpdateAccess
 	numAccessTypes = iota // iota is not reset, so this is the number of access types starting w/ ReadAccess
 )
 
-var reservedPrincipalsConstraint = constraint.Not(constraint.OneOf(ReadWriteAll, ReadAll, NoAccess))
+var (
+	maxPrincipalsConstraint      = constraint.MaxLength(7)
+	reservedPrincipalsConstraint = constraint.Not(constraint.OneOf(ReadWriteAll, ReadAll, NoAccess))
+)
 
 func RegisterAccessPrincipals(accessPrincipals ...AccessPrincipal) {
-	if ge := gomerr.Test("AccessPrincipals", accessPrincipals, constraint.MaxLength(7)); ge != nil {
+	if ge := maxPrincipalsConstraint.Validate(accessPrincipals); ge != nil {
 		panic(ge)
 	}
 
 	for i, r := range accessPrincipals {
-		if ge := gomerr.Test("AccessPrincipal.Id()", r, reservedPrincipalsConstraint); ge != nil {
+		if ge := reservedPrincipalsConstraint.Validate(r); ge != nil {
 			panic(ge)
 		}
 		bitsLocationForPrincipal[r] = uint(i)
@@ -64,12 +71,7 @@ func (f *field) accessTag(accessTag string) gomerr.Gomerr {
 		return nil // no access
 	}
 
-	parts := strings.Split(accessTag, ",")
-	if len(parts) > 1 {
-		f.provided = parts[1] == "p" || parts[1] == "provided"
-	}
-
-	access := strings.TrimSpace(parts[0])
+	access := strings.TrimSpace(accessTag)
 	if len(access) == 0 {
 		return nil
 	} else if len(access) > 16 {
@@ -98,10 +100,12 @@ func (f *field) accessTag(accessTag string) gomerr.Gomerr {
 			accessBits |= CreateAccess
 		case UpdateChar:
 			accessBits |= UpdateAccess
+		case ProvidedChar:
+			f.provided = true
 		case DenyChar:
 			// nothing to set
 		default:
-			return gomerr.Configuration("Expected one of write access values (w, c, u, -), but got: " + string(access[i]))
+			return gomerr.Configuration("Expected one of write access values (w, c, u, p, -), but got: " + string(access[i]))
 		}
 	}
 
@@ -118,11 +122,13 @@ func (f *field) access(accessPrincipal AccessPrincipal, accessType fieldAccessBi
 		return true
 	case ReadAll:
 		return accessType&ReadAccess == ReadAccess
-	case NoAccess:
-		fallthrough
-	case "":
+	case NoAccess, "":
 		return false
 	default:
+		if accessType == 0 {
+			return false
+		}
+
 		bitsIndex, ok := bitsLocationForPrincipal[accessPrincipal]
 		if !ok {
 			return false // no matching principal
@@ -131,4 +137,71 @@ func (f *field) access(accessPrincipal AccessPrincipal, accessType fieldAccessBi
 		accessTypeBits := accessType << (numAccessTypes * bitsIndex)
 		return f.accessBits&accessTypeBits == accessTypeBits
 	}
+}
+
+func (fs *Fields) RemoveNonReadable(v reflect.Value, principal AccessPrincipal) bool {
+	empty := true // Start w/ the assumption that all fields will be zeroed out
+
+	for _, field := range fs.fieldMap {
+		if field.access(principal, ReadAccess) {
+			empty = false // At least one field is present, so mark empty as false
+		} else {
+			fv := v.FieldByName(field.name)
+			if !fv.IsValid() || fv.IsZero() {
+				continue
+			}
+
+			// TODO:p0 need to recurse on struct values
+			fv.Set(field.zeroVal)
+		}
+	}
+
+	return empty
+}
+
+var canSet = constraint.NewType(func(value interface{}) bool { return value.(reflect.Value).CanSet() }, "CanSet", true)
+
+func (fs *Fields) RemoveNonWritable(v reflect.Value, accessType fieldAccessBits, principal AccessPrincipal) gomerr.Gomerr {
+	for _, field := range fs.fieldMap {
+		// TODO:p1 handle nested/embedded structs
+		if field.provided || field.access(principal, accessType) { //  || strings.Contains(field.location, ".")
+			continue
+		}
+
+		fv := v.FieldByName(field.name)
+		if !fv.IsValid() || fv.IsZero() {
+			continue
+		}
+
+		if ge := canSet.Validate(fv); ge != nil {
+			return ge.AddAttribute("field.name", field.name)
+		}
+
+		fv.Set(field.zeroVal)
+	}
+
+	return nil
+}
+
+func (fs *Fields) CopyProvided(from, to reflect.Value) gomerr.Gomerr {
+	for _, field := range fs.fieldMap {
+		// TODO: handle nested/embedded structs
+		if !field.provided || strings.Contains(field.location, ".") {
+			continue
+		}
+
+		ffv := from.FieldByName(field.name)
+		if !ffv.IsValid() || ffv.IsZero() {
+			continue
+		}
+
+		tfv := to.FieldByName(field.name)
+		if ge := canSet.Validate(tfv); ge != nil {
+			return ge.AddAttribute("field.name", field.name)
+		}
+
+		tfv.Set(ffv)
+	}
+
+	return nil
 }
