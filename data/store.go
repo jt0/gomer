@@ -9,28 +9,20 @@ type Store interface {
 	Read(p Persistable) gomerr.Gomerr
 	Update(p Persistable, update Persistable) gomerr.Gomerr
 	Delete(p Persistable) gomerr.Gomerr
-	Query(q Queryable) (items []interface{}, nextToken *string, ge gomerr.Gomerr)
-}
-
-type Storable interface {
-	PersistableTypeName() string // TODO: change this to support an array of types
+	Query(q Queryable) gomerr.Gomerr
 }
 
 type Persistable interface {
-	Storable
-
-	Id() string
+	TypeName() string
 	NewQueryable() Queryable
 }
 
 type Queryable interface {
-	Storable
-	Paginatable
-}
-
-type Paginatable interface {
-	NextPageToken() string
-	PrevPageToken() string
+	TypeNames() []string
+	TypeOf(interface{}) string
+	SetItems([]interface{})
+	NextPageToken() *string
+	SetNextPageToken(*string)
 	MaximumPageSize() int
 }
 
@@ -38,11 +30,11 @@ type QueryTypes uint16
 
 const (
 	EQ QueryTypes = iota + 1
-	//NEQ
-	//GTE
-	//GT
-	//LTE
-	//LT
-	//BETWEEN
-	//CONTAINS
+	// NEQ
+	// GTE
+	// GT
+	// LTE
+	// LT
+	// BETWEEN
+	// CONTAINS
 )

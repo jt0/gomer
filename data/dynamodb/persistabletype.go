@@ -1,6 +1,7 @@
 package dynamodb
 
 import (
+	"fmt"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -17,21 +18,21 @@ import (
 )
 
 type persistableType struct {
-	name         string
-	dbNames      map[string]string   // field name -> storage name
-	uniqueFields map[string][]string // Map of field name -> set of fields that determine uniqueness
-	resolver     ItemResolver
+	name             string
+	dbNames          map[string]string                // field name -> storage name
+	fieldConstraints map[string]constraint.Constraint // Map of field name -> constraint needed to be satisfied
+	resolver         ItemResolver
 }
 
-func newPersistableType(persistableName string, pType reflect.Type, indexes map[string]*index) (*persistableType, gomerr.Gomerr) {
+func newPersistableType(table *table, persistableName string, pType reflect.Type) (*persistableType, gomerr.Gomerr) {
 	pt := &persistableType{
-		name:         persistableName,
-		dbNames:      make(map[string]string, 0),
-		uniqueFields: make(map[string][]string, 0),
-		resolver:     resolver(pType),
+		name:             persistableName,
+		dbNames:          make(map[string]string, 0),
+		fieldConstraints: make(map[string]constraint.Constraint, 0),
+		resolver:         resolver(pType),
 	}
 
-	if errors := pt.processFields(pType, "", indexes, make([]gomerr.Gomerr, 0)); len(errors) > 0 {
+	if errors := pt.processFields(pType, "", table, make([]gomerr.Gomerr, 0)); len(errors) > 0 {
 		return nil, gomerr.Configuration("'db' tag errors found for type: " + persistableName).Wrap(gomerr.Batcher(errors))
 	}
 
@@ -49,27 +50,27 @@ func resolver(pt reflect.Type) func(interface{}) (interface{}, gomerr.Gomerr) {
 
 		err := dynamodbattribute.UnmarshalMap(m, resolved)
 		if err != nil {
-			return nil, gomerr.Unmarshal(resolved.PersistableTypeName(), m, resolved).Wrap(err)
+			return nil, gomerr.Unmarshal(resolved.TypeName(), m, resolved).Wrap(err)
 		}
 
 		return resolved, nil
 	}
 }
 
-func (pt *persistableType) processFields(structType reflect.Type, fieldPath string, indexes map[string]*index, errors []gomerr.Gomerr) []gomerr.Gomerr {
+func (pt *persistableType) processFields(structType reflect.Type, fieldPath string, table *table, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	for i := 0; i < structType.NumField(); i++ {
 		field := structType.Field(i)
 		fieldName := field.Name
 
 		if field.Type.Kind() == reflect.Struct && field.Anonymous {
-			errors = pt.processFields(field.Type, fieldPath+fieldName+".", indexes, errors)
+			errors = pt.processFields(field.Type, fieldPath+fieldName+".", table, errors)
 		} else if unicode.IsLower([]rune(fieldName)[0]) {
 			continue
 		} else {
 			pt.processNameTag(fieldName, field.Tag.Get("db.name"))
 
-			errors = pt.processConstraintsTag(fieldName, field.Tag.Get("db.constraints"), errors)
-			errors = pt.processKeysTag(fieldName, field.Tag.Get("db.keys"), indexes, errors)
+			errors = pt.processConstraintsTag(fieldName, field.Tag.Get("db.constraints"), table, errors)
+			errors = pt.processKeysTag(fieldName, field.Tag.Get("db.keys"), table.indexes, errors)
 		}
 	}
 
@@ -84,33 +85,33 @@ func (pt *persistableType) processNameTag(fieldName string, tag string) {
 	pt.dbNames[fieldName] = tag
 }
 
-var constraintsRegex = regexp.MustCompile(`(unique)(\(([\w,]+)\))?`)
+var constraintsRegexp = regexp.MustCompile(`(unique)(\(([\w,]+)\))?`)
 
-func (pt *persistableType) processConstraintsTag(fieldName string, tag string, errors []gomerr.Gomerr) []gomerr.Gomerr {
+func (pt *persistableType) processConstraintsTag(fieldName string, tag string, t *table, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	if tag == "" {
 		return errors
 	}
 
-	constraints := constraintsRegex.FindAllStringSubmatch(tag, -1)
+	constraints := constraintsRegexp.FindAllStringSubmatch(tag, -1)
 	if constraints == nil {
-		return append(errors, gomerr.Unprocessable("`db.constraints`", tag, constraint.Regexp(constraintsRegex)).AddAttribute("Field", fieldName))
+		return append(errors, gomerr.Unprocessable("`db.constraints`", tag, constraint.RegexpMatch(constraintsRegexp)).AddAttribute("Field", fieldName))
 	}
 
 	for _, c := range constraints {
 		switch c[1] {
 		case "unique":
-			if c[3] == "" {
-				pt.uniqueFields[fieldName] = nil
-			} else {
-				pt.uniqueFields[fieldName] = strings.Split(c[3], ",")
+			var additionalFields []string
+			if c[3] != "" {
+				additionalFields = strings.Split(c[3], ",")
 			}
+			pt.fieldConstraints[fieldName] = constraint.NewType(t.isFieldUnique(fieldName, additionalFields), "Validate", "Field Uniqueness", "Field", fieldName, "Scope", additionalFields)
 		}
 	}
 
 	return errors
 }
 
-var ddbKeyStatementRegex = regexp.MustCompile(`(([\w-.]+):)?(pk|sk)(.(\d))?(=('\w+'))?`)
+var ddbKeyStatementRegexp = regexp.MustCompile(`(([\w-.]+):)?(pk|sk)(.(\d))?(=('\w+')(\+)?)?`)
 
 func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes map[string]*index, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	if tag == "" {
@@ -118,14 +119,14 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 	}
 
 	for _, keyStatement := range strings.Split(strings.ReplaceAll(tag, " ", ""), ",") {
-		groups := ddbKeyStatementRegex.FindStringSubmatch(keyStatement)
+		groups := ddbKeyStatementRegexp.FindStringSubmatch(keyStatement)
 		if groups == nil {
-			return append(errors, gomerr.Unprocessable("`db.keys`", keyStatement, constraint.Regexp(ddbKeyStatementRegex)).AddAttribute("Field", fieldName))
+			return append(errors, gomerr.Unprocessable("`db.keys`", keyStatement, constraint.RegexpMatch(ddbKeyStatementRegexp)).AddAttribute("Field", fieldName))
 		}
 
 		index, ok := indexes[groups[2]]
 		if !ok {
-			return append(errors, gomerr.Missing(groups[2], indexes).AddAttribute("Field", fieldName))
+			return append(errors, gomerr.Configuration(fmt.Sprintf("Undefined index: %s", groups[2])).AddAttribute("Field", fieldName))
 		}
 
 		var key *keyAttribute

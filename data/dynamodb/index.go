@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 
 	"github.com/jt0/gomer/data"
+	"github.com/jt0/gomer/data/dataerr"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/gomerr/constraint"
 )
@@ -17,7 +18,7 @@ type index struct {
 	pk                  *keyAttribute
 	sk                  *keyAttribute
 	canReadConsistently bool
-	//projects bool
+	// projects bool
 }
 
 type keyAttribute struct {
@@ -32,6 +33,13 @@ type candidate struct {
 	skMissing int
 }
 
+func (i *index) indexName() string {
+	if i.name == nil {
+		return "<table>"
+	}
+	return *i.name
+}
+
 func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement, attributeTypes map[string]string) (ge gomerr.Gomerr) {
 	for _, keySchemaElement := range keySchemaElements {
 		key := &keyAttribute{
@@ -39,9 +47,9 @@ func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement,
 			keyFieldsByPersistable: make(map[string][]string),
 		}
 
-		key.attributeType, ge = safeAttributeType(attributeTypes[key.name], key.name)
+		key.attributeType, ge = safeAttributeType(attributeTypes[key.name])
 		if ge != nil {
-			return ge
+			return ge.AddAttribute("key.name", key.name)
 		}
 
 		switch *keySchemaElement.KeyType {
@@ -57,8 +65,8 @@ func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement,
 
 var safeTypeConstraint = constraint.OneOf(dynamodb.ScalarAttributeTypeS, dynamodb.ScalarAttributeTypeN)
 
-func safeAttributeType(attributeType, name string) (string, gomerr.Gomerr) {
-	ge := gomerr.Test(name, attributeType, safeTypeConstraint)
+func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
+	ge := safeTypeConstraint.Validate(attributeType)
 	if ge != nil {
 		return "", ge
 	}
@@ -91,14 +99,33 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 			continue
 		}
 
-		if candidate := index.candidate(qv, q.PersistableTypeName()); candidate != nil {
+		// A viable candidate needs to use one index to collect each type that the queryable is interested in. To find
+		// it, range through each index and if it doesn't work for a type, fail and move to the next one. Amongst the
+		// viable candidates, choose the best match under the (presumption) that fewer missing keys and longer key
+		// length are better
+		var candidate *candidate
+		for _, typeName := range q.TypeNames() {
+			if c := index.candidate(qv, typeName); c == nil {
+				candidate = nil
+				break
+			} else if candidate == nil {
+				candidate = c
+			} else if compareCandidates(candidate, c) {
+				c = candidate
+			}
+		}
+		if candidate != nil {
 			candidates = append(candidates, candidate)
 		}
 	}
 
 	switch len(candidates) {
 	case 0:
-		return nil, nil, gomerr.Missing("Index", t).Given(q)
+		available := make(map[string]interface{}, 1)
+		for _, index := range t.indexes {
+			available[index.indexName()] = index
+		}
+		return nil, nil, dataerr.NoIndexMatch(available, q)
 	case 1:
 		return candidates[0].index, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
 	default:
@@ -110,16 +137,20 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 				return c1.index.canReadConsistently // sorts based on which of c1 or c2 can be read consistently
 			}
 
-			// 4-2 vs 3-1  a_b_c_d  vs a_b_e_d
-			if c1.skMissing != c2.skMissing {
-				return c1.skMissing < c2.skMissing
-			}
-
-			return c1.skLength > c2.skLength
+			return compareCandidates(c1, c2)
 		})
 
 		return candidates[0].index, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
 	}
+}
+
+func compareCandidates(c1 *candidate, c2 *candidate) bool {
+	// 4-2 vs 3-1  a_b_c_d  vs a_b_e_d
+	if c1.skMissing != c2.skMissing {
+		return c1.skMissing < c2.skMissing
+	}
+
+	return c1.skLength > c2.skLength
 }
 
 func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
@@ -146,7 +177,9 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 
 			fv := qv.FieldByName(keyField)
 			if !fv.IsValid() {
-				if kfi == 0 {
+				// Fixed bug where index could be dropped as a candidate if
+				// a trailing sort key member doesn't exist in the Queryable.
+				if kfi == 0 { // XXX: Why is this additional check here? It may be valid to have no SK value present for a query
 					return nil
 				} else {
 					candidate.skMissing++
@@ -169,20 +202,23 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p data.Persistable, valueSeparator string, mustBeSet bool) gomerr.Gomerr {
 	var av *dynamodb.AttributeValue
 
+	// TODO: any reason Elem() would be incorrect?
+	pElem := reflect.ValueOf(p).Elem()
+
 	if _, present := avm[i.pk.name]; !present {
-		if av = i.pk.attributeValue(p, valueSeparator); av != nil {
+		if av = i.pk.attributeValue(pElem, valueSeparator); av != nil {
 			avm[i.pk.name] = av
 		} else if mustBeSet {
-			return gomerr.Missing("PK", i.pk.keyFieldsByPersistable[p.PersistableTypeName()]).Given(p)
+			return dataerr.KeyNotFound(i.pk.name, i.pk.keyFieldsByPersistable[p.TypeName()], p)
 		}
 	}
 
 	if i.sk != nil {
 		if _, present := avm[i.sk.name]; !present {
-			if av = i.sk.attributeValue(p, valueSeparator); av != nil {
+			if av = i.sk.attributeValue(pElem, valueSeparator); av != nil {
 				avm[i.sk.name] = av
 			} else if mustBeSet {
-				return gomerr.Missing("SK", i.sk.keyFieldsByPersistable[p.PersistableTypeName()]).Given(p)
+				return dataerr.KeyNotFound(i.sk.name, i.sk.keyFieldsByPersistable[p.TypeName()], p)
 			}
 		}
 	}
@@ -198,8 +234,8 @@ func (i *index) keyAttributes() []*keyAttribute {
 	}
 }
 
-func (k *keyAttribute) attributeValue(s data.Storable, valueSeparator string) *dynamodb.AttributeValue {
-	value := k.buildKeyValue(s, valueSeparator)
+func (k *keyAttribute) attributeValue(elemValue reflect.Value, valueSeparator string) *dynamodb.AttributeValue {
+	value := k.buildKeyValue(elemValue, valueSeparator)
 	if value == "" {
 		return nil
 	}
@@ -218,13 +254,13 @@ func (k *keyAttribute) attributeValue(s data.Storable, valueSeparator string) *d
 	return nil
 }
 
-func (k *keyAttribute) buildKeyValue(s data.Storable, valueSeparator string) string {
-	sv := reflect.ValueOf(s).Elem()
-	keyFields := k.keyFieldsByPersistable[s.PersistableTypeName()]
-	keyValue := fieldValue(keyFields[0], sv) // will always have at least one keyField
+func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, valueSeparator string) string {
+	// sv := reflect.ValueOf(s).Elem()
+	keyFields := k.keyFieldsByPersistable[elemValue.Type().Name()] // TODO: verify this is the correct value
+	keyValue := fieldValue(keyFields[0], elemValue)                // will always have at least one keyField
 	for i := 1; i < len(keyFields); i++ {
 		keyValue += valueSeparator
-		keyValue += fieldValue(keyFields[i], sv)
+		keyValue += fieldValue(keyFields[i], elemValue)
 	}
 	return keyValue
 }
