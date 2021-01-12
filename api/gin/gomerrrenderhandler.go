@@ -57,9 +57,9 @@ const (
 )
 
 var GomerrToStatusCode = map[string]int{
-	util.UnqualifiedTypeName(gomerr.MissingError{}):  http.StatusBadRequest,
-	util.UnqualifiedTypeName(limit.ExceededError{}):  HttpStatusLimitExceeded,
-	util.UnqualifiedTypeName(gomerr.NotFoundError{}): http.StatusNotFound,
+	util.UnqualifiedTypeName(gomerr.UnprocessableError{}): http.StatusBadRequest,
+	util.UnqualifiedTypeName(limit.ExceededError{}):       HttpStatusLimitExceeded,
+	util.UnqualifiedTypeName(gomerr.NotFoundError{}):      http.StatusNotFound,
 
 	// XXX: finish populating..
 }

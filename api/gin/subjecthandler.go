@@ -10,7 +10,7 @@ import (
 
 var Subject = NilSubject
 
-func NilSubject(c *gin.Context) auth.Subject {
+func NilSubject(*gin.Context) auth.Subject {
 	return nil
 }
 
