@@ -3,11 +3,9 @@ package resource
 import (
 	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
-	"github.com/jt0/gomer/util"
 )
 
 type limitAction func(limit.Limiter, limit.Limited) gomerr.Gomerr
@@ -44,7 +42,7 @@ func decrement(limiter limit.Limiter, limited limit.Limited) gomerr.Gomerr {
 	return nil
 }
 
-func applyLimitAction(limitAction limitAction, i Instance) (limit.Limiter, gomerr.Gomerr) {
+func applyLimitAction(limitAction limitAction, i Resource) (limit.Limiter, gomerr.Gomerr) {
 	limited, ok := i.(limit.Limited)
 	if !ok {
 		return nil, nil
@@ -55,26 +53,31 @@ func applyLimitAction(limitAction limitAction, i Instance) (limit.Limiter, gomer
 		return nil, gomerr.Configuration(i.metadata().instanceName + " did not provide a Limiter for itself.").Wrap(ge)
 	}
 
-	limiterInstance, ok := limiter.(Instance)
+	li, ok := limiter.(Instance)
 	if !ok {
 		return nil, gomerr.Configuration("Limiter from " + i.metadata().instanceName + " does not implement resource.Instance")
 	}
 
 	// If the metadata isn't set, then this is a new object and needs to be loaded
 	var loaded bool
-	if limiterInstance.metadata() == nil {
-		resourceType := util.UnqualifiedTypeName(reflect.TypeOf(limiter)) // PersistableTypeName() not yet available.
-		metadata, ok := lowerCaseResourceTypeToMetadata[strings.ToLower(resourceType)]
+	if li.metadata() == nil {
+		resourceType := reflect.TypeOf(limiter)
+		metadata, ok := resourceTypeToMetadata[resourceType]
 		if !ok {
-			return nil, gomerr.Configuration("Unregistered resource type.").Wrap(unknownResourceType(resourceType))
+			return nil, gomerr.Unprocessable("Unknown Resource type. Was resource.Register() called for it?", resourceType)
 		}
 
-		limiterInstance.setMetadata(metadata)
-		limiterInstance.setSubject(i.Subject())
-		limiterInstance.OnSubject()
+		li.setMetadata(metadata)
+		li.setSubject(i.Subject())
+
+		// Only works if the limiter has provided attributes that overlap with what the limiter needs. If any are
+		// missing, it will need to be populated by the Limited
+		if ge := li.metadata().fields.CopyProvided(reflect.ValueOf(i).Elem(), reflect.ValueOf(li).Elem()); ge != nil {
+			return nil, ge
+		}
 
 		// TODO: cache in case needed by more than one resource...
-		if ge := limiterInstance.metadata().dataStore.Read(limiterInstance); ge != nil {
+		if ge := li.metadata().dataStore.Read(li); ge != nil {
 			return nil, ge
 		}
 
@@ -103,7 +106,8 @@ func saveLimiterIfDirty(limiter limit.Limiter) {
 	ge := limiterInstance.metadata().dataStore.Update(limiterInstance, nil)
 	if ge != nil {
 		// TODO: use provided logger
-		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", limiterInstance.metadata().instanceName, limiterInstance.Id(), ge)
+		id, _ := Id(limiterInstance)
+		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", limiterInstance.metadata().instanceName, id, ge)
 		return
 	}
 

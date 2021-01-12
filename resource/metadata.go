@@ -2,7 +2,6 @@ package resource
 
 import (
 	"reflect"
-	"strings"
 
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/fields"
@@ -11,133 +10,111 @@ import (
 )
 
 type Metadata interface {
-	InstanceName() string
-	InstanceActions() InstanceActions
-	CollectionQueryName() string
-	//Parent() Metadata
+	ResourceType(Type) reflect.Type
+	Actions() map[interface{}]func() Action
+	// Parent() Metadata
 	Children() []Metadata
-	//IdExternalName() string
 	ExternalNameToFieldName(externalName string) (string, bool)
 }
 
-type InstanceActions map[string]func() InstanceAction
-
-var emptyActions = InstanceActions{}
-
-func Register(
-	instance Instance,
-	instanceActions InstanceActions,
-	collectionQuery CollectionQuery,
-	// collectionActions map[string]func() CollectionAction,
-	dataStore data.Store,
-	parentMetadata Metadata,
-) (md *metadata, ge gomerr.Gomerr) {
+func Register(instance Instance, collection Collection, actions map[interface{}]func() Action, dataStore data.Store, parentMetadata Metadata) (md *metadata, ge gomerr.Gomerr) {
 	if instance == nil {
 		return nil, gomerr.Configuration("Must register with an Instance type")
 	}
 
 	it := reflect.TypeOf(instance)
-	instanceName := util.UnqualifiedTypeName(it)
-	lcInstanceName := strings.ToLower(instanceName)
-
-	md = lowerCaseResourceTypeToMetadata[lcInstanceName]
+	md, _ = resourceTypeToMetadata[it]
 	if md != nil {
-		return
+		return md, nil
+	}
+	defer func() {
+		if ge == nil {
+			resourceTypeToMetadata[it] = md
+		}
+	}()
+
+	if actions == nil {
+		return nil, gomerr.Configuration("Must register with a non-nil Actions")
 	}
 
-	var structType reflect.Type
-	switch it.Kind() {
-	case reflect.Struct:
-		structType = it
-	case reflect.Ptr:
-		structType = it.Elem()
+	var ct reflect.Type
+	if collection != nil {
+		ct = reflect.TypeOf(collection)
+		defer func() {
+			if ge == nil {
+				resourceTypeToMetadata[ct] = md
+			}
+		}()
 	}
 
-	cqt := reflect.TypeOf(collectionQuery)
 	nilSafeParentMetadata, _ := parentMetadata.(*metadata)
 
-	if instanceActions == nil {
-		instanceActions = emptyActions
-	}
-
 	md = &metadata{
-		instanceType:        it,
-		instanceName:        instanceName,
-		instanceActions:     instanceActions,
-		collectionQueryType: cqt,
-		collectionQueryName: util.UnqualifiedTypeName(cqt),
-		dataStore:           dataStore,
-		parent:              nilSafeParentMetadata,
-		children:            make([]Metadata, 0),
+		instanceType:   it,
+		instanceName:   util.UnqualifiedTypeName(it),
+		collectionType: ct,
+		collectionName: util.UnqualifiedTypeName(ct),
+		actions:        actions,
+		dataStore:      dataStore,
+		parent:         nilSafeParentMetadata,
+		children:       make([]Metadata, 0),
 	}
 
-	md.fields, ge = fields.NewFields(structType)
-	if ge != nil {
-		return nil, ge // don't want to return metadata value
+	// FIXME: Do a ptr test
+	if md.fields, ge = fields.NewFields(it.Elem()); ge != nil {
+		return nil, ge
 	}
 
-	lowerCaseResourceTypeToMetadata[lcInstanceName] = md
 	if nilSafeParentMetadata != nil {
 		nilSafeParentMetadata.children = append(nilSafeParentMetadata.children, md)
 	}
 
-	return
+	return md, nil
 }
 
-var lowerCaseResourceTypeToMetadata = make(map[string]*metadata)
+var resourceTypeToMetadata = make(map[reflect.Type]*metadata)
 
 type metadata struct {
-	instanceType        reflect.Type
-	instanceName        string
-	instanceActions     InstanceActions
-	collectionQueryType reflect.Type
-	collectionQueryName string
-	fields              *fields.Fields
-	dataStore           data.Store
-	parent              *metadata
-	children            []Metadata // Using interface type since we aren't currently using child attributes
+	instanceType   reflect.Type
+	collectionType reflect.Type
+	instanceName   string
+	collectionName string
+	actions        map[interface{}]func() Action
+	fields         *fields.Fields
+	dataStore      data.Store
+	parent         *metadata
+	children       []Metadata // Using interface type since we aren't currently using child attributes
 
-	//idFields       []field
+	// idFields       []field
 }
 
-func (m *metadata) InstanceName() string {
-	return m.instanceName
+func (m *metadata) ResourceType(type_ Type) reflect.Type {
+	switch type_ {
+	case InstanceType:
+		return m.instanceType
+	case CollectionType:
+		return m.collectionType
+	default:
+		return nil
+	}
 }
 
-func (m *metadata) InstanceActions() InstanceActions {
-	return m.instanceActions
+func (m *metadata) Actions() map[interface{}]func() Action {
+	return m.actions
 }
 
-func (m *metadata) CollectionQueryName() string {
-	return m.collectionQueryName
-}
-
-//func (m *metadata) Parent() Metadata {
-//	if m.parent == nil {
-//		return nil
-//	}
+// func (m *metadata) Parent() Metadata {
+// 	if m.parent == nil {
+// 		return nil
+// 	}
 //
-//	return m.parent
-//}
+// 	return m.parent
+// }
 
 func (m *metadata) Children() []Metadata {
 	return m.children
 }
 
-//func (m *metadata) IdExternalName() string {
-//	return m.fields.idExternalName()
-//}
-
 func (m *metadata) ExternalNameToFieldName(externalName string) (string, bool) {
 	return m.fields.ExternalNameToFieldName(externalName)
-}
-
-func (m *metadata) emptyItems() interface{} {
-	slice := reflect.MakeSlice(reflect.SliceOf(m.instanceType), 0, 0)
-
-	// Create a pointer to a slice value and set it to the slice
-	slicePtr := reflect.New(slice.Type())
-	slicePtr.Elem().Set(slice)
-
-	return slicePtr.Interface()
 }
