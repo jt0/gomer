@@ -10,6 +10,6 @@ type PersistableNotFoundError struct {
 	Key      interface{}
 }
 
-func PersistableNotFound(typeName string, key interface{}) *NoIndexMatchError {
-	return gomerr.Build(new(PersistableNotFoundError), typeName, key).(*NoIndexMatchError)
+func PersistableNotFound(typeName string, key interface{}) *PersistableNotFoundError {
+	return gomerr.Build(new(PersistableNotFoundError), typeName, key).(*PersistableNotFoundError)
 }

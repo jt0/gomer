@@ -64,12 +64,10 @@ type ConsistencyTyper interface {
 
 type ItemResolver func(interface{}) (interface{}, gomerr.Gomerr)
 
-var tableIndexName = "<table>"
-
 func Store(tableName string, config *Configuration /* resolver data.ItemResolver,*/, persistables ...data.Persistable) (data.Store, gomerr.Gomerr) {
 	table := &table{
 		tableName:              &tableName,
-		index:                  index{name: &tableIndexName, canReadConsistently: true},
+		index:                  index{canReadConsistently: true},
 		ddb:                    config.DynamoDb,
 		defaultLimit:           &config.MaxResultsDefault,
 		maxLimit:               &config.MaxResultsMax,
@@ -101,7 +99,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
 			case dynamodb.ErrCodeResourceNotFoundException:
-				return gomerr.NotFound("ddb.Table", *t.tableName).Wrap(awsErr)
+				return gomerr.Unprocessable("Table", *t.tableName).Wrap(awsErr)
 			}
 		}
 
@@ -163,7 +161,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 				if keyParts := keyAttribute.keyFieldsByPersistable[pName]; keyParts != nil {
 					for i, keyPart := range keyParts {
 						if keyPart == "" {
-							return gomerr.Configuration(fmt.Sprintf("Index %s is missing a key part: %s[%s][%d]", index.indexName(), keyAttribute.name, pName, i)).AddAttribute("keyParts", keyParts)
+							return gomerr.Configuration(fmt.Sprintf("Index %s is missing a key part: %s[%s][%d]", index.friendlyName(), keyAttribute.name, pName, i)).AddAttribute("keyParts", keyParts)
 						}
 					}
 				} else {
@@ -212,14 +210,28 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 
 		for i := 0; i < uv.NumField(); i++ {
 			uField := uv.Field(i)
-			if !uField.CanSet() {
+			// TODO:p0 Support structs. Will want to recurse through and not bother w/ CanSet() checks until we know
+			//         we're dealing w/ a scalar.
+			if !uField.CanSet() || uField.Kind() == reflect.Struct || (uField.Kind() == reflect.Ptr && uField.Elem().Kind() == reflect.Struct) {
 				continue
 			}
 
 			pField := pv.Field(i)
 			if reflect.DeepEqual(uField.Interface(), pField.Interface()) {
 				uField.Set(reflect.Zero(uField.Type()))
+			} else if uField.Kind() == reflect.Ptr {
+				if uField.IsNil() {
+					continue
+				}
+				if !pField.IsNil() && reflect.DeepEqual(uField.Elem().Interface(), pField.Elem().Interface()) {
+					uField.Set(reflect.Zero(uField.Type()))
+				} else {
+					pField.Set(uField)
+				}
 			} else {
+				if uField.IsZero() {
+					continue
+				}
 				pField.Set(uField)
 			}
 		}
@@ -235,7 +247,8 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 			// add the constraint to the map and continue.
 			if otherFields, ok := fieldConstraint.Details()["Scope"].([]string); ok {
 				for _, otherField := range otherFields {
-					if !uv.FieldByName(otherField).IsZero() {
+					uField := uv.FieldByName(otherField)
+					if !uField.IsZero() && uField.Interface() != pv.FieldByName(otherField).Interface() {
 						fieldConstraints[fieldName] = fieldConstraint
 						continue
 					}
@@ -406,7 +419,7 @@ func (t *table) Query(q data.Queryable) (ge gomerr.Gomerr) {
 	}()
 
 	var input *dynamodb.QueryInput
-	input, ge = t.buildQueryInput(q)
+	input, ge = t.buildQueryInput(q, q.TypeNames()[0]) // TODO:p2 Fix when query supports multiple types
 	if ge != nil {
 		return ge
 	}
@@ -455,7 +468,7 @@ func (t *table) isFieldUnique(fieldName string, additionalFields []string) func(
 			qv.FieldByName(additionalField).Set(pv.FieldByName(additionalField))
 		}
 
-		input, ge := t.buildQueryInput(q)
+		input, ge := t.buildQueryInput(q, p.TypeName())
 		if ge != nil {
 			// TODO: log "Unable to build constraint query: " + ge.Error()
 			return false
@@ -488,7 +501,7 @@ func (t *table) isFieldUnique(fieldName string, additionalFields []string) func(
 
 // buildQueryInput Builds the DynamoDB QueryInput types based on the provided queryable. See indexFor and
 // nextTokenizer.untokenize for possible error types.
-func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, gomerr.Gomerr) {
+func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*dynamodb.QueryInput, gomerr.Gomerr) {
 	index, consistent, ge := indexFor(t, q)
 	if ge != nil {
 		return nil, ge
@@ -501,10 +514,10 @@ func (t *table) buildQueryInput(q data.Queryable) (*dynamodb.QueryInput, gomerr.
 	qElem := reflect.ValueOf(q).Elem()
 
 	keyConditionExpresion := safeName(index.pk.name, expressionAttributeNames) + "=:pk"
-	expressionAttributeValues[":pk"] = index.pk.attributeValue(qElem, t.valueSeparator) // Non-null because indexFor succeeded
+	expressionAttributeValues[":pk"] = index.pk.attributeValue(qElem, persistableTypeName, t.valueSeparator) // Non-null because indexFor succeeded
 
 	if index.sk != nil {
-		if eav := index.sk.attributeValue(qElem, t.valueSeparator); eav != nil {
+		if eav := index.sk.attributeValue(qElem, persistableTypeName, t.valueSeparator); eav != nil {
 			if eav.S != nil && strings.HasSuffix(*eav.S, ":") {
 				trimmed := strings.Trim(*eav.S, ":")
 				eav.S = &trimmed
@@ -563,9 +576,9 @@ func (t *table) runQuery(input *dynamodb.QueryInput) (*dynamodb.QueryOutput, gom
 				return nil, limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(awsErr)
 			case dynamodb.ErrCodeResourceNotFoundException:
 				if input.IndexName != nil {
-					return nil, gomerr.NotFound("Table index", *input.IndexName).Wrap(awsErr)
+					return nil, gomerr.Unprocessable("Table Index", *input.IndexName).Wrap(awsErr)
 				} else {
-					return nil, gomerr.NotFound("Table", *t.tableName).Wrap(awsErr)
+					return nil, gomerr.Unprocessable("Table", *t.tableName).Wrap(awsErr)
 				}
 			}
 		}

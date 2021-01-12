@@ -61,6 +61,8 @@ func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*
 	return &encoded, nil
 }
 
+var validTokenFormatVersions = constraint.OneOf(nextTokenFormatVersion)
+
 // untokenize will pull the NextPageToken from the queryable and (if there is one) decode the value. Possible errors:
 //
 //  constraint.NotSatisfied (using constraint.Base64):
@@ -93,8 +95,8 @@ func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.Attri
 		return nil, gomerr.Unmarshal("NextPageToken", toUnmarshal, nt).Wrap(err)
 	}
 
-	if nt.Version != nextTokenFormatVersion {
-		return nil, gomerr.Unprocessable("nextTokenFormatVersion", nt.Version, constraint.OneOf(nextTokenFormatVersion))
+	if ge := validTokenFormatVersions.Validate(nt.Version); ge != nil {
+		return nil, ge
 	}
 
 	if nt.expired() {

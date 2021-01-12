@@ -20,6 +20,7 @@ type Persistable interface {
 type Queryable interface {
 	TypeNames() []string
 	TypeOf(interface{}) string
+	Items() []interface{}
 	SetItems([]interface{})
 	NextPageToken() *string
 	SetNextPageToken(*string)

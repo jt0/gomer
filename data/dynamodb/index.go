@@ -33,9 +33,9 @@ type candidate struct {
 	skMissing int
 }
 
-func (i *index) indexName() string {
+func (i *index) friendlyName() string {
 	if i.name == nil {
-		return "<table>"
+		return "__table__"
 	}
 	return *i.name
 }
@@ -100,9 +100,10 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 		}
 
 		// A viable candidate needs to use one index to collect each type that the queryable is interested in. To find
-		// it, range through each index and if it doesn't work for a type, fail and move to the next one. Amongst the
-		// viable candidates, choose the best match under the (presumption) that fewer missing keys and longer key
-		// length are better
+		// it, range through each index and if it doesn't work for a type, fail and move to the next one.
+		//
+		// XXX: revisit - should be the one that covers the least, right? Amongst the viable candidates, choose the
+		//      best match under the (presumption) that fewer missing keys and longer key length are better
 		var candidate *candidate
 		for _, typeName := range q.TypeNames() {
 			if c := index.candidate(qv, typeName); c == nil {
@@ -123,7 +124,7 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 	case 0:
 		available := make(map[string]interface{}, 1)
 		for _, index := range t.indexes {
-			available[index.indexName()] = index
+			available[index.friendlyName()] = index
 		}
 		return nil, nil, dataerr.NoIndexMatch(available, q)
 	case 1:
@@ -206,19 +207,19 @@ func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p dat
 	pElem := reflect.ValueOf(p).Elem()
 
 	if _, present := avm[i.pk.name]; !present {
-		if av = i.pk.attributeValue(pElem, valueSeparator); av != nil {
+		if av = i.pk.attributeValue(pElem, p.TypeName(), valueSeparator); av != nil {
 			avm[i.pk.name] = av
 		} else if mustBeSet {
-			return dataerr.KeyNotFound(i.pk.name, i.pk.keyFieldsByPersistable[p.TypeName()], p)
+			return dataerr.KeyValueNotFound(i.pk.name, i.pk.keyFieldsByPersistable[p.TypeName()], p)
 		}
 	}
 
 	if i.sk != nil {
 		if _, present := avm[i.sk.name]; !present {
-			if av = i.sk.attributeValue(pElem, valueSeparator); av != nil {
+			if av = i.sk.attributeValue(pElem, p.TypeName(), valueSeparator); av != nil {
 				avm[i.sk.name] = av
 			} else if mustBeSet {
-				return dataerr.KeyNotFound(i.sk.name, i.sk.keyFieldsByPersistable[p.TypeName()], p)
+				return dataerr.KeyValueNotFound(i.sk.name, i.sk.keyFieldsByPersistable[p.TypeName()], p)
 			}
 		}
 	}
@@ -234,8 +235,8 @@ func (i *index) keyAttributes() []*keyAttribute {
 	}
 }
 
-func (k *keyAttribute) attributeValue(elemValue reflect.Value, valueSeparator string) *dynamodb.AttributeValue {
-	value := k.buildKeyValue(elemValue, valueSeparator)
+func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeName string, valueSeparator string) *dynamodb.AttributeValue {
+	value := k.buildKeyValue(elemValue, persistableTypeName, valueSeparator)
 	if value == "" {
 		return nil
 	}
@@ -254,10 +255,10 @@ func (k *keyAttribute) attributeValue(elemValue reflect.Value, valueSeparator st
 	return nil
 }
 
-func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, valueSeparator string) string {
+func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeName string, valueSeparator string) string {
 	// sv := reflect.ValueOf(s).Elem()
-	keyFields := k.keyFieldsByPersistable[elemValue.Type().Name()] // TODO: verify this is the correct value
-	keyValue := fieldValue(keyFields[0], elemValue)                // will always have at least one keyField
+	keyFields := k.keyFieldsByPersistable[persistableTypeName]
+	keyValue := fieldValue(keyFields[0], elemValue) // will always have at least one keyField
 	for i := 1; i < len(keyFields); i++ {
 		keyValue += valueSeparator
 		keyValue += fieldValue(keyFields[i], elemValue)

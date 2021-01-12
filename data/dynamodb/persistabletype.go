@@ -43,7 +43,7 @@ func resolver(pt reflect.Type) func(interface{}) (interface{}, gomerr.Gomerr) {
 	return func(i interface{}) (interface{}, gomerr.Gomerr) {
 		m, ok := i.(map[string]*dynamodb.AttributeValue)
 		if !ok {
-			return nil, gomerr.Unprocessable("DynamoDB Item", i, constraint.TypeOf(m))
+			return nil, gomerr.Internal("DynamoDB Item is not a map[string]*dynamodb.AttributeValue").AddAttribute("Actual", i)
 		}
 
 		resolved := reflect.New(pt).Interface().(data.Persistable)
@@ -94,7 +94,7 @@ func (pt *persistableType) processConstraintsTag(fieldName string, tag string, t
 
 	constraints := constraintsRegexp.FindAllStringSubmatch(tag, -1)
 	if constraints == nil {
-		return append(errors, gomerr.Unprocessable("`db.constraints`", tag, constraint.RegexpMatch(constraintsRegexp)).AddAttribute("Field", fieldName))
+		return append(errors, gomerr.Configuration("Invalid `db.constraints` value: "+tag).AddAttribute("Field", fieldName))
 	}
 
 	for _, c := range constraints {
@@ -121,7 +121,7 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 	for _, keyStatement := range strings.Split(strings.ReplaceAll(tag, " ", ""), ",") {
 		groups := ddbKeyStatementRegexp.FindStringSubmatch(keyStatement)
 		if groups == nil {
-			return append(errors, gomerr.Unprocessable("`db.keys`", keyStatement, constraint.RegexpMatch(ddbKeyStatementRegexp)).AddAttribute("Field", fieldName))
+			return append(errors, gomerr.Configuration("Invalid `db.keys` value: "+keyStatement).AddAttribute("Field", fieldName))
 		}
 
 		index, ok := indexes[groups[2]]
