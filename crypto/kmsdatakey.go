@@ -179,9 +179,8 @@ func (k kmsDataKeyDecrypter) decode(encoded []byte) (ciphertext []byte, cipherte
 	reader := bytes.NewBuffer(encoded)
 
 	version, _ := reader.ReadByte()
-	if version != encryptedEncodingFormatVersionByte {
-		return nil, nil, nil, gomerr.Unprocessable("encryptedEncodingFormatVersion", version, validEncodingFormats)
-		// return gomerr.Unexpected
+	if ge := validEncodingFormats.Validate(version); ge != nil {
+		return nil, nil, nil, ge
 	}
 
 	var length uint16

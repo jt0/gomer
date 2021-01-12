@@ -2,7 +2,6 @@ package gomerr
 
 type BatchError struct {
 	Gomerr
-
 	errors []Gomerr
 }
 

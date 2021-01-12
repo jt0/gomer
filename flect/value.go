@@ -5,15 +5,6 @@ import (
 	"strconv"
 
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/gomerr/constraint"
-)
-
-var parsableKindConstraint = constraint.OneOf(
-	reflect.Bool,
-	reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-	reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
-	reflect.Uintptr,
-	reflect.Float32, reflect.Float64,
 )
 
 func SetValue(target reflect.Value, value interface{}) gomerr.Gomerr {
@@ -35,7 +26,7 @@ func SetValue(target reflect.Value, value interface{}) gomerr.Gomerr {
 
 	stringValue, ok := value.(string)
 	if !ok {
-		return gomerr.Unprocessable("value", value, constraint.Or(constraint.TypeOf(targetType), constraint.TypeOf("")))
+		return gomerr.Unprocessable("Not a 'string' or '"+targetType.Name()+"'", value)
 	}
 
 	if targetType.Kind() == reflect.Ptr {
@@ -119,7 +110,7 @@ func SetValue(target reflect.Value, value interface{}) gomerr.Gomerr {
 	case reflect.Float64:
 		typed, err = strconv.ParseFloat(stringValue, 64)
 	default:
-		return gomerr.Unprocessable("target.Type()", targetType.String(), parsableKindConstraint)
+		return gomerr.Unprocessable("Unable to set value to '"+targetType.Name()+"'", value)
 	}
 
 	if err != nil {

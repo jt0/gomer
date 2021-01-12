@@ -106,18 +106,18 @@ func fillStack(stackSkip int) []string {
 	return stack
 }
 
-//func relative(file string) string {
-//	_, thisFile, _, _ := runtime.Caller(0)
+// func relative(file string) string {
+// 	_, thisFile, _, _ := runtime.Caller(0)
 //
-//	gomerPath := thisFile[:strings.LastIndex(thisFile, "/gomerr/")]
-//	basePath := gomerPath[:strings.LastIndex(gomerPath, "/")]
-//	rel, err := filepath.Rel(basePath, file)
-//	if err != nil {
-//		return file
-//	}
+// 	gomerPath := thisFile[:strings.LastIndex(thisFile, "/gomerr/")]
+// 	basePath := gomerPath[:strings.LastIndex(gomerPath, "/")]
+// 	rel, err := filepath.Rel(basePath, file)
+// 	if err != nil {
+// 		return file
+// 	}
 //
-//	return strings.TrimLeft(rel, "./")
-//}
+// 	return strings.TrimLeft(rel, "./")
+// }
 
 func (g *gomerr) Wrap(err error) Gomerr {
 	if g.wrapped != nil {
@@ -130,12 +130,12 @@ func (g *gomerr) Wrap(err error) Gomerr {
 
 func (g *gomerr) AddAttribute(key string, value interface{}) Gomerr {
 	// XXX newGomerr? (or maybe we can just always add to g itself)
-	//gw := newGomerr(2, g.self) // wrap first to get line/file info
+	// gw := newGomerr(2, g.self) // wrap first to get line/file info
 	//
-	//// If the notes are being added in the same place g is introduced, use g instead of the new one
-	//if g.stack[0].Line == gw.stack[0].Line && g.stack[0].File == gw.stack[0].File {
-	//	gw = g
-	//}
+	// // If the notes are being added in the same place g is introduced, use g instead of the new one
+	// if g.stack[0].Line == gw.stack[0].Line && g.stack[0].File == gw.stack[0].File {
+	// 	gw = g
+	// }
 
 	if g.attributes == nil {
 		g.attributes = make(map[string]interface{})
