@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/gomerr/constraint"
 )
 
 var built = map[string]constraint.Constraint{

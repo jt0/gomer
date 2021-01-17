@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/jt0/gomer/auth"
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/gomerr/constraint"
 )
 
 type AccessPrincipal string

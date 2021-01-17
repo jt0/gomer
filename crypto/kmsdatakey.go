@@ -14,8 +14,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/kms"
 	"github.com/aws/aws-sdk-go/service/kms/kmsiface"
 
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/gomerr/constraint"
 )
 
 const (

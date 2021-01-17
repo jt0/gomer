@@ -10,10 +10,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/crypto"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/gomerr/constraint"
 )
 
 type nextTokenizer struct {
