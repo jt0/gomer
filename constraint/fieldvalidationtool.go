@@ -1,97 +1,90 @@
-package fields
+package constraint
 
 import (
 	"fmt"
 	"reflect"
 	"strings"
 
-	"github.com/jt0/gomer/constraint"
+	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 )
 
-var built = map[string]constraint.Constraint{
-	"base64":   constraint.Base64,
-	"empty":    constraint.Empty,
-	"nil":      constraint.Nil,
-	"notnil":   constraint.NotNil,
-	"required": constraint.Required,
+var built = map[string]Constraint{
+	"base64":   Base64,
+	"empty":    Empty,
+	"nil":      Nil,
+	"notnil":   NotNil,
+	"required": Required,
 }
 
 var available = map[string]interface{}{
-	"and":          constraint.And,
-	"endswith":     constraint.EndsWith,
-	"equals":       constraint.Equals,
-	"float":        constraint.FloatCompare,
-	"floatbetween": constraint.FloatBetween,
-	"int":          constraint.IntCompare,
-	"intbetween":   constraint.IntBetween,
-	"len":          constraint.Length,
-	"maxlen":       constraint.MaxLength,
-	"minlen":       constraint.MinLength,
-	"not":          constraint.Not,
-	"notequals":    constraint.NotEquals,
-	"oneof":        constraint.OneOf,
-	"or":           constraint.Or,
-	"regexp":       constraint.Regexp,
-	"startswith":   constraint.StartsWith,
-	"typeof":       constraint.TypeOf,
-	"uint":         constraint.UintCompare,
-	"uintbetween":  constraint.UintBetween,
+	"and":          And,
+	"endswith":     EndsWith,
+	"equals":       Equals,
+	"float":        FloatCompare,
+	"floatbetween": FloatBetween,
+	"int":          IntCompare,
+	"intbetween":   IntBetween,
+	"len":          Length,
+	"maxlen":       MaxLength,
+	"minlen":       MinLength,
+	"not":          Not,
+	"notequals":    NotEquals,
+	"oneof":        OneOf,
+	"or":           Or,
+	"regexp":       Regexp,
+	"startswith":   StartsWith,
+	"typeof":       TypeOf,
+	"uint":         UintCompare,
+	"uintbetween":  UintBetween,
 }
 
-func RegisterConstraints(constraints map[string]constraint.Constraint) {
+func RegisterConstraints(constraints map[string]Constraint) {
 	for validationName, c := range constraints {
-		if ge := dollarNameConstraint.On("Constraint name").Validate(validationName); ge != nil {
-			panic(ge.AddAttribute("Note", "Custom validation names must start with a '$' symbol and between 2 and 64 characters long"))
+		if validationName[0] != '$' || len(validationName) < 2 || len(validationName) > 64 {
+			panic("Custom validation names must start with a '$' symbol and between 2 and 64 characters long")
 		}
 
 		built[strings.ToLower(validationName)] = c
 	}
 }
 
-// contexts match to the mos specific one.
-// create:foo(1),len(1,3),required,or($id,regexp('^AppConfig\\.[A-Za-z0-9]{9,40}$')),len(1,3);*:len(1,3)
-func (f *field) validateTag(validateTag string) (ge gomerr.Gomerr) {
-	if validateTag == "" {
-		return nil
-	}
+var FieldValidationTool = fields.ScopingWrapper{FieldTool: fieldValidationTool{}}
 
-	// Convert all escaped semi-colons (i.e. '\;') into ' '. Since we trimmed out spaces above, we can re-use them now as a
-	// placeholder which we'll convert back on each section of the tag we process in the loop below.
-	validateTag = strings.ReplaceAll(validateTag, "\\;", " ")
-	f.constraints = make(map[string]constraint.Constraint)
-	for _, contextValidations := range strings.Split(validateTag, ";") {
-		// create:len(1,3),required,or[$id,regexp('^AppConfig\\.[A-Za-z0-9]{9,40}$')],len(1,3)
-		// convert spaces back to no-longer-escaped semi-colons
-		contextValidations = strings.ReplaceAll(contextValidations, " ", ";")
-
-		var context, validations string
-		if separatorIndex := strings.Index(contextValidations, ":"); separatorIndex <= 0 {
-			context = matchImplicitly
-			validations = contextValidations
-		} else {
-			context = contextValidations[:separatorIndex]
-			validations = contextValidations[separatorIndex+1:]
-		}
-
-		// context = create; validations = required,or($id,regexp('^AppConfig\\.[A-Za-z0-9]{9,40}$')),len(1,3)
-		if f.constraints[context], ge = constraintFor(validations, ""); ge != nil {
-			return ge.AddAttributes("Field", f.name, "Validations", validations)
-		}
-	}
-
-	return nil
+type fieldValidationTool struct {
+	constraint Constraint
 }
 
-var emptyConstraint = constraint.NewType(nil)
+func (t fieldValidationTool) Name() string {
+	return "FieldValidationTool"
+}
 
-func constraintFor(validationsString string, logicalOp string) (constraint.Constraint, gomerr.Gomerr) {
-	var constraints []constraint.Constraint
+func (t fieldValidationTool) New(_ reflect.Type, _ reflect.StructField, input interface{}) (fields.FieldTool, gomerr.Gomerr) {
+	c, ge := constraintFor(input.(string), "")
+	if ge != nil {
+		return nil, ge.AddAttribute("Validations", input)
+	}
+
+	return fieldValidationTool{c}, nil
+}
+
+func (t fieldValidationTool) Apply(_ reflect.Value, fieldValue reflect.Value, _ fields.ToolContext) gomerr.Gomerr {
+	if fieldValue.Kind() == reflect.Ptr && !fieldValue.IsZero() {
+		fieldValue = fieldValue.Elem()
+	}
+
+	return t.constraint.Validate(fieldValue.Interface())
+}
+
+var emptyConstraint = NewType(nil)
+
+func constraintFor(validationsString string, logicalOp string) (Constraint, gomerr.Gomerr) {
+	var constraints []Constraint
 	var ovs string
 
 	if built, ok := built[validationsString]; ok {
-		if built.Details()[constraint.TagStructName] == logicalOp {
+		if built.Details()[LookupName] == logicalOp {
 			return built, nil
 		}
 		constraints = append(constraints, built)
@@ -147,31 +140,32 @@ func constraintFor(validationsString string, logicalOp string) (constraint.Const
 		return emptyConstraint, gomerr.Configuration("No constraints found")
 	case 1:
 		if logicalOp == "not" {
-			not := constraint.Not(constraints[0])
+			not := Not(constraints[0])
 			built[ovs] = not
 			return not, nil
-		} // ignore other logicalOps since they
+		}
+		// ignore "and" and "or" since they simplify to the constraint itself
 		return constraints[0], nil
 	default:
 		switch logicalOp {
 		case "or":
-			or := constraint.Or(constraints...)
+			or := Or(constraints...)
 			built[ovs] = or
 			return or, nil
 		case "not":
-			not := constraint.Not(constraint.And(constraints...))
+			not := Not(And(constraints...))
 			built[ovs] = not
 			return not, nil
 		default:
-			and := constraint.And(constraints...)
+			and := And(constraints...)
 			built[ovs] = and
 			return and, nil
 		}
 	}
 }
 
-// Called w/ first open paren "consumed", e.g. '1,2)', 'required,len(1,2))
-func parameterizedConstraint(constraintName string, parenthetical *string) (constraint.Constraint, gomerr.Gomerr) {
+// Called w/ first open paren "consumed", e.g. '1,2)', 'required,len(1,2)'
+func parameterizedConstraint(constraintName string, parenthetical *string) (Constraint, gomerr.Gomerr) {
 	remainder := *parenthetical
 	var accumulator int
 	for parenCounter := 1; parenCounter != 0; {
@@ -199,7 +193,7 @@ func parameterizedConstraint(constraintName string, parenthetical *string) (cons
 	}
 }
 
-func buildConstraint(constraintName, parameterString string) (constraint.Constraint, gomerr.Gomerr) {
+func buildConstraint(constraintName, parameterString string) (Constraint, gomerr.Gomerr) {
 	constrainerFunction, ok := available[constraintName]
 	if !ok {
 		return emptyConstraint, gomerr.Configuration("Unknown validation type: " + constraintName)
@@ -250,47 +244,11 @@ func buildConstraint(constraintName, parameterString string) (constraint.Constra
 		}
 	}
 
-	// The set of "available" values all result in a single response element which is a constraint.constrainer.
-	// If something goes sideways, this will panic (and indicates bug in Gomer).
-
+	// The set of "available" values all result in a single response element which is a Constraint.
+	// If something goes sideways, this will panic (and indicates a bug in Gomer).
 	results := cfv.Call(in)
-	constrainer := results[0].Interface().(constraint.Constraint)
+	constrainer := results[0].Interface().(Constraint)
 	built[constraintName+"("+parameterString+")"] = constrainer
 
 	return constrainer, nil
-}
-
-const matchImplicitly = "*"
-
-func (fs *Fields) Validate(v reflect.Value, context string) gomerr.Gomerr {
-	var errors []gomerr.Gomerr
-
-	for _, field := range fs.fieldMap {
-		if field.constraints == nil || strings.Contains(field.location, ".") { // TODO: handle nested/embedded structs
-			continue
-		}
-
-		c, ok := field.constraints[context]
-		if !ok {
-			if c, ok = field.constraints[matchImplicitly]; !ok {
-				continue
-			}
-		}
-
-		fv := v.FieldByName(field.name)
-		if !fv.IsValid() {
-			continue
-		}
-
-		if fv.Kind() == reflect.Ptr && !fv.IsZero() {
-			fv = fv.Elem()
-		}
-
-		fvi := fv.Interface()
-		if ge := c.Validate(fvi); ge != nil {
-			errors = append(errors, ge.AddAttribute("field.name", field.name))
-		}
-	}
-
-	return gomerr.Batcher(errors)
 }

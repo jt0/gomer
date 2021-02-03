@@ -8,13 +8,13 @@ import (
 func Equals(compareTo interface{}) *constraint {
 	return (&constraint{test: func(value interface{}) bool {
 		return value == compareTo
-	}}).setDetails("Equals", compareTo, TagStructName, "equals")
+	}}).setDetails("Equals", compareTo, LookupName, "equals")
 }
 
 func NotEquals(compareTo interface{}) *constraint {
 	return (&constraint{test: func(value interface{}) bool {
 		return value != compareTo
-	}}).setDetails("NotEquals", compareTo, TagStructName, "notequals")
+	}}).setDetails("NotEquals", compareTo, LookupName, "notequals")
 }
 
 func OneOf(compareTo ...interface{}) *constraint {
@@ -26,7 +26,7 @@ func OneOf(compareTo ...interface{}) *constraint {
 		}
 
 		return false
-	}}).setDetails("OneOf", fmt.Sprintf("%v", compareTo), TagStructName, "oneof")
+	}}).setDetails("OneOf", fmt.Sprintf("%v", compareTo), LookupName, "oneof")
 }
 
 func TypeOf(i interface{}) *constraint {
@@ -37,5 +37,5 @@ func TypeOf(i interface{}) *constraint {
 
 	return (&constraint{test: func(value interface{}) bool {
 		return reflect.TypeOf(value) == t
-	}}).setDetails("TypeOf", t.Name(), TagStructName, "typeof")
+	}}).setDetails("TypeOf", t.Name(), LookupName, "typeof")
 }

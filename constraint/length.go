@@ -46,7 +46,7 @@ func MaxLength(max int) *constraint {
 var Empty = MaxLength(0)
 
 func length(min, max *int, lookupName string) *constraint {
-	details := []interface{}{TagStructName, lookupName}
+	details := []interface{}{LookupName, lookupName}
 
 	if min != nil && min == max {
 		details = append(details, "Length", *min)

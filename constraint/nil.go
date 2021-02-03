@@ -18,7 +18,7 @@ func isNil() *constraint {
 		default:
 			return false
 		}
-	}}).setDetails("Nil", true, TagStructName, "nil")
+	}}).setDetails("Nil", true, LookupName, "nil")
 }
 
 var NotNil = notNil()
@@ -26,5 +26,5 @@ var NotNil = notNil()
 func notNil() *constraint {
 	return (&constraint{test: func(value interface{}) bool {
 		return !Nil.Test(value)
-	}}).setDetails("Nil", false, TagStructName, "notnil")
+	}}).setDetails("Nil", false, LookupName, "notnil")
 }

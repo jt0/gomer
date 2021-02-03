@@ -18,7 +18,7 @@ func StartsWith(prefix string) *constraint {
 		default:
 			return false
 		}
-	}}).setDetails("Prefix", prefix, TagStructName, "startswith")
+	}}).setDetails("Prefix", prefix, LookupName, "startswith")
 }
 
 func EndsWith(suffix string) *constraint {
@@ -31,7 +31,7 @@ func EndsWith(suffix string) *constraint {
 		default:
 			return false
 		}
-	}}).setDetails("Suffix", suffix, TagStructName, "endswith")
+	}}).setDetails("Suffix", suffix, LookupName, "endswith")
 }
 
 func Regexp(r string) *constraint {
@@ -48,7 +48,7 @@ func RegexpMatch(regexp *regexp.Regexp) *constraint {
 		default:
 			return false
 		}
-	}}).setDetails("Regexp", regexp.String(), TagStructName, "regexp")
+	}}).setDetails("Regexp", regexp.String(), LookupName, "regexp")
 }
 
 var Base64 = base64()
@@ -66,5 +66,5 @@ func base64() *constraint {
 		}
 
 		return err != nil
-	}}).setDetails("Base64Encoded", true, TagStructName, "base64")
+	}}).setDetails("Base64Encoded", true, LookupName, "base64")
 }

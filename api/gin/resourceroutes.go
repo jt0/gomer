@@ -88,7 +88,7 @@ func buildRoutes(r *gin.Engine, md resource.Metadata, parentPath string) {
 			successStatus = http.StatusOK
 		}
 
-		r.Handle(op.Method(), relativePath, handler(md.ResourceType(action().ResourceType()), action, md.ExternalNameToFieldName, successStatus, resource.ReadableData))
+		r.Handle(op.Method(), relativePath, handler(md.ResourceType(action().ResourceType()), action, successStatus, resource.ReadableData))
 	}
 
 	if collectionType != nil { // Cannot have resources other than instances under a collection
@@ -113,7 +113,7 @@ func typeName(t reflect.Type) string {
 	return s[dotIndex+1:]
 }
 
-func handler(resourceType reflect.Type, action func() resource.Action, externalToFieldName func(string) (string, bool), successStatus int, preRender PreRender) func(c *gin.Context) {
+func handler(resourceType reflect.Type, action func() resource.Action, successStatus int, preRender PreRender) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -121,7 +121,7 @@ func handler(resourceType reflect.Type, action func() resource.Action, externalT
 			}
 		}()
 
-		bytes, ge := getBytes(c, externalToFieldName)
+		bytes, ge := getBytes(c)
 		if ge != nil {
 			_ = c.Error(ge)
 			return
@@ -145,7 +145,7 @@ func handler(resourceType reflect.Type, action func() resource.Action, externalT
 	}
 }
 
-func getBytes(c *gin.Context, externalToFieldName func(string) (string, bool)) ([]byte, gomerr.Gomerr) {
+func getBytes(c *gin.Context) ([]byte, gomerr.Gomerr) {
 	var jsonMap map[string]interface{}
 	bodyBytes, _ := ioutil.ReadAll(c.Request.Body)
 	queryParams := c.Request.URL.Query()
@@ -159,7 +159,7 @@ func getBytes(c *gin.Context, externalToFieldName func(string) (string, bool)) (
 	for key, value := range queryParams {
 		// TODO: decide if body values should be overwritten by query params
 		// Test if the query param will apply to some field in the targeted type and only apply if yes
-		if _, ok := externalToFieldName(key); ok && len(value) > 0 {
+		if len(value) > 0 {
 			jsonMap[key] = value[0]
 		} // TODO: arrays or key-only query params
 	}

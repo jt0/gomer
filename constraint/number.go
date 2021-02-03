@@ -35,13 +35,13 @@ func IntCompare(comparisonType ComparisonType, compareTo int64) *constraint {
 			vv := reflect.ValueOf(value) // ignore nil; can be marked as required if needed
 			return vv.Kind() == reflect.Ptr && vv.IsNil()
 		}
-	}}).setDetails(comparisonType, compareTo, TagStructName, "int")
+	}}).setDetails(comparisonType, compareTo, LookupName, "int")
 }
 
 // IntBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func IntBetween(lower, upper int64) *constraint {
-	return And(IntCompare(GTE, lower), IntCompare(LTE, upper)).(*constraint).setDetails(TagStructName, "intbetween")
+	return And(IntCompare(GTE, lower), IntCompare(LTE, upper)).(*constraint).setDetails(LookupName, "intbetween")
 }
 
 var intComparators = map[ComparisonType]func(value, compareTo int64) bool{
@@ -73,13 +73,13 @@ func UintCompare(comparisonType ComparisonType, compareTo uint64) *constraint {
 			vv := reflect.ValueOf(value) // ignore nil; can be marked as required if needed
 			return vv.Kind() == reflect.Ptr && vv.IsNil()
 		}
-	}}).setDetails(comparisonType, compareTo, TagStructName, "uint")
+	}}).setDetails(comparisonType, compareTo, LookupName, "uint")
 }
 
 // UintBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func UintBetween(lower, upper uint64) *constraint {
-	return And(UintCompare(GTE, lower), UintCompare(LTE, upper)).(*constraint).setDetails(TagStructName, "uintbetween")
+	return And(UintCompare(GTE, lower), UintCompare(LTE, upper)).(*constraint).setDetails(LookupName, "uintbetween")
 }
 
 var uintComparators = map[ComparisonType]func(value, compareTo uint64) bool{
@@ -92,11 +92,11 @@ var uintComparators = map[ComparisonType]func(value, compareTo uint64) bool{
 }
 
 func ByteCompare(comparisonType ComparisonType, compareTo byte) *constraint {
-	return UintCompare(comparisonType, uint64(compareTo)).setDetails(TagStructName, "byte")
+	return UintCompare(comparisonType, uint64(compareTo)).setDetails(LookupName, "byte")
 }
 
 func ByteBetween(lower, upper byte) *constraint {
-	return UintBetween(uint64(lower), uint64(upper)).setDetails(TagStructName, "bytebetween")
+	return UintBetween(uint64(lower), uint64(upper)).setDetails(LookupName, "bytebetween")
 }
 
 // FloatCompare compares a tested value to compareTo. While compareTo is an float64, the
@@ -112,13 +112,13 @@ func FloatCompare(comparisonType ComparisonType, compareTo float64) *constraint 
 			vv := reflect.ValueOf(value) // ignore nil; can be marked as required if needed
 			return vv.Kind() == reflect.Ptr && vv.IsNil()
 		}
-	}}).setDetails(string(comparisonType), compareTo, TagStructName, "float")
+	}}).setDetails(string(comparisonType), compareTo, LookupName, "float")
 }
 
 // FloatBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func FloatBetween(lower, upper float64) *constraint {
-	return And(FloatCompare(GTE, lower), FloatCompare(LTE, upper)).(*constraint).setDetails(TagStructName, "floatbetween")
+	return And(FloatCompare(GTE, lower), FloatCompare(LTE, upper)).(*constraint).setDetails(LookupName, "floatbetween")
 }
 
 var floatComparators = map[ComparisonType]func(value, compareTo float64) bool{

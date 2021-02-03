@@ -3,10 +3,12 @@ package resource
 import (
 	"reflect"
 
+	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/data/dataerr"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/id"
 )
 
 type Instance interface {
@@ -28,12 +30,19 @@ func SaveInstance(i Instance) gomerr.Gomerr {
 }
 
 func Id(i Instance) (string, gomerr.Gomerr) {
-	return i.metadata().fields.Id(reflect.ValueOf(i).Elem())
+	return id.Id(reflect.ValueOf(i).Elem())
 }
 
 func readableInstanceData(i Instance) gomerr.Gomerr {
-	if empty := i.metadata().fields.RemoveNonReadable(reflect.ValueOf(i).Elem(), i.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal)); empty == true {
-		id, ge := Id(i)
+	id, _ := Id(i)
+
+	tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddClearIfDeniedAction(i.Subject(), auth.CreatePermission)}
+	ge := i.metadata().fields.ApplyTools(reflect.ValueOf(i).Elem(), tool)
+	if ge != nil {
+		return ge
+	}
+
+	if tool.Context[auth.NotClearedCount] == 0 {
 		return dataerr.PersistableNotFound(i.TypeName(), id).Wrap(ge)
 	}
 

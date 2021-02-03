@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	TagStructName = "TagStructName"
+	LookupName = "LookupName"
 )
 
 type Constraint interface {

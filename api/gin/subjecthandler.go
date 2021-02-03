@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/jt0/gomer/auth"
-	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 )
 
@@ -19,7 +18,7 @@ type SubjectProvider func(*gin.Context) (auth.Subject, gomerr.Gomerr)
 func SubjectHandler(subjectProvider SubjectProvider) gin.HandlerFunc {
 	if subjectProvider == nil {
 		subjectProvider = func(*gin.Context) (auth.Subject, gomerr.Gomerr) {
-			return auth.NewSubject(fields.NoAccess), nil
+			return auth.NewSubject(auth.NoFieldAccess), nil
 		}
 	}
 

@@ -3,6 +3,7 @@ package resource
 import (
 	"reflect"
 
+	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
@@ -14,13 +15,21 @@ type Collection interface {
 }
 
 func readableCollectionData(c Collection) gomerr.Gomerr {
+	ta := fields.ToolWithContext{auth.FieldAccessTool, auth.AddClearIfDeniedAction(c.Subject(), auth.ReadPermission)}
+
 	for _, item := range c.Items() {
 		if r, ok := item.(Resource); ok {
-			r.metadata().fields.RemoveNonReadable(reflect.ValueOf(r).Elem(), r.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal))
+			ge := c.metadata().fields.ApplyTools(reflect.ValueOf(r).Elem(), ta)
+			if ge != nil {
+				return ge
+			}
 		}
 	}
 
-	c.metadata().fields.RemoveNonReadable(reflect.ValueOf(c).Elem(), c.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal))
+	ge := c.metadata().fields.ApplyTools(reflect.ValueOf(c).Elem(), ta)
+	if ge != nil {
+		return ge
+	}
 
 	return nil
 }

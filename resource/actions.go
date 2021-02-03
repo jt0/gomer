@@ -3,6 +3,8 @@ package resource
 import (
 	"reflect"
 
+	"github.com/jt0/gomer/auth"
+	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
 )
@@ -158,8 +160,8 @@ func (a *updateAction) Pre(update Resource) gomerr.Gomerr {
 		return gomerr.Unprocessable("Type does not implement resource.Updatable", update)
 	}
 
-	uv := reflect.ValueOf(update).Elem()
-	if ge := r.metadata().fields.CopyProvided(uv, reflect.ValueOf(current).Elem()); ge != nil {
+	tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedAction(reflect.ValueOf(current).Elem())}
+	if ge := r.metadata().fields.ApplyTools(reflect.ValueOf(update).Elem(), tool); ge != nil {
 		return ge
 	}
 
@@ -290,12 +292,15 @@ func (queryAction) Do(r Resource) (ge gomerr.Gomerr) {
 		return ge
 	}
 
+	rve := reflect.ValueOf(r).Elem()
+	tc := fields.EnsureContext()
 	for _, elem := range r.(Queryable).Items() {
 		item := elem.(Resource)
 		item.setMetadata(r.metadata())
 		item.setSubject(r.Subject())
 
-		if ge := item.metadata().fields.CopyProvided(reflect.ValueOf(r).Elem(), reflect.ValueOf(item).Elem()); ge != nil {
+		tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedAction(reflect.ValueOf(item).Elem(), tc)}
+		if ge := r.metadata().fields.ApplyTools(rve, tool); ge != nil {
 			return ge
 		}
 

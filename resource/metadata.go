@@ -3,18 +3,31 @@ package resource
 import (
 	"reflect"
 
+	"github.com/jt0/gomer/auth"
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/id"
 	"github.com/jt0/gomer/util"
 )
+
+func init() {
+	// These are the default tag keys for these tools, but an application can set different key values if they'd like or
+	// add new entries to the map so long as they do it before invoking Register().
+	fields.SetTagKeyToFieldToolMap(map[string]fields.FieldTool{
+		"access":   auth.FieldAccessTool,
+		"default":  fields.FieldDefaultTool,
+		"id":       id.IdFieldTool,
+		"validate": constraint.FieldValidationTool,
+	})
+}
 
 type Metadata interface {
 	ResourceType(Type) reflect.Type
 	Actions() map[interface{}]func() Action
 	// Parent() Metadata
 	Children() []Metadata
-	ExternalNameToFieldName(externalName string) (string, bool)
 }
 
 func Register(instance Instance, collection Collection, actions map[interface{}]func() Action, dataStore data.Store, parentMetadata Metadata) (md *metadata, ge gomerr.Gomerr) {
@@ -113,8 +126,4 @@ func (m *metadata) Actions() map[interface{}]func() Action {
 
 func (m *metadata) Children() []Metadata {
 	return m.children
-}
-
-func (m *metadata) ExternalNameToFieldName(externalName string) (string, bool) {
-	return m.fields.ExternalNameToFieldName(externalName)
 }

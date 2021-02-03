@@ -3,8 +3,11 @@ package resource
 import (
 	"reflect"
 
+	"github.com/jt0/gomer/auth"
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/id"
 )
 
 type Action interface {
@@ -33,31 +36,20 @@ func DoAction(resource Resource, action Action) (Resource, gomerr.Gomerr) {
 }
 
 func prepareAndValidateFields(resource Resource, action Action) gomerr.Gomerr {
-	rv := reflect.ValueOf(resource).Elem()
-
-	// TODO:p1 Have InstanceAction provide WriteAccess() instead of checking Action type directly. Alternatively,
-	//         implement enhancements to 'fields' package that would support this (along w/ other use cases).
-	fs := resource.metadata().fields
+	tc := fields.EnsureContext().Add(fields.ScopeKey, action.Name())
 	switch action.(type) {
 	case *createAction, queryAction:
-		if ge := fs.RemoveNonWritable(rv, fields.CreateAccess, resource.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal)); ge != nil {
-			return ge
-		}
+		tc = auth.AddClearIfDeniedAction(resource.Subject(), auth.CreatePermission, tc)
 	case *updateAction:
-		if ge := fs.RemoveNonWritable(rv, fields.UpdateAccess, resource.Subject().Principal(fields.FieldAccess).(fields.AccessPrincipal)); ge != nil {
-			return ge
-		}
+		tc = auth.AddClearIfDeniedAction(resource.Subject(), auth.UpdatePermission, tc)
 	}
 
-	// TODO:p2 Consider adding 'context' to 'default' tags as well. May be useful if, for example, an update
-	//         action takes in directive fields that should default to something
-	if ge := fs.ApplyDefaults(rv, action.Name()); ge != nil {
-		return ge
-	}
-
-	if ge := fs.Validate(rv, action.Name()); ge != nil {
-		return ge
-	}
-
-	return nil
+	// Sometimes one might want different tool contexts for different tools, but in this case we can use the same one.
+	return resource.metadata().fields.ApplyTools(
+		reflect.ValueOf(resource).Elem(),
+		fields.ToolWithContext{auth.FieldAccessTool, tc},
+		fields.ToolWithContext{fields.FieldDefaultTool, tc},
+		fields.ToolWithContext{id.IdFieldTool, tc},
+		fields.ToolWithContext{constraint.FieldValidationTool, tc},
+	)
 }

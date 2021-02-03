@@ -5,7 +5,7 @@ var Required = required()
 func required() *constraint {
 	return (&constraint{test: func(value interface{}) bool {
 		return !Nil.Test(value)
-	}}).setDetails("Required", true, TagStructName, "required")
+	}}).setDetails("Required", true, LookupName, "required")
 }
 
 var Invalid = invalid()

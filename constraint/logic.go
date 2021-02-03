@@ -15,7 +15,7 @@ func And(operands ...Constraint) Constraint {
 			}
 		}
 		return true
-	}}).setDetails("And", operandDetails(operands), TagStructName, "and")
+	}}).setDetails("And", operandDetails(operands), LookupName, "and")
 }
 
 func Or(operands ...Constraint) Constraint {
@@ -33,13 +33,13 @@ func Or(operands ...Constraint) Constraint {
 			}
 		}
 		return false
-	}}).setDetails("Or", operandDetails(operands), TagStructName, "or")
+	}}).setDetails("Or", operandDetails(operands), LookupName, "or")
 }
 
 func Not(operand Constraint) Constraint {
 	return (&constraint{test: func(value interface{}) bool {
 		return !operand.Test(value)
-	}}).setDetails("Not", operand.Details(), TagStructName, "not")
+	}}).setDetails("Not", operand.Details(), LookupName, "not")
 }
 
 func operandDetails(operands []Constraint) []map[string]interface{} {

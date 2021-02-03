@@ -48,8 +48,8 @@ type uuidV4 struct {
 }
 
 const (
-	versionByte = 12 // per diagram above (upper left is byte '0')
-	variantByte = 16 // per diagram above (upper left is byte '0')
+	versionNibble = 12 // per diagram above (upper left is byte '0')
+	variantNibble = 16 // per diagram above (upper left is byte '0')
 
 	v4VersionBits = 0b0100
 	variantBits   = 0b10 << 2
@@ -58,8 +58,8 @@ const (
 func (u uuidV4) Generate() string {
 	chars := u.base16.generateChars()
 
-	chars[versionByte] = u.base16.encoding[v4VersionBits]                                 // Should be encoded as '4'
-	chars[variantByte] = u.base16.encoding[variantBits|hexToBits(chars[variantByte])&0x3] // variant bits ORed with the current char's bottom 2 bits
+	chars[versionNibble] = u.base16.encoding[v4VersionBits]                                   // Should be encoded as '4'
+	chars[variantNibble] = u.base16.encoding[variantBits|hexToBits(chars[variantNibble])&0x3] // variant bits ORed with the current char's bottom 2 bits
 
 	if u.withHyphens {
 		s := make([]byte, 36)
@@ -80,10 +80,10 @@ func (u uuidV4) Generate() string {
 }
 
 func hexToBits(b byte) byte {
-	if b >= '0' || b <= '9' {
-		return b - 48 // '0'
-	} else if b >= 'A' || b <= 'F' {
-		return b - 75 // 'A' + 10
+	if b >= '0' && b <= '9' {
+		return b - '0'
+	} else if b >= 'A' && b <= 'F' {
+		return (b - 'A') + 10
 	} else {
 		panic("provided value is not encoded in hexadecimal: " + string(b))
 	}
