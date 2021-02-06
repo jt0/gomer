@@ -17,6 +17,7 @@ type Gomerr interface {
 	AddAttributes(keysAndValues ...interface{}) Gomerr
 	WithAttributes(attributes map[string]interface{}) Gomerr
 
+	Is(error) bool
 	Unwrap() error
 	Attributes() map[string]interface{}
 	Stack() []string
@@ -125,7 +126,8 @@ func (g *gomerr) Wrap(err error) Gomerr {
 	}
 
 	g.wrapped = err
-	return g.self // Ensure we don't lose the actual error struct
+
+	return g.self
 }
 
 func (g *gomerr) AddAttribute(key string, value interface{}) Gomerr {
@@ -168,7 +170,7 @@ func (g *gomerr) AddAttributes(keysAndValues ...interface{}) Gomerr {
 		addAttribute(key, keysAndValues[i+1], &g.attributes)
 	}
 
-	return g
+	return g.self
 }
 
 func (g *gomerr) WithAttributes(attributes map[string]interface{}) Gomerr {
@@ -193,6 +195,10 @@ func addAttribute(key string, value interface{}, m *map[string]interface{}) {
 	}
 
 	(*m)[key] = value
+}
+
+func (g *gomerr) Is(err error) bool {
+	return reflect.TypeOf(g.self) == reflect.TypeOf(err)
 }
 
 // Implicitly used by errors.Is()/errors.As()

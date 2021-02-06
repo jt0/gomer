@@ -37,17 +37,17 @@ func Error(tb testing.TB, err error, msg string, msgArgs ...interface{}) {
 	}
 }
 
-func ErrorType(tb testing.TB, err error, errorType interface{}, msg string, msgArgs ...interface{}) {
-	if err == nil {
+func ErrorType(tb testing.TB, actual error, expected error, msg string, msgArgs ...interface{}) {
+	if actual == nil {
 		fmt.Printf("Expected an error: "+msg+"\n", msgArgs...)
 		printStack()
 		tb.FailNow()
 	}
 
-	if !errors.As(err, &errorType) {
-		fmt.Printf("Wrong error type. Expected %s but received %s: "+msg+"\n", append([]interface{}{reflect.TypeOf(err).String(), reflect.TypeOf(errorType).String()}, msgArgs...)...)
-		fmt.Printf("Error: " + err.Error())
-		if _, ok := err.(gomerr.Gomerr); !ok {
+	if !errors.Is(actual, expected) {
+		fmt.Printf("Wrong error type. Expected 'errors.Is(actual, %s)' to succeed: "+msg+"\n", append([]interface{}{reflect.TypeOf(expected).String()}, msgArgs...)...)
+		fmt.Printf("Actual: " + actual.Error())
+		if _, ok := actual.(gomerr.Gomerr); !ok {
 			printStack() // Gomerr already includes stack info
 		}
 		tb.FailNow()

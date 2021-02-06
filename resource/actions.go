@@ -1,9 +1,11 @@
 package resource
 
 import (
+	"errors"
 	"reflect"
 
 	"github.com/jt0/gomer/auth"
+	"github.com/jt0/gomer/data/dataerr"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
@@ -121,7 +123,7 @@ func (readAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 		return failer.OnReadFailure(ge)
 	}
 
-	return ge
+	return convertPersistableNotFoundIfApplicable(r.(Readable), ge)
 }
 
 type Updatable interface {
@@ -183,12 +185,12 @@ func (a *updateAction) OnDoSuccess(update Resource) (Resource, gomerr.Gomerr) {
 	return a.actual, a.actual.PostUpdate(update)
 }
 
-func (a *updateAction) OnDoFailure(_ Resource, ge gomerr.Gomerr) gomerr.Gomerr {
+func (a *updateAction) OnDoFailure(update Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 	if failer, ok := a.actual.(OnUpdateFailer); ok {
 		return failer.OnUpdateFailure(ge)
 	}
 
-	return ge
+	return convertPersistableNotFoundIfApplicable(update.(Updatable), ge)
 }
 
 type Deletable interface {
@@ -247,7 +249,7 @@ func (*deleteAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 		return failer.OnDeleteFailure(ge)
 	}
 
-	return ge
+	return convertPersistableNotFoundIfApplicable(r.(Deletable), ge)
 }
 
 type Queryable interface {
@@ -347,4 +349,21 @@ func (NoOpAction) OnDoSuccess(r Resource) (Resource, gomerr.Gomerr) {
 
 func (NoOpAction) OnDoFailure(_ Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 	return ge
+}
+
+var persistableNotFound = &dataerr.PersistableNotFoundError{}
+
+func convertPersistableNotFoundIfApplicable(i Instance, ge gomerr.Gomerr) gomerr.Gomerr {
+	if !errors.Is(ge, persistableNotFound) {
+		return ge
+	}
+
+	// If the underlying store data wasn't found, return the more general gomerr.NotFoundError.
+	id, ide := Id(i)
+	nfe := gomerr.NotFound(i.metadata().instanceName, id).Wrap(ge)
+	if ide != nil {
+		nfe = nfe.AddAttribute("IdRetrievalError", ide)
+	}
+
+	return nfe
 }
