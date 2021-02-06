@@ -30,7 +30,8 @@ type table struct {
 	defaultConsistencyType ConsistencyType
 	indexes                map[string]*index
 	persistableTypes       map[string]*persistableType
-	valueSeparator         string
+	valueSeparatorChar     byte
+	queryWildcardChar      byte
 	nextTokenizer          nextTokenizer
 	failDeleteIfNotPresent bool
 }
@@ -40,7 +41,8 @@ type Configuration struct {
 	MaxResultsDefault      int64
 	MaxResultsMax          int64
 	ConsistencyDefault     ConsistencyType
-	ValueSeparator         string
+	ValueSeparatorChar     byte
+	QueryWildcardChar      byte
 	NextTokenCipher        crypto.Cipher
 	FailDeleteIfNotPresent bool
 }
@@ -53,6 +55,10 @@ const (
 	Indifferent ConsistencyType = iota
 	Required
 	Preferred
+
+	SymbolChars                    = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`"
+	ValueSeparatorCharDefault      = ':'
+	QueryWildcardCharDefault  byte = 0
 )
 
 const maxItemSize = limit.DataSize(400 * 1024)
@@ -64,7 +70,7 @@ type ConsistencyTyper interface {
 
 type ItemResolver func(interface{}) (interface{}, gomerr.Gomerr)
 
-func Store(tableName string, config *Configuration /* resolver data.ItemResolver,*/, persistables ...data.Persistable) (data.Store, gomerr.Gomerr) {
+func Store(tableName string, config *Configuration /* resolver data.ItemResolver,*/, persistables ...data.Persistable) (store data.Store, ge gomerr.Gomerr) {
 	table := &table{
 		tableName:              &tableName,
 		index:                  index{canReadConsistently: true},
@@ -74,9 +80,16 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 		defaultConsistencyType: config.ConsistencyDefault,
 		indexes:                make(map[string]*index),
 		persistableTypes:       make(map[string]*persistableType),
-		valueSeparator:         config.ValueSeparator,
 		nextTokenizer:          nextTokenizer{cipher: config.NextTokenCipher},
 		failDeleteIfNotPresent: config.FailDeleteIfNotPresent,
+	}
+
+	if table.valueSeparatorChar, ge = validOrDefaultChar(config.ValueSeparatorChar, ValueSeparatorCharDefault); ge != nil {
+		return nil, ge
+	}
+
+	if table.queryWildcardChar, ge = validOrDefaultChar(config.QueryWildcardChar, QueryWildcardCharDefault); ge != nil {
+		return nil, ge
 	}
 
 	if ge := table.prepare(persistables); ge != nil {
@@ -86,6 +99,19 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 	tables[tableName] = table
 
 	return table, nil
+}
+
+func validOrDefaultChar(ch byte, _default byte) (byte, gomerr.Gomerr) {
+	if ch != 0 {
+		s := string(ch)
+		if strings.Contains(SymbolChars, s) {
+			return ch, nil
+		} else {
+			return 0, gomerr.Configuration("QueryWildcardChar " + s + " not in the valid set: " + SymbolChars)
+		}
+	} else {
+		return _default, nil
+	}
 }
 
 func Stores() map[string]data.Store {
@@ -277,7 +303,7 @@ func (t *table) put(p data.Persistable, fieldConstraints map[string]constraint.C
 	t.persistableTypes[p.TypeName()].convertFieldNamesToDbNames(&av)
 
 	for _, index := range t.indexes {
-		_ = index.populateKeyValues(av, p, t.valueSeparator, false)
+		_ = index.populateKeyValues(av, p, t.valueSeparatorChar, false)
 	}
 
 	// TODO: here we could compare the current av map w/ one we stashed into the object somewhere
@@ -329,7 +355,7 @@ func (t *table) Read(p data.Persistable) (ge gomerr.Gomerr) {
 	}()
 
 	key := make(map[string]*dynamodb.AttributeValue, 2)
-	ge = t.populateKeyValues(key, p, t.valueSeparator, true)
+	ge = t.populateKeyValues(key, p, t.valueSeparatorChar, true)
 	if ge != nil {
 		return ge
 	}
@@ -375,7 +401,7 @@ func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
 	// TODO:p2 support a soft-delete option
 
 	key := make(map[string]*dynamodb.AttributeValue, 2)
-	ge = t.populateKeyValues(key, p, t.valueSeparator, true)
+	ge = t.populateKeyValues(key, p, t.valueSeparatorChar, true)
 	if ge != nil {
 		return ge
 	}
@@ -398,7 +424,7 @@ func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
-			case dynamodb.ErrCodeResourceNotFoundException:
+			case dynamodb.ErrCodeResourceNotFoundException, dynamodb.ErrCodeConditionalCheckFailedException:
 				return dataerr.PersistableNotFound(p.TypeName(), key).Wrap(err)
 			case dynamodb.ErrCodeRequestLimitExceeded, dynamodb.ErrCodeProvisionedThroughputExceededException:
 				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(awsErr)
@@ -514,13 +540,14 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 	qElem := reflect.ValueOf(q).Elem()
 
 	keyConditionExpresion := safeName(index.pk.name, expressionAttributeNames) + "=:pk"
-	expressionAttributeValues[":pk"] = index.pk.attributeValue(qElem, persistableTypeName, t.valueSeparator) // Non-null because indexFor succeeded
+	expressionAttributeValues[":pk"] = index.pk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar) // Non-null because indexFor succeeded
 
+	// TODO: customers should opt-in to wildcard matches on a field-by-field basis
+	// TODO: need to provide a way to sanitize, both when saving and querying data, the delimiter char
 	if index.sk != nil {
-		if eav := index.sk.attributeValue(qElem, persistableTypeName, t.valueSeparator); eav != nil {
-			if eav.S != nil && strings.HasSuffix(*eav.S, ":") {
-				trimmed := strings.Trim(*eav.S, ":")
-				eav.S = &trimmed
+		if eav := index.sk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar); eav != nil {
+			if eav.S != nil && len(*eav.S) > 0 && ((*eav.S)[len(*eav.S)-1] == t.queryWildcardChar || (*eav.S)[len(*eav.S)-1] == t.valueSeparatorChar) {
+				*eav.S = (*eav.S)[:len(*eav.S)-1] // remove the last char
 				keyConditionExpresion += " AND begins_with(" + safeName(index.sk.name, expressionAttributeNames) + ",:sk)"
 			} else {
 				keyConditionExpresion += " AND " + safeName(index.sk.name, expressionAttributeNames) + "=:sk"

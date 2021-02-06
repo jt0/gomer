@@ -91,7 +91,7 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 		consistencyType = t.defaultConsistencyType
 	}
 
-	candidates := make([]*candidate, 0, 5)
+	candidates := make([]*candidate, 0, len(t.indexes))
 	qv := reflect.ValueOf(q).Elem()
 
 	for _, index := range t.indexes {
@@ -200,7 +200,7 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 	return candidate
 }
 
-func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p data.Persistable, valueSeparator string, mustBeSet bool) gomerr.Gomerr {
+func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p data.Persistable, valueSeparator byte, mustBeSet bool) gomerr.Gomerr {
 	var av *dynamodb.AttributeValue
 
 	// TODO: any reason Elem() would be incorrect?
@@ -235,7 +235,7 @@ func (i *index) keyAttributes() []*keyAttribute {
 	}
 }
 
-func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeName string, valueSeparator string) *dynamodb.AttributeValue {
+func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeName string, valueSeparator byte) *dynamodb.AttributeValue {
 	value := k.buildKeyValue(elemValue, persistableTypeName, valueSeparator)
 	if value == "" {
 		return nil
@@ -255,12 +255,12 @@ func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeNa
 	return nil
 }
 
-func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeName string, valueSeparator string) string {
+func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeName string, valueSeparator byte) string {
 	// sv := reflect.ValueOf(s).Elem()
 	keyFields := k.keyFieldsByPersistable[persistableTypeName]
 	keyValue := fieldValue(keyFields[0], elemValue) // will always have at least one keyField
 	for i := 1; i < len(keyFields); i++ {
-		keyValue += valueSeparator
+		keyValue += string(valueSeparator)
 		keyValue += fieldValue(keyFields[i], elemValue)
 	}
 	return keyValue
