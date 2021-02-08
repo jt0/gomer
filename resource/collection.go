@@ -38,5 +38,5 @@ func (*BaseCollection) PostQuery() gomerr.Gomerr {
 }
 
 func (c *BaseCollection) ApplyTools(tools ...fields.ToolWithContext) gomerr.Gomerr {
-	return c.md.instanceFields.ApplyTools(reflect.ValueOf(c.self).Elem(), tools...)
+	return c.md.collectionFields.ApplyTools(reflect.ValueOf(c.self).Elem(), tools...)
 }
