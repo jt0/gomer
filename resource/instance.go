@@ -3,9 +3,7 @@ package resource
 import (
 	"reflect"
 
-	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
-	"github.com/jt0/gomer/data/dataerr"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/id"
@@ -14,6 +12,7 @@ import (
 type Instance interface {
 	Resource
 	data.Persistable
+	Id() string
 }
 
 func SaveInstance(i Instance) gomerr.Gomerr {
@@ -29,47 +28,37 @@ func SaveInstance(i Instance) gomerr.Gomerr {
 	return nil
 }
 
-func Id(i Instance) (string, gomerr.Gomerr) {
-	return id.Id(reflect.ValueOf(i).Elem())
-}
-
-func readableInstanceData(i Instance) gomerr.Gomerr {
-	id, _ := Id(i)
-
-	tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddClearIfDeniedAction(i.Subject(), auth.CreatePermission)}
-	ge := i.metadata().fields.ApplyTools(reflect.ValueOf(i).Elem(), tool)
-	if ge != nil {
-		return ge
-	}
-
-	if tool.Context[auth.NotClearedCount] == 0 {
-		return dataerr.PersistableNotFound(i.TypeName(), id).Wrap(ge)
-	}
-
-	return nil
-}
-
 type BaseInstance struct {
 	BaseResource
 
 	// persistedValues map[string]interface{}
 }
 
-func (b *BaseInstance) TypeName() string {
-	return b.metadata().instanceName
+func (i *BaseInstance) TypeName() string {
+	return i.md.instanceName
 }
 
-func (b *BaseInstance) NewQueryable() data.Queryable {
-	ct := b.metadata().collectionType
+func (i *BaseInstance) NewQueryable() data.Queryable {
+	ct := i.metadata().collectionType
 	if ct == nil {
 		return nil
 	}
 
 	collection := reflect.New(ct.Elem()).Interface().(Collection)
-	collection.setMetadata(b.metadata())
-	collection.setSubject(b.Subject())
+	collection.setSelf(collection)
+	collection.setMetadata(i.md)
+	collection.setSubject(i.Subject())
 
 	return collection
+}
+
+func (i *BaseInstance) Id() string {
+	instanceId, ge := id.Id(reflect.ValueOf(i.self).Elem())
+	if ge != nil {
+		println("Unable to get id value for instance:\n", ge.Error())
+	}
+
+	return instanceId
 }
 
 func (*BaseInstance) PreCreate() gomerr.Gomerr {
@@ -106,4 +95,8 @@ func (*BaseInstance) PostDelete() gomerr.Gomerr {
 
 func (*BaseInstance) PostQuery() gomerr.Gomerr {
 	return nil
+}
+
+func (i *BaseInstance) ApplyTools(tools ...fields.ToolWithContext) gomerr.Gomerr {
+	return i.md.instanceFields.ApplyTools(reflect.ValueOf(i.self).Elem(), tools...)
 }

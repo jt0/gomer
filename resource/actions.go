@@ -11,14 +11,6 @@ import (
 	"github.com/jt0/gomer/limit"
 )
 
-const (
-	CreateAction = "create"
-	ReadAction   = "read"
-	UpdateAction = "update"
-	DeleteAction = "delete"
-	QueryAction  = "query"
-)
-
 type Creatable interface {
 	Instance
 	PreCreate() gomerr.Gomerr
@@ -29,7 +21,7 @@ type OnCreateFailer interface {
 	OnCreateFailure(gomerr.Gomerr) gomerr.Gomerr
 }
 
-func CreateInstanceAction() Action {
+func CreateAction() Action {
 	return &createAction{}
 }
 
@@ -38,7 +30,7 @@ type createAction struct {
 }
 
 func (*createAction) Name() string {
-	return CreateAction
+	return "resource.CreateAction"
 }
 
 func (*createAction) ResourceType() Type {
@@ -87,14 +79,14 @@ type OnReadFailer interface {
 	OnReadFailure(gomerr.Gomerr) gomerr.Gomerr
 }
 
-func ReadInstanceAction() Action {
+func ReadAction() Action {
 	return readAction{}
 }
 
 type readAction struct{}
 
 func (readAction) Name() string {
-	return ReadAction
+	return "resource.ReadAction"
 }
 
 func (readAction) ResourceType() Type {
@@ -136,7 +128,7 @@ type OnUpdateFailer interface {
 	OnUpdateFailure(gomerr.Gomerr) gomerr.Gomerr
 }
 
-func UpdateInstanceAction() Action {
+func UpdateAction() Action {
 	return &updateAction{}
 }
 
@@ -145,7 +137,7 @@ type updateAction struct {
 }
 
 func (*updateAction) Name() string {
-	return UpdateAction
+	return "resource.UpdateAction"
 }
 
 func (*updateAction) ResourceType() Type {
@@ -162,8 +154,8 @@ func (a *updateAction) Pre(update Resource) gomerr.Gomerr {
 		return gomerr.Unprocessable("Type does not implement resource.Updatable", update)
 	}
 
-	tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedAction(reflect.ValueOf(current).Elem())}
-	if ge := r.metadata().fields.ApplyTools(reflect.ValueOf(update).Elem(), tool); ge != nil {
+	tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedToContext(reflect.ValueOf(update).Elem())}
+	if ge := current.ApplyTools(tool); ge != nil {
 		return ge
 	}
 
@@ -203,7 +195,7 @@ type OnDeleteFailer interface {
 	OnDeleteFailure(gomerr.Gomerr) gomerr.Gomerr
 }
 
-func DeleteInstanceAction() Action {
+func DeleteAction() Action {
 	return &deleteAction{}
 }
 
@@ -212,7 +204,7 @@ type deleteAction struct {
 }
 
 func (*deleteAction) Name() string {
-	return DeleteAction
+	return "resource.DeleteAction"
 }
 
 func (*deleteAction) ResourceType() Type {
@@ -266,14 +258,14 @@ type OnQueryFailer interface {
 	OnQueryFailure(gomerr.Gomerr) gomerr.Gomerr
 }
 
-func QueryCollectionAction() Action {
+func QueryAction() Action {
 	return queryAction{}
 }
 
 type queryAction struct{}
 
 func (queryAction) Name() string {
-	return QueryAction
+	return "resource.QueryAction"
 }
 
 func (queryAction) ResourceType() Type {
@@ -294,15 +286,15 @@ func (queryAction) Do(r Resource) (ge gomerr.Gomerr) {
 		return ge
 	}
 
-	rve := reflect.ValueOf(r).Elem()
 	tc := fields.EnsureContext()
 	for _, elem := range r.(Queryable).Items() {
 		item := elem.(Resource)
+		item.setSelf(item)
 		item.setMetadata(r.metadata())
 		item.setSubject(r.Subject())
 
-		tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedAction(reflect.ValueOf(item).Elem(), tc)}
-		if ge := r.metadata().fields.ApplyTools(rve, tool); ge != nil {
+		tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedToContext(reflect.ValueOf(r).Elem(), tc)}
+		if ge := item.ApplyTools(tool); ge != nil {
 			return ge
 		}
 
@@ -332,7 +324,7 @@ func (queryAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 type NoOpAction struct{}
 
 func (NoOpAction) Name() string {
-	return "noop"
+	return "resource.NoOpAction"
 }
 
 func (NoOpAction) Pre(Resource) gomerr.Gomerr {
@@ -358,12 +350,5 @@ func convertPersistableNotFoundIfApplicable(i Instance, ge gomerr.Gomerr) gomerr
 		return ge
 	}
 
-	// If the underlying store data wasn't found, return the more general gomerr.NotFoundError.
-	id, ide := Id(i)
-	nfe := gomerr.NotFound(i.metadata().instanceName, id).Wrap(ge)
-	if ide != nil {
-		nfe = nfe.AddAttribute("IdRetrievalError", ide)
-	}
-
-	return nfe
+	return gomerr.NotFound(i.metadata().instanceName, i.Id()).Wrap(ge)
 }

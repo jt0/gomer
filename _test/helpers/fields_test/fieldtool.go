@@ -19,7 +19,7 @@ type TestCase struct {
 }
 
 func RunTests(t *testing.T, tests []TestCase) {
-	var testStructToFields = make(map[reflect.Type]*fields.Fields)
+	var testStructToFields = make(map[reflect.Type]fields.Fields)
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {

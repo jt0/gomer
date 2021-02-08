@@ -133,7 +133,7 @@ type action interface {
 	apply(fieldValue reflect.Value, accessTool fieldAccessTool, toolContext fields.ToolContext) gomerr.Gomerr
 }
 
-func AddClearIfDeniedAction(subject Subject, accessPermission AccessPermissions, tcs ...fields.ToolContext) fields.ToolContext {
+func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...fields.ToolContext) fields.ToolContext {
 	// If no access principal, all permissions will be denied
 	accessPrincipal, _ := subject.Principal(fieldAccessPrincipal).(AccessPrincipal)
 	return fields.EnsureContext(tcs...).Add(accessToolAction, remover{accessPrincipal, accessPermission})
@@ -162,26 +162,29 @@ func (r remover) apply(fv reflect.Value, at fieldAccessTool, tc fields.ToolConte
 	return nil
 }
 
-func AddCopyProvidedAction(toStruct reflect.Value, tcs ...fields.ToolContext) fields.ToolContext {
-	return fields.EnsureContext(tcs...).Add(accessToolAction, copyProvided{toStruct})
+func AddCopyProvidedToContext(fromStruct reflect.Value, tcs ...fields.ToolContext) fields.ToolContext {
+	return fields.EnsureContext(tcs...).Add(accessToolAction, copyProvided(fromStruct))
 }
 
-type copyProvided struct {
-	toStruct reflect.Value
-}
+type copyProvided reflect.Value
 
-func (cp copyProvided) apply(fv reflect.Value, at fieldAccessTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
+func (cf copyProvided) apply(fv reflect.Value, at fieldAccessTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
 			ge = gomerr.Unprocessable("Unable to copy field", r)
 		}
 	}()
 
-	if !at.provided || fv.IsZero() { // TODO: should copy zero val?
+	if !at.provided {
 		return nil
 	}
 
-	cp.toStruct.FieldByName(at.fieldName).Set(fv)
+	fromFv := reflect.Value(cf).FieldByName(at.fieldName)
+	if !fromFv.IsValid() || fromFv.IsZero() {
+		return nil
+	}
+
+	fv.Set(fromFv)
 	tc.IncrementInt(CopiedCount, 1)
 
 	return nil

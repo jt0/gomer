@@ -69,13 +69,14 @@ func applyLimitAction(limitAction limitAction, i Resource) (limit.Limiter, gomer
 			return nil, gomerr.Unprocessable("Unknown Resource type. Was resource.Register() called for it?", resourceType)
 		}
 
+		li.setSelf(li)
 		li.setMetadata(metadata)
 		li.setSubject(i.Subject())
 
 		// Only works if the limiter has provided attributes that overlap with what the limiter needs. If any are
 		// missing, it will need to be populated by the Limited
-		tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedAction(reflect.ValueOf(li).Elem())}
-		if ge := li.metadata().fields.ApplyTools(reflect.ValueOf(i).Elem(), tool); ge != nil {
+		tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedToContext(reflect.ValueOf(i).Elem())}
+		if ge := li.ApplyTools(tool); ge != nil {
 			return nil, ge
 		}
 
@@ -109,8 +110,7 @@ func saveLimiterIfDirty(limiter limit.Limiter) {
 	ge := limiterInstance.metadata().dataStore.Update(limiterInstance, nil)
 	if ge != nil {
 		// TODO: use provided logger
-		id, _ := Id(limiterInstance)
-		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", limiterInstance.metadata().instanceName, id, ge)
+		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", limiterInstance.metadata().instanceName, limiterInstance.Id(), ge)
 		return
 	}
 

@@ -49,7 +49,7 @@ func TestAccessTool(t *testing.T) {
 		{"Remove non-creatable as 'two'", auth.FieldAccessTool, clear(sTwo, auth.CreatePermission), all(), nil, partial("ABEFIJ")},
 		{"Remove non-updatable as 'one'", auth.FieldAccessTool, clear(sOne, auth.UpdatePermission), all(), nil, all()},
 		{"Remove non-updatable as 'two'", auth.FieldAccessTool, clear(sTwo, auth.UpdatePermission), all(), nil, partial("ACEGIJ")},
-		{"Copy provided", auth.FieldAccessTool, auth.AddCopyProvidedAction(reflect.ValueOf(copiedTo).Elem(), nil), all(), copiedTo, partial("IJ")},
+		{"Copy provided", auth.FieldAccessTool, auth.AddCopyProvidedToContext(reflect.ValueOf(all()).Elem(), nil), copiedTo, copiedTo, partial("IJ")},
 	})
 }
 
@@ -83,7 +83,7 @@ func TestPermissionsWithProvidedVerifiesForwardsCompatibility(t *testing.T) {
 }
 
 func clear(subject auth.Subject, permission auth.AccessPermissions) fields.ToolContext {
-	return auth.AddClearIfDeniedAction(subject, permission, nil)
+	return auth.AddClearIfDeniedToContext(subject, permission, nil)
 }
 
 func all() *AccessTest {

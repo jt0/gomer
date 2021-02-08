@@ -11,6 +11,9 @@ import (
 	"github.com/gin-gonic/gin/render"
 
 	. "github.com/jt0/gomer/api/http"
+	"github.com/jt0/gomer/auth"
+	"github.com/jt0/gomer/data/dataerr"
+	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/resource"
 )
@@ -38,11 +41,11 @@ var successStatusCodes = map[Op]int{
 }
 
 var crudqActions = map[interface{}]func() resource.Action{
-	PostCollection: resource.CreateInstanceAction,
-	GetInstance:    resource.ReadInstanceAction,
-	PatchInstance:  resource.UpdateInstanceAction,
-	DeleteInstance: resource.DeleteInstanceAction,
-	GetCollection:  resource.QueryCollectionAction,
+	PostCollection: resource.CreateAction,
+	GetInstance:    resource.ReadAction,
+	PatchInstance:  resource.UpdateAction,
+	DeleteInstance: resource.DeleteAction,
+	GetCollection:  resource.QueryAction,
 }
 
 func CrudqActions() map[interface{}]func() resource.Action {
@@ -88,7 +91,7 @@ func buildRoutes(r *gin.Engine, md resource.Metadata, parentPath string) {
 			successStatus = http.StatusOK
 		}
 
-		r.Handle(op.Method(), relativePath, handler(md.ResourceType(action().ResourceType()), action, successStatus, resource.ReadableData))
+		r.Handle(op.Method(), relativePath, handler(md.ResourceType(action().ResourceType()), action, successStatus))
 	}
 
 	if collectionType != nil { // Cannot have resources other than instances under a collection
@@ -113,7 +116,7 @@ func typeName(t reflect.Type) string {
 	return s[dotIndex+1:]
 }
 
-func handler(resourceType reflect.Type, action func() resource.Action, successStatus int, preRender PreRender) func(c *gin.Context) {
+func handler(resourceType reflect.Type, action func() resource.Action, successStatus int) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -133,14 +136,12 @@ func handler(resourceType reflect.Type, action func() resource.Action, successSt
 			return
 		}
 
-		if resource_, ge = resource.DoAction(resource_, action()); ge != nil {
+		if resource_, ge = resource_.DoAction(action()); ge != nil {
+			_ = c.Error(ge)
+		} else if ge = preRender(resource_); ge != nil {
 			_ = c.Error(ge)
 		} else {
-			if ge := preRender(resource_); ge != nil {
-				_ = c.Error(ge)
-			} else {
-				c.Render(successStatus, render.IndentedJSON{Data: resource_})
-			}
+			c.Render(successStatus, render.IndentedJSON{Data: resource_})
 		}
 	}
 }
@@ -171,4 +172,48 @@ func getBytes(c *gin.Context) ([]byte, gomerr.Gomerr) {
 	bodyBytes, _ = json.Marshal(jsonMap)
 
 	return bodyBytes, nil
+}
+
+func preRender(r resource.Resource) gomerr.Gomerr {
+	if c, ok := r.(resource.Collection); ok {
+		return readableCollectionData(c)
+	} else if i, ok := r.(resource.Instance); ok {
+		return readableInstanceData(i)
+	} else {
+		return gomerr.Unprocessable("Resource is neither a Collection nor Instance", reflect.TypeOf(r))
+	}
+}
+
+func readableCollectionData(c resource.Collection) gomerr.Gomerr {
+	twc := fields.ToolWithContext{auth.FieldAccessTool, auth.AddClearIfDeniedToContext(c.Subject(), auth.ReadPermission)}
+
+	for _, item := range c.Items() {
+		if r, ok := item.(resource.Instance); ok {
+			ge := r.ApplyTools(twc) // remove if not cleared count == 0?
+			if ge != nil {
+				return ge
+			}
+		}
+	}
+
+	ge := c.ApplyTools(twc)
+	if ge != nil {
+		return ge
+	}
+
+	return nil
+}
+
+func readableInstanceData(i resource.Instance) gomerr.Gomerr {
+	tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddClearIfDeniedToContext(i.Subject(), auth.CreatePermission)}
+	ge := i.ApplyTools(tool)
+	if ge != nil {
+		return ge
+	}
+
+	if tool.Context[auth.NotClearedCount] == 0 {
+		return dataerr.PersistableNotFound(i.TypeName(), i.Id()).Wrap(ge)
+	}
+
+	return nil
 }

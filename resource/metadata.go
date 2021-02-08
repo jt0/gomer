@@ -21,6 +21,17 @@ func init() {
 		"id":       id.IdFieldTool,
 		"validate": constraint.FieldValidationTool,
 	})
+
+	// This defines a subset of default values that map to the provided Action types assoc. An application can add
+	// alternative keys that map to these same action names if they prefer something different. To clear out these
+	// values in lieu of alternatives (or to not have any aliases), call fields.ResetScopeAliases().
+	fields.AddScopeAliases(map[string][]string{
+		"create": {CreateAction().Name()},
+		"read":   {ReadAction().Name()},
+		"update": {UpdateAction().Name()},
+		"delete": {DeleteAction().Name()},
+		"query":  {QueryAction().Name()},
+	})
 }
 
 type Metadata interface {
@@ -74,8 +85,14 @@ func Register(instance Instance, collection Collection, actions map[interface{}]
 	}
 
 	// FIXME: Do a ptr test
-	if md.fields, ge = fields.NewFields(it.Elem()); ge != nil {
+	if md.instanceFields, ge = fields.NewFields(it.Elem()); ge != nil {
 		return nil, ge
+	}
+
+	if ct != nil {
+		if md.collectionFields, ge = fields.NewFields(ct.Elem()); ge != nil {
+			return nil, ge
+		}
 	}
 
 	if nilSafeParentMetadata != nil {
@@ -88,15 +105,16 @@ func Register(instance Instance, collection Collection, actions map[interface{}]
 var resourceTypeToMetadata = make(map[reflect.Type]*metadata)
 
 type metadata struct {
-	instanceType   reflect.Type
-	collectionType reflect.Type
-	instanceName   string
-	collectionName string
-	actions        map[interface{}]func() Action
-	fields         *fields.Fields
-	dataStore      data.Store
-	parent         *metadata
-	children       []Metadata // Using interface type since we aren't currently using child attributes
+	instanceType     reflect.Type
+	instanceName     string
+	instanceFields   fields.Fields
+	collectionType   reflect.Type
+	collectionName   string
+	collectionFields fields.Fields
+	actions          map[interface{}]func() Action
+	dataStore        data.Store
+	parent           *metadata
+	children         []Metadata // Using interface type since we aren't currently using child attributes
 
 	// idFields       []field
 }

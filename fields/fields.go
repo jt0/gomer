@@ -7,16 +7,13 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-func NewFields(structType reflect.Type) (*Fields, gomerr.Gomerr) {
+func NewFields(structType reflect.Type) (Fields, gomerr.Gomerr) {
 	if structType.Kind() != reflect.Struct {
 		return nil, gomerr.Configuration("Input's kind is not a struct. Do you need to call Elem()?").AddAttribute("Kind", structType.Kind().String())
 	}
 
-	fields := &Fields{
-		fieldMap: make(map[string]*field),
-	}
-
-	if errors := fields.processStruct(structType, "", make([]gomerr.Gomerr, 0)); len(errors) > 0 {
+	fields, errors := processStruct(structType, "")
+	if len(errors) > 0 {
 		return nil, gomerr.Configuration("Failed to process Fields for " + structType.Name()).Wrap(gomerr.Batcher(errors))
 	}
 
@@ -56,14 +53,7 @@ func SetTagKeyToFieldToolMap(tagKeyToFieldToolMap map[string]FieldTool) {
 	}
 }
 
-type Fields struct {
-	fieldMap map[string]*field // TODO: should this be ordered instead of a map?
-
-	// To consider...
-	//   idField  *field
-	//   internalToField map[string]*field
-	//   keyFields []*field
-}
+type Fields []field
 
 type field struct {
 	name        string
@@ -72,15 +62,22 @@ type field struct {
 	toolsByName map[string]FieldTool
 }
 
-func (fs *Fields) processStruct(structType reflect.Type, path string, errors []gomerr.Gomerr) []gomerr.Gomerr {
+func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomerr) {
+	fields := Fields{}
+	errors := make([]gomerr.Gomerr, 0)
+
 	for i := 0; i < structType.NumField(); i++ {
 		structField := structType.Field(i)
 		if structField.Type.Kind() == reflect.Struct {
+			var subFields Fields
+			var subErrors []gomerr.Gomerr
 			if structField.Anonymous {
-				errors = fs.processStruct(structField.Type, path+structField.Name+"+", errors)
+				subFields, subErrors = processStruct(structField.Type, path+structField.Name+"+")
 			} else {
-				errors = fs.processStruct(structField.Type, path+structField.Name+".", errors)
+				subFields, subErrors = processStruct(structField.Type, path+structField.Name+".")
 			}
+			fields = append(fields, subFields...)
+			errors = append(errors, subErrors...)
 		}
 
 		if unicode.IsLower([]rune(structField.Name)[0]) {
@@ -102,15 +99,15 @@ func (fs *Fields) processStruct(structType reflect.Type, path string, errors []g
 			}
 		}
 
-		fs.fieldMap[structField.Name] = &field{
+		fields = append(fields, field{
 			name:        structField.Name,
 			location:    path + structField.Name,
 			zeroVal:     reflect.Zero(structField.Type),
 			toolsByName: toolsByName,
-		}
+		})
 	}
 
-	return errors
+	return fields, errors
 }
 
 type ToolWithContext struct {
@@ -120,14 +117,14 @@ type ToolWithContext struct {
 
 // ApplyTools will apply the tool associated with each tool type in the appliers slice in order to each field
 // in the struct.
-func (fs *Fields) ApplyTools(sv reflect.Value, tools ...ToolWithContext) gomerr.Gomerr {
+func (fs Fields) ApplyTools(sv reflect.Value, tools ...ToolWithContext) gomerr.Gomerr {
 	if sv.Kind() != reflect.Struct {
 		return gomerr.Unprocessable("Not a struct type", sv.Interface())
 	}
 
 	// TODO:p0 handle nested structs (embedded seems okay)
 	var errors = make([]gomerr.Gomerr, 0)
-	for _, field := range fs.fieldMap {
+	for _, field := range fs {
 		if len(field.toolsByName) == 0 {
 			continue
 		}
