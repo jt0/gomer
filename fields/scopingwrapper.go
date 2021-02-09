@@ -50,22 +50,44 @@ const anyScope = "*"
 // Generics will make this better, but for now, we assume input is a string
 func (w ScopingWrapper) New(structType reflect.Type, structField reflect.StructField, input interface{}) (FieldTool, gomerr.Gomerr) {
 	scopedTools := make(map[string]FieldTool)
-	for _, match := range scopeRegexp.FindAllStringSubmatch(input.(string), -1) {
-		if remainder := match[2]; remainder != "" {
-			scope := match[1]
-			if scope == "" {
-				scope = anyScope
-			}
+	inputString, ok := input.(string)
+	if !ok {
+		inputString = ""
+	}
 
-			tool, ge := w.FieldTool.New(structType, structField, remainder)
-			if ge != nil {
-				return nil, ge
-			}
+	for _, match := range scopeRegexp.FindAllStringSubmatch(inputString, -1) {
+		scope := match[1]
+		if scope == "" {
+			scope = anyScope
+		}
 
-			scopedTools[scope] = tool
-			for _, alias := range scopeAliases[scope] {
-				scopedTools[alias] = tool
-			}
+		var newInput interface{}
+		if input == nil {
+			newInput = nil
+		} else {
+			newInput = match[2]
+		}
+
+		tool, ge := w.FieldTool.New(structType, structField, newInput)
+		if ge != nil {
+			return nil, ge
+		} else if tool == nil {
+			continue
+		}
+
+		scopedTools[scope] = tool
+		for _, alias := range scopeAliases[scope] {
+			scopedTools[alias] = tool
+		}
+	}
+
+	switch len(scopedTools) {
+	case 0:
+		return nil, nil
+	case 1:
+		// no point in having the intermediate wrapper - just return the tool directly
+		if tool, ok := scopedTools[anyScope]; ok {
+			return tool, nil
 		}
 	}
 

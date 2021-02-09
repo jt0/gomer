@@ -59,10 +59,14 @@ type fieldValidationTool struct {
 }
 
 func (t fieldValidationTool) Name() string {
-	return "FieldValidationTool"
+	return "constraint.FieldValidationTool"
 }
 
 func (t fieldValidationTool) New(_ reflect.Type, _ reflect.StructField, input interface{}) (fields.FieldTool, gomerr.Gomerr) {
+	if input == nil {
+		return nil, nil
+	}
+
 	c, ge := constraintFor(input.(string), "")
 	if ge != nil {
 		return nil, ge.AddAttribute("Validations", input)

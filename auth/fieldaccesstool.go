@@ -55,27 +55,28 @@ type fieldAccessTool struct {
 }
 
 func (t fieldAccessTool) Name() string {
-	const name = "FieldAccessTool"
-	return name
+	return "auth.FieldAccessTool"
 }
 
 func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldTool, gomerr.Gomerr) {
-	principalPermissionsList := input.([]map[string]string)
-	permissionsCount := len(principalPermissionsList)
+	perPrincipalPermissions := input.([]map[string]string)
+	ppPermissionsCount := len(perPrincipalPermissions)
 
-	if permissionsCount != len(fieldAccessPrincipalIndexes) {
+	// If a field has defined no access permissions (by it being absent or via the empty string), we bypass the error
+	// and the resulting (empty) fieldPermissions will deny access to all registered principals.
+	if ppPermissionsCount > 0 && ppPermissionsCount != len(fieldAccessPrincipalIndexes) {
 		return nil, gomerr.Configuration("Incorrect number of 'access' AccessPermissions").AddAttributes(
 			"Expected", len(fieldAccessPrincipalIndexes),
-			"Actual", len(principalPermissionsList),
+			"Actual", len(perPrincipalPermissions),
 		)
 	}
 
-	var allPermissions principalPermissions
+	var fieldPermissions principalPermissions
 	var provided bool
-	for i := 0; i < permissionsCount; i++ {
+	for i := 0; i < ppPermissionsCount; i++ {
 		var principalAccess AccessPermissions
 
-		switch principalPermissionsList[i]["read"][0] {
+		switch perPrincipalPermissions[i]["read"][0] {
 		case ReadChar:
 			principalAccess |= ReadPermission
 		case DenyChar:
@@ -83,7 +84,7 @@ func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, in
 		}
 
 		var provides bool
-		switch principalPermissionsList[i]["write"][0] {
+		switch perPrincipalPermissions[i]["write"][0] {
 		case WriteChar:
 			principalAccess |= CreatePermission | UpdatePermission
 		case CreateChar:
@@ -101,12 +102,12 @@ func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, in
 				" If 'p' was correctly specified, all other principals must indicate '-' for their write permissions.")
 		}
 
-		allPermissions = (allPermissions << permissionsPerPrincipal) | principalPermissions(principalAccess)
+		fieldPermissions = (fieldPermissions << permissionsPerPrincipal) | principalPermissions(principalAccess)
 	}
 
 	return fieldAccessTool{
 		fieldName:   structField.Name,
-		permissions: allPermissions,
+		permissions: fieldPermissions,
 		provided:    provided,
 		zeroVal:     reflect.Zero(structField.Type),
 	}, nil

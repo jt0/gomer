@@ -68,6 +68,10 @@ func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomer
 
 	for i := 0; i < structType.NumField(); i++ {
 		structField := structType.Field(i)
+		if structField.Tag.Get("fields") == "ignore" {
+			continue
+		}
+
 		if structField.Type.Kind() == reflect.Struct {
 			var subFields Fields
 			var subErrors []gomerr.Gomerr
@@ -86,12 +90,14 @@ func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomer
 
 		toolsByName := make(map[string]FieldTool)
 		for tagKey, toolType := range _tagKeyToFieldToolMap {
-			tagValue, ok := structField.Tag.Lookup(tagKey)
-			if !ok {
-				continue
+			var newInput interface{}
+			if tagValue, ok := structField.Tag.Lookup(tagKey); ok {
+				newInput = tagValue
+			} else {
+				newInput = nil
 			}
 
-			tool, ge := toolType.New(structType, structField, tagValue)
+			tool, ge := toolType.New(structType, structField, newInput)
 			if ge != nil {
 				errors = append(errors, ge)
 			} else if tool != nil {

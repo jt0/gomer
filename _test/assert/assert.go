@@ -46,7 +46,7 @@ func ErrorType(tb testing.TB, actual error, expected error, msg string, msgArgs 
 
 	if !errors.Is(actual, expected) {
 		fmt.Printf("Wrong error type. Expected 'errors.Is(actual, %s)' to succeed: "+msg+"\n", append([]interface{}{reflect.TypeOf(expected).String()}, msgArgs...)...)
-		fmt.Printf("Actual: " + actual.Error())
+		fmt.Printf("Actual: " + actual.Error() + "\n")
 		if _, ok := actual.(gomerr.Gomerr); !ok {
 			printStack() // Gomerr already includes stack info
 		}

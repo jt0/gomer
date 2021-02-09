@@ -19,8 +19,13 @@ func (w RegexpWrapper) Name() string {
 }
 
 func (w RegexpWrapper) New(structType reflect.Type, structField reflect.StructField, input interface{}) (FieldTool, gomerr.Gomerr) {
+	inputString, ok := input.(string)
+	if !ok {
+		inputString = ""
+	}
+
 	valuesList := make([]map[string]string, 0)
-	for _, match := range w.Regexp.FindAllStringSubmatch(input.(string), -1) {
+	for _, match := range w.Regexp.FindAllStringSubmatch(inputString, -1) {
 		values := make(map[string]string)
 		for i, value := range match {
 			key := w.RegexpGroups[i]

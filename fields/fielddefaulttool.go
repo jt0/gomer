@@ -17,27 +17,35 @@ type fieldDefaultTool struct {
 }
 
 func (t fieldDefaultTool) Name() string {
-	return "FieldDefaultTool"
+	return "fields.FieldDefaultTool"
 }
 
 func (t fieldDefaultTool) New(_ reflect.Type, _ reflect.StructField, input interface{}) (FieldTool, gomerr.Gomerr) {
-	dt := fieldDefaultTool{}
-
-	value := input.(string)
-	if value[:1] == "?" {
-		dt.bypassIfSet = true
-		value = value[1:]
+	if input == nil {
+		return nil, nil
 	}
 
-	if value[:1] != "$" {
-		dt.value = value
-	} else if fn := GetFieldFunction(value); fn != nil {
-		dt.function = fn
+	fdt := fieldDefaultTool{}
+
+	defaultValueString := input.(string)
+	if len(defaultValueString) == 0 {
+		return fdt, nil
+	}
+
+	if defaultValueString[:1] == "?" {
+		fdt.bypassIfSet = true
+		defaultValueString = defaultValueString[1:]
+	}
+
+	if len(defaultValueString) > 0 && defaultValueString[:1] != "$" {
+		fdt.value = defaultValueString
+	} else if fn := GetFieldFunction(defaultValueString); fn != nil {
+		fdt.function = fn
 	} else {
-		dt.value = value
+		fdt.value = defaultValueString
 	}
 
-	return dt, nil
+	return fdt, nil
 }
 
 func (t fieldDefaultTool) Apply(structValue reflect.Value, fieldValue reflect.Value, _ ToolContext) gomerr.Gomerr {

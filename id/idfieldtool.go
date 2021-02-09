@@ -17,12 +17,16 @@ type idFieldTool struct {
 }
 
 func (t idFieldTool) Name() string {
-	return "IdFieldTool"
+	return "id.IdFieldTool"
 }
 
 // TODO: need to consider what to use for the id of a singleton resource w/o an obvious value (e.g. a '/configuration'
 //       resource that nonetheless supports GET and PUT operations and may need to redact info)
 func (t idFieldTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldTool, gomerr.Gomerr) {
+	if input == nil {
+		return nil, nil
+	}
+
 	if idf, ok := idFieldForStruct[structType]; ok {
 		return nil, gomerr.Configuration("Can't mark '" + structField.Name + "'as an id field because it conflicts with '" + idf.Name + "'")
 	}

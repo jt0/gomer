@@ -22,6 +22,7 @@ type AccessTest struct {
 	H string `access:"rw--"`
 	I string `access:"rpr-"` // acts like writable for both principals
 	J string `access:"rp--"` // acts like writable for both principals
+	K string
 }
 
 var (
@@ -43,11 +44,11 @@ func init() {
 func TestAccessTool(t *testing.T) {
 	copiedTo := &AccessTest{}
 	fields_test.RunTests(t, []fields_test.TestCase{
-		{"Remove non-readable as 'one'", auth.FieldAccessTool, clear(sOne, auth.ReadPermission), all(), nil, all()},
+		{"Remove non-readable as 'one'", auth.FieldAccessTool, clear(sOne, auth.ReadPermission), all(), nil, allExpected()},
 		{"Remove non-readable as 'two'", auth.FieldAccessTool, clear(sTwo, auth.ReadPermission), all(), nil, partial("ABCDI")},
-		{"Remove non-creatable as 'one'", auth.FieldAccessTool, clear(sOne, auth.CreatePermission), all(), nil, all()},
+		{"Remove non-creatable as 'one'", auth.FieldAccessTool, clear(sOne, auth.CreatePermission), all(), nil, allExpected()},
 		{"Remove non-creatable as 'two'", auth.FieldAccessTool, clear(sTwo, auth.CreatePermission), all(), nil, partial("ABEFIJ")},
-		{"Remove non-updatable as 'one'", auth.FieldAccessTool, clear(sOne, auth.UpdatePermission), all(), nil, all()},
+		{"Remove non-updatable as 'one'", auth.FieldAccessTool, clear(sOne, auth.UpdatePermission), all(), nil, allExpected()},
 		{"Remove non-updatable as 'two'", auth.FieldAccessTool, clear(sTwo, auth.UpdatePermission), all(), nil, partial("ACEGIJ")},
 		{"Copy provided", auth.FieldAccessTool, auth.AddCopyProvidedToContext(reflect.ValueOf(all()).Elem(), nil), copiedTo, copiedTo, partial("IJ")},
 	})
@@ -87,7 +88,11 @@ func clear(subject auth.Subject, permission auth.AccessPermissions) fields.ToolC
 }
 
 func all() *AccessTest {
-	return &AccessTest{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J"}
+	return &AccessTest{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"}
+}
+
+func allExpected() *AccessTest {
+	return &AccessTest{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", ""}
 }
 
 func partial(assigned string) *AccessTest {
