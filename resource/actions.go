@@ -154,7 +154,7 @@ func (a *updateAction) Pre(update Resource) gomerr.Gomerr {
 		return gomerr.Unprocessable("Type does not implement resource.Updatable", update)
 	}
 
-	tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedToContext(reflect.ValueOf(update).Elem())}
+	tool := fields.ToolWithContext{auth.FieldAccessTool.Name(), auth.AddCopyProvidedToContext(reflect.ValueOf(update).Elem())}
 	if ge := current.ApplyTools(tool); ge != nil {
 		return ge
 	}
@@ -293,7 +293,7 @@ func (queryAction) Do(r Resource) (ge gomerr.Gomerr) {
 		item.setMetadata(r.metadata())
 		item.setSubject(r.Subject())
 
-		tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedToContext(reflect.ValueOf(r).Elem(), tc)}
+		tool := fields.ToolWithContext{auth.FieldAccessTool.Name(), auth.AddCopyProvidedToContext(reflect.ValueOf(r).Elem(), tc)}
 		if ge := item.ApplyTools(tool); ge != nil {
 			return ge
 		}

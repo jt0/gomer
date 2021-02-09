@@ -32,7 +32,7 @@ func RunTests(t *testing.T, tests []TestCase) {
 				testStructToFields[targetType] = fs
 			}
 
-			ge := fs.ApplyTools(reflect.ValueOf(tt.Input).Elem(), fields.ToolWithContext{tt.Tool, tt.Context})
+			ge := fs.ApplyTools(reflect.ValueOf(tt.Input).Elem(), fields.ToolWithContext{tt.Tool.Name(), tt.Context})
 			if expectedError, ok := tt.Expected.(gomerr.Gomerr); !ok {
 				assert.Success(t, ge)
 				if tt.Output == nil {

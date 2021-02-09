@@ -185,7 +185,7 @@ func preRender(r resource.Resource) gomerr.Gomerr {
 }
 
 func readableCollectionData(c resource.Collection) gomerr.Gomerr {
-	twc := fields.ToolWithContext{auth.FieldAccessTool, auth.AddClearIfDeniedToContext(c.Subject(), auth.ReadPermission)}
+	twc := fields.ToolWithContext{auth.FieldAccessTool.Name(), auth.AddClearIfDeniedToContext(c.Subject(), auth.ReadPermission)}
 
 	for _, item := range c.Items() {
 		if r, ok := item.(resource.Instance); ok {
@@ -205,7 +205,7 @@ func readableCollectionData(c resource.Collection) gomerr.Gomerr {
 }
 
 func readableInstanceData(i resource.Instance) gomerr.Gomerr {
-	tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddClearIfDeniedToContext(i.Subject(), auth.CreatePermission)}
+	tool := fields.ToolWithContext{auth.FieldAccessTool.Name(), auth.AddClearIfDeniedToContext(i.Subject(), auth.CreatePermission)}
 	ge := i.ApplyTools(tool)
 	if ge != nil {
 		return ge

@@ -109,10 +109,10 @@ func (b *BaseResource) prepareAndValidateFields(action Action) gomerr.Gomerr {
 
 	// Sometimes one might want different tool contexts for different tools, but in this case we can use the same one.
 	return b.self.ApplyTools(
-		fields.ToolWithContext{auth.FieldAccessTool, tc},
-		fields.ToolWithContext{fields.FieldDefaultTool, tc},
-		fields.ToolWithContext{id.IdFieldTool, tc},
-		fields.ToolWithContext{constraint.FieldValidationTool, tc},
+		fields.ToolWithContext{auth.FieldAccessTool.Name(), tc},
+		fields.ToolWithContext{fields.FieldDefaultTool.Name(), tc},
+		fields.ToolWithContext{id.IdFieldTool.Name(), tc},
+		fields.ToolWithContext{constraint.FieldValidationTool.Name(), tc},
 	)
 }
 

@@ -75,7 +75,7 @@ func applyLimitAction(limitAction limitAction, i Resource) (limit.Limiter, gomer
 
 		// Only works if the limiter has provided attributes that overlap with what the limiter needs. If any are
 		// missing, it will need to be populated by the Limited
-		tool := fields.ToolWithContext{auth.FieldAccessTool, auth.AddCopyProvidedToContext(reflect.ValueOf(i).Elem())}
+		tool := fields.ToolWithContext{auth.FieldAccessTool.Name(), auth.AddCopyProvidedToContext(reflect.ValueOf(i).Elem())}
 		if ge := li.ApplyTools(tool); ge != nil {
 			return nil, ge
 		}

@@ -53,12 +53,11 @@ func SetTagKeyToFieldToolMap(tagKeyToFieldToolMap map[string]FieldTool) {
 	}
 }
 
-type Fields []field
+type Fields map[string][]field
 
 type field struct {
 	name        string
 	location    string
-	zeroVal     reflect.Value
 	toolsByName map[string]FieldTool
 }
 
@@ -80,7 +79,10 @@ func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomer
 			} else {
 				subFields, subErrors = processStruct(structField.Type, path+structField.Name+".")
 			}
-			fields = append(fields, subFields...)
+
+			for tool, sub := range subFields {
+				fields[tool] = append(fields[tool], sub...)
+			}
 			errors = append(errors, subErrors...)
 		}
 
@@ -105,48 +107,39 @@ func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomer
 			}
 		}
 
-		fields = append(fields, field{
+		newField := field{
 			name:        structField.Name,
 			location:    path + structField.Name,
-			zeroVal:     reflect.Zero(structField.Type),
 			toolsByName: toolsByName,
-		})
+		}
+		for name := range toolsByName {
+			fields[name] = append(fields[name], newField)
+		}
 	}
 
 	return fields, errors
 }
 
 type ToolWithContext struct {
-	Type    FieldTool
-	Context ToolContext
+	TypeName string
+	Context  ToolContext
 }
 
 // ApplyTools will apply the tool associated with each tool type in the appliers slice in order to each field
 // in the struct.
-func (fs Fields) ApplyTools(sv reflect.Value, tools ...ToolWithContext) gomerr.Gomerr {
+func (fs Fields) ApplyTools(sv reflect.Value, toolWithContexts ...ToolWithContext) gomerr.Gomerr {
 	if sv.Kind() != reflect.Struct {
 		return gomerr.Unprocessable("Not a struct type", sv.Interface())
 	}
 
-	// TODO:p0 handle nested structs (embedded seems okay)
 	var errors = make([]gomerr.Gomerr, 0)
-	for _, field := range fs {
-		if len(field.toolsByName) == 0 {
-			continue
-		}
+	for _, toolWithContext := range toolWithContexts {
+		for _, usesTool := range fs[toolWithContext.TypeName] {
+			fv := sv.FieldByName(usesTool.name)                       // fv should always be valid
+			tool, _ := usesTool.toolsByName[toolWithContext.TypeName] // tool should always be found
 
-		fv := sv.FieldByName(field.name)
-		if !fv.IsValid() {
-			continue
-		}
-
-		for _, tool := range tools {
-			toolInstance := field.toolsByName[tool.Type.Name()]
-			if toolInstance == nil {
-				continue
-			}
-			if ge := toolInstance.Apply(sv, fv, tool.Context); ge != nil {
-				errors = append(errors, ge.AddAttribute("Field", field.name))
+			if ge := tool.Apply(sv, fv, toolWithContext.Context); ge != nil {
+				errors = append(errors, ge.AddAttribute("Field", usesTool.name))
 			}
 		}
 	}
