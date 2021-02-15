@@ -36,7 +36,6 @@ func ResetScopeAliases() {
 
 type ScopingWrapper struct {
 	FieldTool
-	scopedTools map[string]FieldTool
 }
 
 func (w ScopingWrapper) Name() string {
@@ -48,8 +47,8 @@ var scopeRegexp = regexp.MustCompile("(?:([^;:]*):)?([^;]*);?")
 const anyScope = "*"
 
 // Generics will make this better, but for now, we assume input is a string
-func (w ScopingWrapper) New(structType reflect.Type, structField reflect.StructField, input interface{}) (FieldTool, gomerr.Gomerr) {
-	scopedTools := make(map[string]FieldTool)
+func (w ScopingWrapper) New(structType reflect.Type, structField reflect.StructField, input interface{}) (FieldToolApplier, gomerr.Gomerr) {
+	scopedAppliers := make(map[string]FieldToolApplier)
 	inputString, ok := input.(string)
 	if !ok {
 		inputString = ""
@@ -75,40 +74,44 @@ func (w ScopingWrapper) New(structType reflect.Type, structField reflect.StructF
 			continue
 		}
 
-		scopedTools[scope] = tool
+		scopedAppliers[scope] = tool
 		for _, alias := range scopeAliases[scope] {
-			scopedTools[alias] = tool
+			scopedAppliers[alias] = tool
 		}
 	}
 
-	switch len(scopedTools) {
+	switch len(scopedAppliers) {
 	case 0:
 		return nil, nil
 	case 1:
 		// no point in having the intermediate wrapper - just return the tool directly
-		if tool, ok := scopedTools[anyScope]; ok {
+		if tool, ok := scopedAppliers[anyScope]; ok {
 			return tool, nil
 		}
 	}
 
-	return ScopingWrapper{nil, scopedTools}, nil
+	return scopingApplier{scopedAppliers}, nil
 }
 
-func (w ScopingWrapper) Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) gomerr.Gomerr {
+type scopingApplier struct {
+	scopedAppliers map[string]FieldToolApplier
+}
+
+func (a scopingApplier) Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) gomerr.Gomerr {
 	scope, ok := toolContext[ScopeKey].(string)
 	if !ok {
 		scope = anyScope
 	}
 
-	scopedTool, ok := w.scopedTools[scope]
+	applier, ok := a.scopedAppliers[scope]
 	if !ok {
-		scopedTool, ok = w.scopedTools[anyScope]
+		applier, ok = a.scopedAppliers[anyScope]
 		if !ok {
 			return nil // no matching tool, return
 		}
 	}
 
-	return scopedTool.Apply(structValue, fieldValue, toolContext)
+	return applier.Apply(structValue, fieldValue, toolContext)
 }
 
 func AddScopeToContext(scope string, tcs ...ToolContext) ToolContext {

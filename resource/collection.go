@@ -38,5 +38,10 @@ func (*BaseCollection) PostQuery() gomerr.Gomerr {
 }
 
 func (c *BaseCollection) ApplyTools(tools ...fields.ToolWithContext) gomerr.Gomerr {
-	return c.md.collectionFields.ApplyTools(reflect.ValueOf(c.self).Elem(), tools...)
+	fs, ge := fields.Get(c.md.collectionType.Elem())
+	if ge != nil {
+		return ge
+	}
+
+	return fs.ApplyTools(reflect.ValueOf(c.self).Elem(), tools...)
 }

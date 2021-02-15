@@ -37,6 +37,10 @@ func (*createAction) ResourceType() Type {
 	return InstanceType
 }
 
+func (*createAction) FieldAccessPermissions() auth.AccessPermissions {
+	return auth.CreatePermission
+}
+
 func (*createAction) Pre(r Resource) gomerr.Gomerr {
 	creatable, ok := r.(Creatable)
 	if !ok {
@@ -93,6 +97,10 @@ func (readAction) ResourceType() Type {
 	return InstanceType
 }
 
+func (readAction) FieldAccessPermissions() auth.AccessPermissions {
+	return auth.ReadPermission
+}
+
 func (readAction) Pre(r Resource) gomerr.Gomerr {
 	readable, ok := r.(Readable)
 	if !ok {
@@ -142,6 +150,10 @@ func (*updateAction) Name() string {
 
 func (*updateAction) ResourceType() Type {
 	return InstanceType
+}
+
+func (*updateAction) FieldAccessPermissions() auth.AccessPermissions {
+	return auth.UpdatePermission
 }
 
 func (a *updateAction) Pre(update Resource) gomerr.Gomerr {
@@ -211,6 +223,10 @@ func (*deleteAction) ResourceType() Type {
 	return InstanceType
 }
 
+func (*deleteAction) FieldAccessPermissions() auth.AccessPermissions {
+	return auth.NoPermissions
+}
+
 func (*deleteAction) Pre(r Resource) gomerr.Gomerr {
 	deletable, ok := r.(Deletable)
 	if !ok {
@@ -272,6 +288,10 @@ func (queryAction) ResourceType() Type {
 	return CollectionType
 }
 
+func (queryAction) FieldAccessPermissions() auth.AccessPermissions {
+	return auth.WritePermissions // 'Write' because we're creating a query, not creating a resource per se
+}
+
 func (queryAction) Pre(r Resource) gomerr.Gomerr {
 	queryable, ok := r.(Queryable)
 	if !ok {
@@ -325,6 +345,10 @@ type NoOpAction struct{}
 
 func (NoOpAction) Name() string {
 	return "resource.NoOpAction"
+}
+
+func (NoOpAction) FieldAccessPermissions() auth.AccessPermissions {
+	return auth.NoPermissions
 }
 
 func (NoOpAction) Pre(Resource) gomerr.Gomerr {

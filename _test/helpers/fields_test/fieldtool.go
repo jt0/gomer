@@ -27,7 +27,7 @@ func RunTests(t *testing.T, tests []TestCase) {
 			fs, ok := testStructToFields[targetType]
 			if !ok {
 				var ge gomerr.Gomerr
-				fs, ge = fields.NewFields(targetType)
+				fs, ge = fields.Get(targetType)
 				assert.Success(t, ge)
 				testStructToFields[targetType] = fs
 			}

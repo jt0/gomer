@@ -1,7 +1,6 @@
 package resource
 
 import (
-	"encoding/json"
 	"reflect"
 
 	"github.com/jt0/gomer/auth"
@@ -26,6 +25,7 @@ type Resource interface {
 type Action interface {
 	Name() string
 	ResourceType() Type
+	FieldAccessPermissions() auth.AccessPermissions
 	Pre(Resource) gomerr.Gomerr
 	Do(Resource) gomerr.Gomerr
 	OnDoSuccess(Resource) (Resource, gomerr.Gomerr)
@@ -49,21 +49,6 @@ func New(resourceType reflect.Type, subject auth.Subject) (Resource, gomerr.Gome
 	resource.setSelf(resource)
 	resource.setMetadata(md)
 	resource.setSubject(subject)
-
-	return resource, nil
-}
-
-func Unmarshal(resourceType reflect.Type, subject auth.Subject, bytes []byte) (Resource, gomerr.Gomerr) {
-	resource, ge := New(resourceType, subject)
-	if ge != nil {
-		return nil, ge
-	}
-
-	if len(bytes) != 0 {
-		if err := json.Unmarshal(bytes, &resource); err != nil {
-			return nil, gomerr.Unmarshal("Resource", bytes, resourceType).Wrap(err)
-		}
-	}
 
 	return resource, nil
 }
@@ -100,11 +85,8 @@ func (b *BaseResource) DoAction(action Action) (Resource, gomerr.Gomerr) {
 
 func (b *BaseResource) prepareAndValidateFields(action Action) gomerr.Gomerr {
 	tc := fields.AddScopeToContext(action.Name())
-	switch action.(type) {
-	case *createAction, queryAction:
-		tc = auth.AddClearIfDeniedToContext(b.self.Subject(), auth.CreatePermission, tc)
-	case *updateAction:
-		tc = auth.AddClearIfDeniedToContext(b.self.Subject(), auth.UpdatePermission, tc)
+	if action.FieldAccessPermissions()&auth.WritePermissions != 0 {
+		tc = auth.AddClearIfDeniedToContext(b.self.Subject(), action.FieldAccessPermissions(), tc)
 	}
 
 	// Sometimes one might want different tool contexts for different tools, but in this case we can use the same one.

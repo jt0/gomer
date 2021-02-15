@@ -20,7 +20,7 @@ func (t fieldDefaultTool) Name() string {
 	return "fields.FieldDefaultTool"
 }
 
-func (t fieldDefaultTool) New(_ reflect.Type, _ reflect.StructField, input interface{}) (FieldTool, gomerr.Gomerr) {
+func (t fieldDefaultTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (FieldToolApplier, gomerr.Gomerr) {
 	if input == nil {
 		return nil, nil
 	}

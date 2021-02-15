@@ -8,7 +8,10 @@ import (
 
 type FieldTool interface {
 	Name() string
-	New(structType reflect.Type, structField reflect.StructField, input interface{}) (FieldTool, gomerr.Gomerr)
+	New(structType reflect.Type, structField reflect.StructField, input interface{}) (FieldToolApplier, gomerr.Gomerr)
+}
+
+type FieldToolApplier interface {
 	Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) gomerr.Gomerr
 }
 

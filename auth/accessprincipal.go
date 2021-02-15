@@ -53,7 +53,7 @@ func RegisterFieldAccessPrincipals(accessPrincipals ...AccessPrincipal) {
 const (
 	fieldAccessScope accessScope = "Field"
 
-	fieldAccessPrincipal PrincipalType = fieldAccessScope + "AccessPrincipal"
+	fieldAccessPrincipal = fieldAccessScope + "AccessPrincipal"
 )
 
 type accessScope = PrincipalType
@@ -93,10 +93,10 @@ const (
 	reserved7                                      // = 0b01000000 (64)
 	reserved8                                      // = 0b10000000 (128)
 
-	readPermissions  = ReadPermission
-	writePermissions = CreatePermission | UpdatePermission | deletePermission
-	noPermissions    = 0b00000000
-	allPermissions   = ^noPermissions // 0b11111111
+	WritePermissions     = CreatePermission | UpdatePermission
+	LifecyclePermissions = WritePermissions | deletePermission
+	NoPermissions        = 0b00000000
+	AllPermissions       = ^NoPermissions // 0b11111111
 
 	sizeOfAccessPermissions          = unsafe.Sizeof(principalPermissions(0))
 	sizeOfPrincipalAccessPermissions = unsafe.Sizeof(ReadPermission)
@@ -110,7 +110,7 @@ const (
 type principalPermissions uint32
 
 func (p principalPermissions) grants(principal AccessPrincipal, permissionsNeeded AccessPermissions) bool {
-	if permissionsNeeded == noPermissions {
+	if permissionsNeeded == NoPermissions {
 		return false // TODO: should this return true or false?
 	}
 
@@ -129,7 +129,7 @@ func (p principalPermissions) grants(principal AccessPrincipal, permissionsNeede
 func (p principalPermissions) principalAccessPermissions(principal AccessPrincipal) AccessPermissions {
 	principalIndex, ok := fieldAccessPrincipalIndexes[principal]
 	if !ok {
-		return noPermissions
+		return NoPermissions
 	}
 
 	// Move the principal's permissions to the lowest-order bits, then convert to the right type which will

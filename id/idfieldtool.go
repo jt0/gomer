@@ -22,12 +22,12 @@ func (t idFieldTool) Name() string {
 
 // TODO: need to consider what to use for the id of a singleton resource w/o an obvious value (e.g. a '/configuration'
 //       resource that nonetheless supports GET and PUT operations and may need to redact info)
-func (t idFieldTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldTool, gomerr.Gomerr) {
+func (t idFieldTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldToolApplier, gomerr.Gomerr) {
 	if input == nil {
 		return nil, nil
 	}
 
-	if idf, ok := idFieldForStruct[structType]; ok {
+	if idf, ok := idFieldForStruct[structType]; ok && !reflect.DeepEqual(idf, structField) {
 		return nil, gomerr.Configuration("Can't mark '" + structField.Name + "'as an id field because it conflicts with '" + idf.Name + "'")
 	}
 	idFieldForStruct[structType] = structField

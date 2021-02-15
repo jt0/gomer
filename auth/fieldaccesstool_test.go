@@ -34,7 +34,7 @@ var (
 )
 
 func init() {
-	fields.SetTagKeyToFieldToolMap(map[string]fields.FieldTool{
+	fields.TagToFieldToolAssociations(map[string]fields.FieldTool{
 		"access": auth.FieldAccessTool,
 	})
 

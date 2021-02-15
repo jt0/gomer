@@ -23,7 +23,7 @@ func init() {
 		},
 	})
 
-	fields.SetTagKeyToFieldToolMap(map[string]fields.FieldTool{"default": fields.FieldDefaultTool})
+	fields.TagToFieldToolAssociations(map[string]fields.FieldTool{"default": fields.FieldDefaultTool})
 }
 
 func TestDefaultTool(t *testing.T) {

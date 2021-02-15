@@ -7,12 +7,43 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-func NewFields(structType reflect.Type) (Fields, gomerr.Gomerr) {
+var tagToFieldToolMap = map[string]FieldTool{}
+
+// TagToFieldToolAssociations accepts a set of mappings for struct tag keys to map to a FieldTool to apply at various
+// points of a struct's lifecycle. These are additive to others tag/tools that may have been added. To remove a mapping,
+// provide a nil value for the corresponding key when calling this function.
+func TagToFieldToolAssociations(associations map[string]FieldTool) {
+	for k, v := range associations {
+		if v == nil {
+			delete(tagToFieldToolMap, k)
+		} else {
+			tagToFieldToolMap[k] = v
+		}
+	}
+}
+
+var typeToFields = map[reflect.Type]Fields{}
+
+func Get(structType reflect.Type) (Fields, gomerr.Gomerr) {
+	fields, ok := typeToFields[structType]
+	if !ok {
+		var ge gomerr.Gomerr
+		if fields, ge = process(structType); ge != nil {
+			return nil, ge
+		}
+
+		typeToFields[structType] = fields
+	}
+
+	return fields, nil
+}
+
+func process(structType reflect.Type) (Fields, gomerr.Gomerr) {
 	if structType.Kind() != reflect.Struct {
 		return nil, gomerr.Configuration("Input's kind is not a struct. Do you need to call Elem()?").AddAttribute("Kind", structType.Kind().String())
 	}
 
-	fields, errors := processStruct(structType, "")
+	fields, errors := processStruct(structType, "", tagToFieldToolMap)
 	if len(errors) > 0 {
 		return nil, gomerr.Configuration("Failed to process Fields for " + structType.Name()).Wrap(gomerr.Batcher(errors))
 	}
@@ -20,48 +51,15 @@ func NewFields(structType reflect.Type) (Fields, gomerr.Gomerr) {
 	return fields, nil
 }
 
-var fieldFunctions map[string]func(structValue reflect.Value) interface{}
-
-func RegisterFieldFunctions(functions map[string]func(structValue reflect.Value) interface{}) {
-	if fieldFunctions == nil {
-		fieldFunctions = make(map[string]func(structValue reflect.Value) interface{})
-	}
-
-	for fnName, function := range functions {
-		if len(fnName) < 2 || len(fnName) > 64 || fnName[0] != '$' {
-			panic("Field function names must start with a '$' symbol and between 2 and 64 characters long")
-		}
-
-		if fnName[1:2] == "_" {
-			panic("Function Name must not start with an underscore")
-		}
-
-		fieldFunctions[fnName] = function
-	}
-}
-
-func GetFieldFunction(functionName string) func(structValue reflect.Value) interface{} {
-	return fieldFunctions[functionName]
-}
-
-var _tagKeyToFieldToolMap map[string]FieldTool
-
-func SetTagKeyToFieldToolMap(tagKeyToFieldToolMap map[string]FieldTool) {
-	_tagKeyToFieldToolMap = make(map[string]FieldTool, len(tagKeyToFieldToolMap))
-	for k, v := range tagKeyToFieldToolMap {
-		_tagKeyToFieldToolMap[k] = v
-	}
-}
-
-type Fields map[string][]field
+type Fields map[string][]field // key = toolName, value = list of fields that are applicable to the tool
 
 type field struct {
-	name        string
-	location    string
-	toolsByName map[string]FieldTool
+	structFieldName        string
+	fullyQualifiedLocation string
+	appliersByName         map[string]FieldToolApplier
 }
 
-func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomerr) {
+func processStruct(structType reflect.Type, path string, tagKeyToFieldTool map[string]FieldTool) (Fields, []gomerr.Gomerr) {
 	fields := Fields{}
 	errors := make([]gomerr.Gomerr, 0)
 
@@ -75,9 +73,9 @@ func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomer
 			var subFields Fields
 			var subErrors []gomerr.Gomerr
 			if structField.Anonymous {
-				subFields, subErrors = processStruct(structField.Type, path+structField.Name+"+")
+				subFields, subErrors = processStruct(structField.Type, path+structField.Name+"+", tagKeyToFieldTool)
 			} else {
-				subFields, subErrors = processStruct(structField.Type, path+structField.Name+".")
+				subFields, subErrors = processStruct(structField.Type, path+structField.Name+".", tagKeyToFieldTool)
 			}
 
 			for tool, sub := range subFields {
@@ -90,8 +88,8 @@ func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomer
 			continue
 		}
 
-		toolsByName := make(map[string]FieldTool)
-		for tagKey, toolType := range _tagKeyToFieldToolMap {
+		appliersByName := make(map[string]FieldToolApplier)
+		for tagKey, toolType := range tagKeyToFieldTool {
 			var newInput interface{}
 			if tagValue, ok := structField.Tag.Lookup(tagKey); ok {
 				newInput = tagValue
@@ -103,17 +101,17 @@ func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomer
 			if ge != nil {
 				errors = append(errors, ge)
 			} else if tool != nil {
-				toolsByName[toolType.Name()] = tool
+				appliersByName[toolType.Name()] = tool
 			}
 		}
 
 		newField := field{
-			name:        structField.Name,
-			location:    path + structField.Name,
-			toolsByName: toolsByName,
+			structFieldName:        structField.Name,
+			fullyQualifiedLocation: path + structField.Name,
+			appliersByName:         appliersByName,
 		}
-		for name := range toolsByName {
-			fields[name] = append(fields[name], newField)
+		for toolName := range appliersByName {
+			fields[toolName] = append(fields[toolName], newField)
 		}
 	}
 
@@ -135,14 +133,21 @@ func (fs Fields) ApplyTools(sv reflect.Value, toolWithContexts ...ToolWithContex
 	var errors = make([]gomerr.Gomerr, 0)
 	for _, toolWithContext := range toolWithContexts {
 		for _, usesTool := range fs[toolWithContext.TypeName] {
-			fv := sv.FieldByName(usesTool.name)                       // fv should always be valid
-			tool, _ := usesTool.toolsByName[toolWithContext.TypeName] // tool should always be found
+			fv := sv.FieldByName(usesTool.structFieldName)               // fv should always be valid
+			tool, _ := usesTool.appliersByName[toolWithContext.TypeName] // tool should always be found
 
 			if ge := tool.Apply(sv, fv, toolWithContext.Context); ge != nil {
-				errors = append(errors, ge.AddAttribute("Field", usesTool.name))
+				errors = append(errors, ge.AddAttribute("Field", usesTool.structFieldName))
 			}
 		}
 	}
 
 	return gomerr.Batcher(errors)
+}
+
+func (fs Fields) GetFieldNamesUsingTool(tool FieldTool) (names []string) {
+	for _, f := range fs[tool.Name()] {
+		names = append(names, f.structFieldName)
+	}
+	return
 }

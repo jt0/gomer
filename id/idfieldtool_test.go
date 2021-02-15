@@ -32,7 +32,7 @@ func init() {
 		},
 	})
 
-	fields.SetTagKeyToFieldToolMap(map[string]fields.FieldTool{"id": id.IdFieldTool})
+	fields.TagToFieldToolAssociations(map[string]fields.FieldTool{"id": id.IdFieldTool})
 }
 
 func TestIdTool(t *testing.T) {
@@ -53,6 +53,6 @@ func TestTwoIdFieldsFail(t *testing.T) {
 		Id2 string `id:"$id"`
 	}
 
-	_, ge := fields.NewFields(reflect.TypeOf(TwoIdsTest{}))
+	_, ge := fields.Get(reflect.TypeOf(TwoIdsTest{}))
 	assert.ErrorType(t, ge, &gomerr.ConfigurationError{}, "Should fail due to multiple fields with 'id' struct tag")
 }

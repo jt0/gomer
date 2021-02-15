@@ -58,7 +58,7 @@ func (t fieldAccessTool) Name() string {
 	return "auth.FieldAccessTool"
 }
 
-func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldTool, gomerr.Gomerr) {
+func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldToolApplier, gomerr.Gomerr) {
 	perPrincipalPermissions := input.([]map[string]string)
 	ppPermissionsCount := len(perPrincipalPermissions)
 
@@ -114,24 +114,25 @@ func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, in
 }
 
 func (t fieldAccessTool) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext fields.ToolContext) gomerr.Gomerr {
-	action, ok := toolContext[accessToolAction].(action)
+	accessAction, ok := toolContext[accessToolAction].(action)
 	if !ok {
 		return nil // no action specified, return
 	}
 
-	return action.apply(fieldValue, t, toolContext)
+	return accessAction.do(fieldValue, t, toolContext)
 }
 
 const (
 	accessToolAction = "$_access_tool_action"
 
+	// TODO: clear these at the end of all Apply() calls somehow...
 	NotClearedCount = "$_not_cleared_count"
 	ClearedCount    = "$_cleared_count"
 	CopiedCount     = "$_copied_count"
 )
 
 type action interface {
-	apply(fieldValue reflect.Value, accessTool fieldAccessTool, toolContext fields.ToolContext) gomerr.Gomerr
+	do(fieldValue reflect.Value, accessTool fieldAccessTool, toolContext fields.ToolContext) gomerr.Gomerr
 }
 
 func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...fields.ToolContext) fields.ToolContext {
@@ -145,14 +146,14 @@ type remover struct {
 	permission AccessPermissions
 }
 
-func (r remover) apply(fv reflect.Value, at fieldAccessTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
+func (r remover) do(fv reflect.Value, at fieldAccessTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
 			ge = gomerr.Unprocessable("Unable to remove non-writable field", r)
 		}
 	}()
 
-	if at.permissions.grants(r.principal, r.permission) || at.provided && (r.permission == CreatePermission || r.permission == UpdatePermission) {
+	if at.permissions.grants(r.principal, r.permission) || at.provided && writable(r.permission) {
 		tc.IncrementInt(NotClearedCount, 1)
 		return nil
 	}
@@ -169,7 +170,7 @@ func AddCopyProvidedToContext(fromStruct reflect.Value, tcs ...fields.ToolContex
 
 type copyProvided reflect.Value
 
-func (cf copyProvided) apply(fv reflect.Value, at fieldAccessTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
+func (cf copyProvided) do(fv reflect.Value, at fieldAccessTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
 			ge = gomerr.Unprocessable("Unable to copy field", r)
@@ -192,5 +193,5 @@ func (cf copyProvided) apply(fv reflect.Value, at fieldAccessTool, tc fields.Too
 }
 
 func writable(permissions AccessPermissions) bool {
-	return permissions&writePermissions != 0
+	return permissions&LifecyclePermissions != 0
 }

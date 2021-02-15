@@ -62,7 +62,7 @@ func (t fieldValidationTool) Name() string {
 	return "constraint.FieldValidationTool"
 }
 
-func (t fieldValidationTool) New(_ reflect.Type, _ reflect.StructField, input interface{}) (fields.FieldTool, gomerr.Gomerr) {
+func (t fieldValidationTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldToolApplier, gomerr.Gomerr) {
 	if input == nil {
 		return nil, nil
 	}

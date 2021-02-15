@@ -98,5 +98,10 @@ func (*BaseInstance) PostQuery() gomerr.Gomerr {
 }
 
 func (i *BaseInstance) ApplyTools(tools ...fields.ToolWithContext) gomerr.Gomerr {
-	return i.md.instanceFields.ApplyTools(reflect.ValueOf(i.self).Elem(), tools...)
+	fs, ge := fields.Get(i.md.instanceType.Elem())
+	if ge != nil {
+		return ge
+	}
+
+	return fs.ApplyTools(reflect.ValueOf(i.self).Elem(), tools...)
 }

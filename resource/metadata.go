@@ -15,7 +15,7 @@ import (
 func init() {
 	// These are the default tag keys for these tools, but an application can set different key values if they'd like or
 	// add new entries to the map so long as they do it before invoking Register().
-	fields.SetTagKeyToFieldToolMap(map[string]fields.FieldTool{
+	fields.TagToFieldToolAssociations(map[string]fields.FieldTool{
 		"access":   auth.FieldAccessTool,
 		"default":  fields.FieldDefaultTool,
 		"id":       id.IdFieldTool,
@@ -84,17 +84,6 @@ func Register(instance Instance, collection Collection, actions map[interface{}]
 		children:       make([]Metadata, 0),
 	}
 
-	// FIXME: Do a ptr test
-	if md.instanceFields, ge = fields.NewFields(it.Elem()); ge != nil {
-		return nil, ge
-	}
-
-	if ct != nil {
-		if md.collectionFields, ge = fields.NewFields(ct.Elem()); ge != nil {
-			return nil, ge
-		}
-	}
-
 	if nilSafeParentMetadata != nil {
 		nilSafeParentMetadata.children = append(nilSafeParentMetadata.children, md)
 	}
@@ -105,16 +94,14 @@ func Register(instance Instance, collection Collection, actions map[interface{}]
 var resourceTypeToMetadata = make(map[reflect.Type]*metadata)
 
 type metadata struct {
-	instanceType     reflect.Type
-	instanceName     string
-	instanceFields   fields.Fields
-	collectionType   reflect.Type
-	collectionName   string
-	collectionFields fields.Fields
-	actions          map[interface{}]func() Action
-	dataStore        data.Store
-	parent           *metadata
-	children         []Metadata // Using interface type since we aren't currently using child attributes
+	instanceType   reflect.Type
+	instanceName   string
+	collectionType reflect.Type
+	collectionName string
+	actions        map[interface{}]func() Action
+	dataStore      data.Store
+	parent         *metadata
+	children       []Metadata // Using interface type since we aren't currently using child attributes
 
 	// idFields       []field
 }
