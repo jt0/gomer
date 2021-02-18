@@ -35,7 +35,7 @@ func init() {
 }
 
 type Metadata interface {
-	ResourceType(Type) reflect.Type
+	ResourceType(Category) reflect.Type
 	Actions() map[interface{}]func() Action
 	// Parent() Metadata
 	Children() []Metadata
@@ -106,11 +106,11 @@ type metadata struct {
 	// idFields       []field
 }
 
-func (m *metadata) ResourceType(type_ Type) reflect.Type {
-	switch type_ {
-	case InstanceType:
+func (m *metadata) ResourceType(category Category) reflect.Type {
+	switch category {
+	case InstanceCategory:
 		return m.instanceType
-	case CollectionType:
+	case CollectionCategory:
 		return m.collectionType
 	default:
 		return nil

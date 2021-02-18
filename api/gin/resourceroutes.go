@@ -61,15 +61,15 @@ func BuildRoutes(r *gin.Engine, topLevelResources ...resource.Metadata) {
 }
 
 func buildRoutes(r *gin.Engine, md resource.Metadata, parentPath string) {
-	instanceType := md.ResourceType(resource.InstanceType)
-	collectionType := md.ResourceType(resource.CollectionType)
+	instanceType := md.ResourceType(resource.InstanceCategory)
+	collectionType := md.ResourceType(resource.CollectionCategory)
 
-	path := make(map[resource.Type]string, 2)
+	path := make(map[resource.Category]string, 2)
 	if collectionType == nil {
-		path[resource.InstanceType] = namedPath(instanceType, parentPath)
+		path[resource.InstanceCategory] = namedPath(instanceType, parentPath)
 	} else {
-		path[resource.CollectionType] = namedPath(collectionType, parentPath)
-		path[resource.InstanceType] = variablePath(instanceType, path[resource.CollectionType])
+		path[resource.CollectionCategory] = namedPath(collectionType, parentPath)
+		path[resource.InstanceCategory] = variablePath(instanceType, path[resource.CollectionCategory])
 	}
 
 	for key, action := range md.Actions() {
@@ -85,12 +85,12 @@ func buildRoutes(r *gin.Engine, md resource.Metadata, parentPath string) {
 			successStatus = http.StatusOK
 		}
 
-		r.Handle(op.Method(), relativePath, handler(md.ResourceType(action().ResourceType()), action, successStatus))
+		r.Handle(op.Method(), relativePath, handler(md.ResourceType(action().AppliesToCategory()), action, successStatus))
 	}
 
 	if collectionType != nil { // Cannot have resources other than instances under a collection
 		for _, childMetadata := range md.Children() {
-			buildRoutes(r, childMetadata, path[resource.InstanceType])
+			buildRoutes(r, childMetadata, path[resource.InstanceCategory])
 		}
 	}
 }

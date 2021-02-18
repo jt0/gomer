@@ -24,7 +24,7 @@ type Resource interface {
 
 type Action interface {
 	Name() string
-	ResourceType() Type
+	AppliesToCategory() Category
 	FieldAccessPermissions() auth.AccessPermissions
 	Pre(Resource) gomerr.Gomerr
 	Do(Resource) gomerr.Gomerr
@@ -32,11 +32,11 @@ type Action interface {
 	OnDoFailure(Resource, gomerr.Gomerr) gomerr.Gomerr
 }
 
-type Type string
+type Category string
 
 const (
-	InstanceType   Type = "Instance"
-	CollectionType Type = "Collection"
+	InstanceCategory   Category = "Instance"
+	CollectionCategory Category = "Collection"
 )
 
 func New(resourceType reflect.Type, subject auth.Subject) (Resource, gomerr.Gomerr) {

@@ -33,8 +33,8 @@ func (*createAction) Name() string {
 	return "resource.CreateAction"
 }
 
-func (*createAction) ResourceType() Type {
-	return InstanceType
+func (*createAction) AppliesToCategory() Category {
+	return InstanceCategory
 }
 
 func (*createAction) FieldAccessPermissions() auth.AccessPermissions {
@@ -93,8 +93,8 @@ func (readAction) Name() string {
 	return "resource.ReadAction"
 }
 
-func (readAction) ResourceType() Type {
-	return InstanceType
+func (readAction) AppliesToCategory() Category {
+	return InstanceCategory
 }
 
 func (readAction) FieldAccessPermissions() auth.AccessPermissions {
@@ -148,8 +148,8 @@ func (*updateAction) Name() string {
 	return "resource.UpdateAction"
 }
 
-func (*updateAction) ResourceType() Type {
-	return InstanceType
+func (*updateAction) AppliesToCategory() Category {
+	return InstanceCategory
 }
 
 func (*updateAction) FieldAccessPermissions() auth.AccessPermissions {
@@ -219,8 +219,8 @@ func (*deleteAction) Name() string {
 	return "resource.DeleteAction"
 }
 
-func (*deleteAction) ResourceType() Type {
-	return InstanceType
+func (*deleteAction) AppliesToCategory() Category {
+	return InstanceCategory
 }
 
 func (*deleteAction) FieldAccessPermissions() auth.AccessPermissions {
@@ -284,8 +284,8 @@ func (queryAction) Name() string {
 	return "resource.QueryAction"
 }
 
-func (queryAction) ResourceType() Type {
-	return CollectionType
+func (queryAction) AppliesToCategory() Category {
+	return CollectionCategory
 }
 
 func (queryAction) FieldAccessPermissions() auth.AccessPermissions {

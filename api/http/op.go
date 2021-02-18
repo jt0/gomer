@@ -12,9 +12,9 @@ type Op byte
 
 const InvalidHttpOp = 0b00000000
 
-func NewOp(method Method, resourceType resource.Type) Op {
-	rtBits := toResourceTypeBits(resourceType)
-	if method&^methodMask != 0 || rtBits&^resourceTypeMask != 0 {
+func NewOp(method Method, category resource.Category) Op {
+	rtBits := toCategoryBits(category)
+	if method&^methodMask != 0 || rtBits&^categoryMask != 0 {
 		return InvalidHttpOp
 	}
 
@@ -29,8 +29,8 @@ func (o Op) Method() string {
 	return methods[o&methodMask]
 }
 
-func (o Op) ResourceType() resource.Type {
-	return toResourceType(o & resourceTypeMask)
+func (o Op) ResourceType() resource.Category {
+	return toCategoryConst(o & categoryMask)
 }
 
 func (o Op) IsBuiltIn() bool {
@@ -65,45 +65,45 @@ var methods = [1 << methodBitsCount]string{
 	"OPTIONS",
 }
 
-type resourceType = Op
+type resourceCategory = Op
 
 const (
-	noResource resourceType = iota << methodBitsCount // 0b00000000
-	collection                                        // 0b00100000
-	instance                                          // 0b01000000
-	reserved                                          // 0b01100000
+	noResource resourceCategory = iota << methodBitsCount // 0b00000000
+	collection                                            // 0b00100000
+	instance                                              // 0b01000000
+	reserved                                              // 0b01100000
 
-	resourceTypeBitsCount = 2
-	resourceTypeMask      = (1<<resourceTypeBitsCount - 1) << methodBitsCount
+	categoryBitsCount = 2
+	categoryMask      = (1<<categoryBitsCount - 1) << methodBitsCount
 )
 
-func toResourceTypeBits(resourceType resource.Type) resourceType {
-	switch resourceType {
-	case resource.CollectionType:
+func toCategoryBits(category resource.Category) resourceCategory {
+	switch category {
+	case resource.CollectionCategory:
 		return collection
-	case resource.InstanceType:
+	case resource.InstanceCategory:
 		return instance
 	default:
 		return noResource
 	}
 }
 
-func toResourceType(resourceType resourceType) resource.Type {
+func toCategoryConst(resourceType resourceCategory) resource.Category {
 	switch resourceType {
 	case collection:
-		return resource.CollectionType
+		return resource.CollectionCategory
 	case instance:
-		return resource.InstanceType
+		return resource.InstanceCategory
 	default:
 		return ""
 	}
 }
 
 const (
-	builtIn  = iota << (methodBitsCount + resourceTypeBitsCount) // 0b00000000
-	customer                                                     // 0b10000000
+	builtIn  = iota << (methodBitsCount + categoryBitsCount) // 0b00000000
+	customer                                                 // 0b10000000
 
-	creatorTypeMask = 1 << (methodBitsCount + resourceTypeBitsCount) // 0b10000000
+	creatorTypeMask = 1 << (methodBitsCount + categoryBitsCount) // 0b10000000
 )
 
 const (
