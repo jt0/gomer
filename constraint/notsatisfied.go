@@ -14,3 +14,7 @@ type NotSatisfiedError struct {
 func NotSatisfied(constraint Constraint, on string, value interface{}) *NotSatisfiedError {
 	return gomerr.Build(new(NotSatisfiedError), constraint.Details(), on, value).(*NotSatisfiedError)
 }
+
+func NotSatisfiedBecause(details map[string]interface{}, on string, value interface{}) *NotSatisfiedError {
+	return gomerr.Build(new(NotSatisfiedError), details, on, value).(*NotSatisfiedError)
+}

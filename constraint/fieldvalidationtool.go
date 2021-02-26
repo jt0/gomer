@@ -52,7 +52,7 @@ func RegisterConstraints(constraints map[string]Constraint) {
 	}
 }
 
-var FieldValidationTool = fields.ScopingWrapper{FieldTool: fieldValidationTool{}}
+var FieldValidationTool = fields.ScopingWrapper{fieldValidationTool{}}
 
 type fieldValidationTool struct {
 	constraint Constraint
@@ -62,7 +62,7 @@ func (t fieldValidationTool) Name() string {
 	return "constraint.FieldValidationTool"
 }
 
-func (t fieldValidationTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldToolApplier, gomerr.Gomerr) {
+func (t fieldValidationTool) New(_ reflect.Type, _ reflect.StructField, input interface{}) (fields.FieldToolApplier, gomerr.Gomerr) {
 	if input == nil {
 		return nil, nil
 	}
@@ -85,6 +85,9 @@ func (t fieldValidationTool) Apply(_ reflect.Value, fieldValue reflect.Value, _ 
 
 var emptyConstraint = NewType(nil)
 
+// TODO:p2 Handle mixed cased function names (e.g. "oneof" vs "oneOf" vs "OneOf"). Don't do for provided string values
+//   though. Of example, "oneOf(Red,Blue,Green)" should not succeed if the value is "red" unless a case insensitive
+//   option is indicated
 func constraintFor(validationsString string, logicalOp string) (Constraint, gomerr.Gomerr) {
 	var constraints []Constraint
 	var ovs string

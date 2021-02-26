@@ -92,6 +92,7 @@ func (b bindQueryParamTool) Apply(_ reflect.Value, fieldValue reflect.Value, too
 	if b.multi {
 		panic("Not yet supported")
 	} else {
+		// TODO:p2 should be case insensitive Get()
 		qpVal := queryParams.Get(b.paramName)
 		if qpVal == "" {
 			// Get() will return an empty string if the value is empty or not present. We want to disambiguate, so check

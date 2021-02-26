@@ -8,6 +8,7 @@ import (
 
 type stringPtr *string
 
+// TODO:p2 add "ignore case" option
 func StartsWith(prefix string) *constraint {
 	return (&constraint{test: func(value interface{}) bool {
 		switch vt := value.(type) {

@@ -11,10 +11,10 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbiface"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/crypto"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/data/dataerr"
+	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
 	"github.com/jt0/gomer/util"
@@ -71,7 +71,7 @@ type ConsistencyTyper interface {
 type ItemResolver func(interface{}) (interface{}, gomerr.Gomerr)
 
 func Store(tableName string, config *Configuration /* resolver data.ItemResolver,*/, persistables ...data.Persistable) (store data.Store, ge gomerr.Gomerr) {
-	table := &table{
+	t := &table{
 		tableName:              &tableName,
 		index:                  index{canReadConsistently: true},
 		ddb:                    config.DynamoDb,
@@ -84,21 +84,21 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 		failDeleteIfNotPresent: config.FailDeleteIfNotPresent,
 	}
 
-	if table.valueSeparatorChar, ge = validOrDefaultChar(config.ValueSeparatorChar, ValueSeparatorCharDefault); ge != nil {
+	if t.valueSeparatorChar, ge = validOrDefaultChar(config.ValueSeparatorChar, ValueSeparatorCharDefault); ge != nil {
 		return nil, ge
 	}
 
-	if table.queryWildcardChar, ge = validOrDefaultChar(config.QueryWildcardChar, QueryWildcardCharDefault); ge != nil {
+	if t.queryWildcardChar, ge = validOrDefaultChar(config.QueryWildcardChar, QueryWildcardCharDefault); ge != nil {
 		return nil, ge
 	}
 
-	if ge := table.prepare(persistables); ge != nil {
+	if ge = t.prepare(persistables); ge != nil {
 		return nil, ge
 	}
 
-	tables[tableName] = table
+	tables[tableName] = t
 
-	return table, nil
+	return t, nil
 }
 
 func validOrDefaultChar(ch byte, _default byte) (byte, gomerr.Gomerr) {
@@ -143,32 +143,32 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 
 	t.indexes[""] = &t.index
 
-	for _, lsid := range output.Table.LocalSecondaryIndexes {
+	for _, lsiDescription := range output.Table.LocalSecondaryIndexes {
 		lsi := &index{
-			name:                lsid.IndexName,
+			name:                lsiDescription.IndexName,
 			canReadConsistently: true,
 		}
 
-		if ge := lsi.processKeySchema(lsid.KeySchema, attributeTypes); ge != nil {
+		if ge := lsi.processKeySchema(lsiDescription.KeySchema, attributeTypes); ge != nil {
 			return ge
 		}
 
 		lsi.pk = t.pk // Overwrite w/ t.pk
 
-		t.indexes[*lsid.IndexName] = lsi
+		t.indexes[*lsiDescription.IndexName] = lsi
 	}
 
-	for _, gsid := range output.Table.GlobalSecondaryIndexes {
+	for _, gsiDescription := range output.Table.GlobalSecondaryIndexes {
 		gsi := &index{
-			name:                gsid.IndexName,
+			name:                gsiDescription.IndexName,
 			canReadConsistently: false,
 		}
 
-		if ge := gsi.processKeySchema(gsid.KeySchema, attributeTypes); ge != nil {
+		if ge := gsi.processKeySchema(gsiDescription.KeySchema, attributeTypes); ge != nil {
 			return ge
 		}
 
-		t.indexes[*gsid.IndexName] = gsi
+		t.indexes[*gsiDescription.IndexName] = gsi
 	}
 
 	for _, persistable := range persistables {
@@ -181,20 +181,21 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 			return ge
 		}
 
+		// TODO: determine best way to verify this
 		// Validate that each key in each index has fully defined key fields for this persistable
-		for _, index := range t.indexes {
-			for _, keyAttribute := range index.keyAttributes() {
-				if keyParts := keyAttribute.keyFieldsByPersistable[pName]; keyParts != nil {
-					for i, keyPart := range keyParts {
-						if keyPart == "" {
-							return gomerr.Configuration(fmt.Sprintf("Index %s is missing a key part: %s[%s][%d]", index.friendlyName(), keyAttribute.name, pName, i)).AddAttribute("keyParts", keyParts)
-						}
-					}
-				} else {
-					keyAttribute.keyFieldsByPersistable[pName] = []string{pt.dbNameToFieldName(keyAttribute.name)}
-				}
-			}
-		}
+		// for _, idx := range t.indexes {
+		// 	for _, attribute := range idx.keyAttributes() {
+		// 		if keyParts := attribute.keyFieldsByPersistable[pName]; keyParts != nil {
+		// 			for i, keyPart := range keyParts {
+		// 				if keyPart == "" {
+		// 					return gomerr.Configuration(fmt.Sprintf("Index %s is missing a key part: %s[%s][%d]", idx.friendlyName(), attribute.name, pName, i)).AddAttribute("keyParts", keyParts)
+		// 				}
+		// 			}
+		// 		} else {
+		// 			attribute.keyFieldsByPersistable[pName] = []string{pt.dbNameToFieldName(attribute.name)}
+		// 		}
+		// 	}
+		// }
 
 		t.persistableTypes[pName] = pt
 	}
@@ -214,108 +215,43 @@ func (t *table) Create(p data.Persistable) (ge gomerr.Gomerr) {
 		}
 	}()
 
-	ge = t.put(p, t.persistableTypes[p.TypeName()].fieldConstraints, true)
+	pElem := reflect.ValueOf(p).Elem()
 
-	return
-}
-
-func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.Gomerr) {
-	defer func() {
-		if ge != nil {
-			ge = dataerr.Store("Update", p).Wrap(ge)
-		}
-	}()
-
-	// TODO:p1 support partial update vs put()
-
-	fieldConstraints := make(map[string]constraint.Constraint)
-
-	if update != nil {
-		uv := reflect.ValueOf(update).Elem()
-		pv := reflect.ValueOf(p).Elem()
-
-		for i := 0; i < uv.NumField(); i++ {
-			uField := uv.Field(i)
-			// TODO:p0 Support structs. Will want to recurse through and not bother w/ CanSet() checks until we know
-			//         we're dealing w/ a scalar.
-			if !uField.CanSet() || uField.Kind() == reflect.Struct || (uField.Kind() == reflect.Ptr && uField.Elem().Kind() == reflect.Struct) {
-				continue
-			}
-
-			pField := pv.Field(i)
-			if reflect.DeepEqual(uField.Interface(), pField.Interface()) {
-				uField.Set(reflect.Zero(uField.Type()))
-			} else if uField.Kind() == reflect.Ptr {
-				if uField.IsNil() {
-					continue
-				}
-				if !pField.IsNil() && reflect.DeepEqual(uField.Elem().Interface(), pField.Elem().Interface()) {
-					uField.Set(reflect.Zero(uField.Type()))
-				} else {
-					pField.Set(uField)
-				}
-			} else {
-				if uField.IsZero() {
-					continue
-				}
-				pField.Set(uField)
-			}
-		}
-
-		for fieldName, fieldConstraint := range t.persistableTypes[p.TypeName()].fieldConstraints {
-			// Test if the field with the constraint has been updated. If so, add the constraint to the map and continue.
-			if !uv.FieldByName(fieldName).IsZero() {
-				fieldConstraints[fieldName] = fieldConstraint
-				continue
-			}
-
-			// See if there are other fields in the "scope" attribute. If yes, and if those fields have been updated,
-			// add the constraint to the map and continue.
-			if otherFields, ok := fieldConstraint.Details()["Scope"].([]string); ok {
-				for _, otherField := range otherFields {
-					uField := uv.FieldByName(otherField)
-					if !uField.IsZero() && uField.Interface() != pv.FieldByName(otherField).Interface() {
-						fieldConstraints[fieldName] = fieldConstraint
-						continue
-					}
-				}
-			}
-		}
+	pt := t.persistableTypes[p.TypeName()]
+	toolContext := fields.EnsureContext().Add(constrainedFieldsKey, make(map[string]bool, 0))
+	ge = pt.fields.ApplyTools(pElem, fields.ToolWithContext{"ddb.CollectConstrainedFields", toolContext})
+	if ge != nil {
+		return ge
 	}
 
-	ge = t.put(p, fieldConstraints, false)
-
-	return
-}
-
-func (t *table) put(p data.Persistable, fieldConstraints map[string]constraint.Constraint, ensureUniqueId bool) gomerr.Gomerr {
-	for _, fieldConstraint := range fieldConstraints {
-		if ge := fieldConstraint.Validate(p); ge != nil {
-			return ge
-		}
+	fs, ge := fields.Get(reflect.TypeOf(p).Elem())
+	if ge != nil {
+		return ge
 	}
 
-	av, err := dynamodbattribute.MarshalMap(p)
-	if err != nil {
-		return gomerr.Marshal(p.TypeName(), p).Wrap(err)
+	av := make(map[string]*dynamodb.AttributeValue)
+	tc := fields.EnsureContext().
+		Add("persistable", p).
+		Add("attributeValues", av)
+	ge = fs.ApplyTools(pElem,
+		fields.ToolWithContext{"ddb.ConstraintValidatorTool", tc},
+		fields.ToolWithContext{"ddb.PutFieldsTool", tc}, // add fields into av map w/ proper names TODO: handle index keys, too
+		// fields.ToolWithContext{"ddb.IndexKeysTool", tc}, // populate index keys into av map
+	)
+	if ge != nil {
+		return ge
 	}
 
-	t.persistableTypes[p.TypeName()].convertFieldNamesToDbNames(&av)
-
+	// TODO: if can't be done in 'PutFieldsTool', handle here
 	for _, index := range t.indexes {
 		_ = index.populateKeyValues(av, p, t.valueSeparatorChar, false)
 	}
 
-	// TODO: here we could compare the current av map w/ one we stashed into the object somewhere
-
-	var uniqueIdConditionExpresion *string
-	if ensureUniqueId {
-		expression := fmt.Sprintf("attribute_not_exists(%s)", t.pk.name)
-		if t.sk != nil {
-			expression += fmt.Sprintf(" AND attribute_not_exists(%s)", t.sk.name)
-		}
-		uniqueIdConditionExpresion = &expression
+	expression := fmt.Sprintf("attribute_not_exists(%s)", t.pk.name)
+	if t.sk != nil {
+		expression += fmt.Sprintf(" AND attribute_not_exists(%s)", t.sk.name)
 	}
+	uniqueIdConditionExpresion := &expression
 
 	// TODO:p1 optimistic locking
 
@@ -324,16 +260,110 @@ func (t *table) put(p data.Persistable, fieldConstraints map[string]constraint.C
 		TableName:           t.tableName,
 		ConditionExpression: uniqueIdConditionExpresion,
 	}
-	_, err = t.ddb.PutItem(input) // TODO:p3 look at result data to track capacity or other info?
+	_, err := t.ddb.PutItem(input) // TODO:p3 look at result data to track capacity or other info?
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
 			case dynamodb.ErrCodeConditionalCheckFailedException:
-				if ensureUniqueId {
-					return gomerr.Internal("Unique id check failed, retry with a new id value").Wrap(err)
-				} else {
-					return gomerr.Dependency("DynamoDB", input).Wrap(err)
-				}
+				return gomerr.Internal("Unique id check failed, retry with a new id value").Wrap(err)
+			case dynamodb.ErrCodeRequestLimitExceeded, dynamodb.ErrCodeProvisionedThroughputExceededException:
+				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(awsErr)
+			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
+				return limit.Exceeded("DynamoDB", "item.size()", maxItemSize, limit.NotApplicable, limit.Unknown)
+			}
+		}
+
+		return gomerr.Dependency("DynamoDB", input).Wrap(err)
+	}
+
+	return nil
+}
+
+func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.Gomerr) {
+	if update == nil {
+		return
+	}
+
+	defer func() {
+		if ge != nil {
+			ge = dataerr.Store("Update", p).Wrap(ge)
+		}
+	}()
+
+	pv := reflect.ValueOf(p).Elem()
+	uv := reflect.ValueOf(update).Elem()
+	for i := 0; i < uv.NumField(); i++ {
+		uField := uv.Field(i)
+		// TODO:p0 Support structs. Will want to recurse through and not bother w/ CanSet() checks until we know
+		//         we're dealing w/ a scalar.
+		if !uField.CanSet() || uField.Kind() == reflect.Struct || (uField.Kind() == reflect.Ptr && uField.Elem().Kind() == reflect.Struct) {
+			continue
+		}
+
+		pField := pv.Field(i)
+		if reflect.DeepEqual(uField.Interface(), pField.Interface()) {
+			uField.Set(reflect.Zero(uField.Type()))
+		} else if uField.Kind() == reflect.Ptr {
+			if uField.IsNil() {
+				continue
+			}
+			if !pField.IsNil() && reflect.DeepEqual(uField.Elem().Interface(), pField.Elem().Interface()) {
+				uField.Set(reflect.Zero(uField.Type()))
+			} else {
+				pField.Set(uField)
+			}
+		} else {
+			if uField.IsZero() {
+				continue
+			}
+			pField.Set(uField)
+		}
+	}
+
+	// TODO: here we could compare the current av map w/ one we stashed into the object somewhere
+
+	pt := t.persistableTypes[p.TypeName()]
+	toolContext := fields.EnsureContext().
+		Add("persistable", p).
+		Add("constrainedFields", make([]string, 0)).
+		Add("updateExpressionParts", make(map[string][]string)).
+		Add("expressionAttributeNames", make(map[string]*string, 2)).
+		Add("expressionAttributeValues", make(map[string]*dynamodb.AttributeValue, 2))
+	ge = pt.fields.ApplyTools(uv,
+		fields.ToolWithContext{"ddb.ConstrainedFieldsTool", toolContext},
+		fields.ToolWithContext{"ddb.UpdateFieldsTool", toolContext}, // TODO: handle index vals, too
+		// fields.ToolWithContext{"ddb.IndexKeysTool", toolContext},
+	)
+	if ge != nil {
+		return ge
+	}
+
+	key := make(map[string]*dynamodb.AttributeValue, 2)
+	ge = t.populateKeyValues(key, p, t.valueSeparatorChar, true)
+	if ge != nil {
+		return ge
+	}
+
+	updateExpression := ""
+	for op, parts := range toolContext["updateExpression"].(map[string][]string) {
+		updateExpression += " " + op + " " + strings.Join(parts, ",")
+	}
+
+	input := &dynamodb.UpdateItemInput{
+		TableName:                 t.tableName,
+		Key:                       key,
+		UpdateExpression:          &updateExpression,
+		ExpressionAttributeNames:  toolContext["expressionAttributeNames"].(map[string]*string),
+		ExpressionAttributeValues: toolContext["expressionAttributeValues"].(map[string]*dynamodb.AttributeValue),
+		// ConditionExpression:       nil,
+	}
+
+	_, err := t.ddb.UpdateItem(input) // TODO:p3 look at result data to track capacity or other info?
+	if err != nil {
+		if awsErr, ok := err.(awserr.Error); ok {
+			switch awsErr.Code() {
+			case dynamodb.ErrCodeConditionalCheckFailedException:
+				return gomerr.Dependency("DynamoDB", input).Wrap(err)
 			case dynamodb.ErrCodeRequestLimitExceeded, dynamodb.ErrCodeProvisionedThroughputExceededException:
 				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(awsErr)
 			case dynamodb.ErrCodeItemCollectionSizeLimitExceededException:
@@ -445,20 +475,18 @@ func (t *table) Query(q data.Queryable) (ge gomerr.Gomerr) {
 	}()
 
 	var input *dynamodb.QueryInput
-	input, ge = t.buildQueryInput(q, q.TypeNames()[0]) // TODO:p2 Fix when query supports multiple types
-	if ge != nil {
+	if input, ge = t.buildQueryInput(q, q.TypeNames()[0]); ge != nil { // TODO:p2 Fix when query supports multiple types
 		return ge
 	}
 
 	var output *dynamodb.QueryOutput
-	output, ge = t.runQuery(input)
-	if ge != nil {
+	if output, ge = t.runQuery(input); ge != nil {
 		return ge
 	}
 
-	nextToken, ge := t.nextTokenizer.tokenize(q, output.LastEvaluatedKey)
-	if ge != nil {
-		return gomerr.Internal("Unable to generate nextToken").Wrap(ge)
+	var nextPageToken *string
+	if nextPageToken, ge = t.nextTokenizer.tokenize(q, output.LastEvaluatedKey); ge != nil {
+		return gomerr.Internal("Unable to generate next page token").Wrap(ge)
 	}
 
 	items := make([]interface{}, len(output.Items))
@@ -469,60 +497,9 @@ func (t *table) Query(q data.Queryable) (ge gomerr.Gomerr) {
 	}
 
 	q.SetItems(items)
-	q.SetNextPageToken(nextToken)
+	q.SetNextPageToken(nextPageToken)
 
 	return nil
-}
-
-func (t *table) isFieldUnique(fieldName string, additionalFields []string) func(pi interface{}) bool {
-	return func(pi interface{}) bool {
-		p, ok := pi.(data.Persistable)
-		if !ok {
-			return false
-		}
-
-		q := p.NewQueryable()
-		if ct, ok := p.(ConsistencyTyper); ok {
-			ct.SetConsistencyType(Preferred)
-		}
-
-		qv := reflect.ValueOf(q).Elem()
-		pv := reflect.ValueOf(p).Elem()
-
-		qv.FieldByName(fieldName).Set(pv.FieldByName(fieldName))
-		for _, additionalField := range additionalFields {
-			qv.FieldByName(additionalField).Set(pv.FieldByName(additionalField))
-		}
-
-		input, ge := t.buildQueryInput(q, p.TypeName())
-		if ge != nil {
-			// TODO: log "Unable to build constraint query: " + ge.Error()
-			return false
-		}
-
-		for queryLimit := int64(1); queryLimit <= 300; queryLimit += 100 { // Bump limit up each time
-			input.Limit = &queryLimit
-
-			output, ge := t.runQuery(input)
-			if ge != nil {
-				// TODO: log "Error while running query: " + ge.Error()
-				return false
-			}
-
-			if len(output.Items) > 0 {
-				return false
-			}
-
-			if output.LastEvaluatedKey == nil {
-				return true
-			}
-
-			input.ExclusiveStartKey = output.LastEvaluatedKey
-		}
-
-		// TODO: log "Too many db checks to verify field constraint"
-		return false
-	}
 }
 
 // buildQueryInput Builds the DynamoDB QueryInput types based on the provided queryable. See indexFor and
