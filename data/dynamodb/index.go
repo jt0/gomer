@@ -24,11 +24,19 @@ type index struct {
 type keyAttribute struct {
 	name                   string
 	attributeType          string
-	keyFieldsByPersistable map[string][]string // persistable type name -> key fields
+	keyFieldsByPersistable map[string][]*keyField // persistable type name -> key fields
+}
+
+type keyField struct {
+	name      string
+	preferred bool
+	ascending bool
 }
 
 type candidate struct {
 	index     *index
+	preferred bool
+	ascending bool
 	skLength  int
 	skMissing int
 }
@@ -44,7 +52,7 @@ func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement,
 	for _, keySchemaElement := range keySchemaElements {
 		key := &keyAttribute{
 			name:                   *keySchemaElement.AttributeName,
-			keyFieldsByPersistable: make(map[string][]string),
+			keyFieldsByPersistable: make(map[string][]*keyField),
 		}
 
 		key.attributeType, ge = safeAttributeType(attributeTypes[key.name])
@@ -83,7 +91,7 @@ func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
 //
 //  gomerr.Missing:
 //      if there is no matching index for the query
-func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
+func indexFor(t *table, q data.Queryable) (index *index, ascending bool, consistent *bool, ge gomerr.Gomerr) {
 	var consistencyType ConsistencyType
 	if c, ok := q.(ConsistencyTyper); ok {
 		consistencyType = c.ConsistencyType()
@@ -94,45 +102,49 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 	candidates := make([]*candidate, 0, len(t.indexes))
 	qv := reflect.ValueOf(q).Elem()
 
-	for _, index := range t.indexes {
-		if consistencyType == Required && !index.canReadConsistently {
+	for _, idx := range t.indexes {
+		if consistencyType == Required && !idx.canReadConsistently {
 			continue
 		}
 
 		// A viable candidate needs to use one index to collect each type that the queryable is interested in. To find
 		// it, range through each index and if it doesn't work for a type, fail and move to the next one.
 		//
-		// XXX: revisit - should be the one that covers the least, right? Amongst the viable candidates, choose the
+		// TODO: revisit - should be the one that covers the least, right? Amongst the viable candidates, choose the
 		//      best match under the (presumption) that fewer missing keys and longer key length are better
-		var candidate *candidate
+		var match *candidate
 		for _, typeName := range q.TypeNames() {
-			if c := index.candidate(qv, typeName); c == nil {
-				candidate = nil
+			if candidateForType := idx.candidate(qv, typeName); candidateForType == nil {
+				match = nil
 				break
-			} else if candidate == nil {
-				candidate = c
-			} else if compareCandidates(candidate, c) {
-				c = candidate
+			} else if match == nil {
+				match = candidateForType
+			} else if compareCandidates(match, candidateForType) {
+				candidateForType = match
 			}
 		}
-		if candidate != nil {
-			candidates = append(candidates, candidate)
+		if match != nil {
+			candidates = append(candidates, match)
 		}
 	}
 
 	switch len(candidates) {
 	case 0:
 		available := make(map[string]interface{}, 1)
-		for _, index := range t.indexes {
-			available[index.friendlyName()] = index
+		for _, idx := range t.indexes {
+			available[idx.friendlyName()] = idx
 		}
-		return nil, nil, dataerr.NoIndexMatch(available, q)
+		return nil, false, nil, dataerr.NoIndexMatch(available, q)
 	case 1:
-		return candidates[0].index, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
+		// do nothing. candidates[0] returned below
 	default:
 		sort.Slice(candidates, func(i, j int) bool {
 			c1 := candidates[i]
 			c2 := candidates[j]
+
+			if c1.preferred != c2.preferred {
+				return c1.preferred // sorts based on which of c1 or c2 is preferred over the other
+			}
 
 			if consistencyType == Preferred && c1.index.canReadConsistently != c2.index.canReadConsistently {
 				return c1.index.canReadConsistently // sorts based on which of c1 or c2 can be read consistently
@@ -140,9 +152,9 @@ func indexFor(t *table, q data.Queryable) (*index, *bool, gomerr.Gomerr) {
 
 			return compareCandidates(c1, c2)
 		})
-
-		return candidates[0].index, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
 	}
+
+	return candidates[0].index, candidates[0].ascending, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
 }
 
 func compareCandidates(c1 *candidate, c2 *candidate) bool {
@@ -156,48 +168,50 @@ func compareCandidates(c1 *candidate, c2 *candidate) bool {
 
 func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 	// TODO: validate index sufficiently projects over request. if not, return nil
-
-	for _, keyField := range i.pk.keyFieldsByPersistable[ptName] {
-		if keyField[:1] == "'" {
+	for _, kf := range i.pk.keyFieldsByPersistable[ptName] {
+		if kf.name[:1] == "'" {
 			continue
 		}
 
-		if fv := qv.FieldByName(keyField); !fv.IsValid() || fv.IsZero() {
+		if fv := qv.FieldByName(kf.name); !fv.IsValid() || fv.IsZero() {
 			return nil
 		}
 	}
 
-	candidate := &candidate{index: i}
+	c := &candidate{index: i}
 
 	// Needs more work to handle multi-attribute cases such as "between"
 	if i.sk != nil {
-		for kfi, keyField := range i.sk.keyFieldsByPersistable[ptName] {
-			if keyField[:1] == "'" {
+		for kfi, kf := range i.sk.keyFieldsByPersistable[ptName] {
+			c.preferred = kf.preferred
+			c.ascending = kf.ascending
+
+			if kf.name[:1] == "'" {
 				continue
 			}
 
-			fv := qv.FieldByName(keyField)
+			fv := qv.FieldByName(kf.name)
 			if !fv.IsValid() {
 				// Fixed bug where index could be dropped as a candidate if
 				// a trailing sort key member doesn't exist in the Queryable.
-				if kfi == 0 { // XXX: Why is this additional check here? It may be valid to have no SK value present for a query
+				if kfi == 0 { // TODO: Why is this additional check here? It may be valid to have no SK value present for a query
 					return nil
 				} else {
-					candidate.skMissing++
+					c.skMissing++
 				}
 			} else if fv.IsZero() {
-				candidate.skMissing++
+				c.skMissing++
 			} else {
-				if candidate.skMissing > 0 { // Cannot have gaps in the middle of the sort key
+				if c.skMissing > 0 { // Cannot have gaps in the middle of the sort key
 					return nil
 				}
 			}
 		}
 
-		candidate.skLength = len(i.sk.keyFieldsByPersistable[ptName])
+		c.skLength = len(i.sk.keyFieldsByPersistable[ptName])
 	}
 
-	return candidate
+	return c
 }
 
 func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p data.Persistable, valueSeparator byte, mustBeSet bool) gomerr.Gomerr {
@@ -210,7 +224,7 @@ func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p dat
 		if av = i.pk.attributeValue(pElem, p.TypeName(), valueSeparator); av != nil {
 			avm[i.pk.name] = av
 		} else if mustBeSet {
-			return dataerr.KeyValueNotFound(i.pk.name, i.pk.keyFieldsByPersistable[p.TypeName()], p)
+			return dataerr.KeyValueNotFound(i.pk.name, keyFieldNames(i.pk.keyFieldsByPersistable[p.TypeName()]), p)
 		}
 	}
 
@@ -219,12 +233,20 @@ func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p dat
 			if av = i.sk.attributeValue(pElem, p.TypeName(), valueSeparator); av != nil {
 				avm[i.sk.name] = av
 			} else if mustBeSet {
-				return dataerr.KeyValueNotFound(i.sk.name, i.sk.keyFieldsByPersistable[p.TypeName()], p)
+				return dataerr.KeyValueNotFound(i.sk.name, keyFieldNames(i.sk.keyFieldsByPersistable[p.TypeName()]), p)
 			}
 		}
 	}
 
 	return nil
+}
+
+func keyFieldNames(keyFields []*keyField) []string {
+	names := make([]string, len(keyFields))
+	for i, kf := range keyFields {
+		names[i] = kf.name
+	}
+	return names
 }
 
 func (i *index) keyAttributes() []*keyAttribute {
@@ -258,10 +280,10 @@ func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeNa
 func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeName string, valueSeparator byte) string {
 	// sv := reflect.ValueOf(s).Elem()
 	keyFields := k.keyFieldsByPersistable[persistableTypeName]
-	keyValue := fieldValue(keyFields[0], elemValue) // will always have at least one keyField
+	keyValue := fieldValue(keyFields[0].name, elemValue) // will always have at least one keyField
 	for i := 1; i < len(keyFields); i++ {
 		keyValue += string(valueSeparator)
-		keyValue += fieldValue(keyFields[i], elemValue)
+		keyValue += fieldValue(keyFields[i].name, elemValue)
 	}
 	return keyValue
 }
@@ -271,6 +293,8 @@ func fieldValue(fieldName string, sv reflect.Value) string {
 		return fieldName[1 : len(fieldName)-1]
 	} else {
 		v := sv.FieldByName(fieldName)
+		// NB: if the type is a number w/ a value of 0, it will be discarded. To use an actual zero, one needs to
+		//  specify the attribute as a pointer to the numeric type.
 		if v.IsValid() && !v.IsZero() {
 			if v.Kind() == reflect.Ptr && !v.IsNil() {
 				v = v.Elem()

@@ -14,7 +14,6 @@ import (
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/util"
 )
 
 type persistableType struct {
@@ -111,7 +110,7 @@ func (pt *persistableType) processConstraintsTag(fieldName string, tag string, t
 	return errors
 }
 
-var ddbKeyStatementRegexp = regexp.MustCompile(`(([\w-.]+):)?(pk|sk)(.(\d))?(=('\w+')(\+)?)?`)
+var ddbKeyStatementRegexp = regexp.MustCompile(`(?:(!)?(\+|-)?([\w-.]+)?:)?(pk|sk)(?:.(\d))?(?:=('\w+')(\+)?)?`)
 
 func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes map[string]*index, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	if tag == "" {
@@ -124,16 +123,16 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 			return append(errors, gomerr.Configuration("Invalid `db.keys` value: "+keyStatement).AddAttribute("Field", fieldName))
 		}
 
-		index, ok := indexes[groups[2]]
+		idx, ok := indexes[groups[3]]
 		if !ok {
-			return append(errors, gomerr.Configuration(fmt.Sprintf("Undefined index: %s", groups[2])).AddAttribute("Field", fieldName))
+			return append(errors, gomerr.Configuration(fmt.Sprintf("Undefined index: %s", groups[3])).AddAttribute("Field", fieldName))
 		}
 
 		var key *keyAttribute
-		if groups[3] == "pk" {
-			key = index.pk
+		if groups[4] == "pk" {
+			key = idx.pk
 		} else {
-			key = index.sk
+			key = idx.sk
 		}
 
 		var partIndex int // default to index 0
@@ -141,14 +140,39 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 			partIndex, _ = strconv.Atoi(groups[5])
 		}
 
-		if groups[7] != "" { // If non-empty, this field has a static value. Replace with that value.
-			fieldName = groups[7]
+		if groups[6] != "" { // If non-empty, this field has a static value. Replace with that value.
+			fieldName = groups[6]
 		}
 
-		key.keyFieldsByPersistable[pt.name] = util.InsertStringAtIndex(key.keyFieldsByPersistable[pt.name], fieldName, partIndex)
+		// TODO: Determine scenarios where skLength/skMissing don't map to desired behavior. May need preferred
+		//       priority levels to compensate
+		kf := keyField{name: fieldName, preferred: groups[1] == "!", ascending: groups[2] != "-"}
+		key.keyFieldsByPersistable[pt.name] = insertAtIndex(key.keyFieldsByPersistable[pt.name], &kf, partIndex)
 	}
 
 	return errors
+}
+
+func insertAtIndex(slice []*keyField, value *keyField, index int) []*keyField {
+	if slice == nil || cap(slice) == 0 {
+		slice = make([]*keyField, 0, index+1)
+	}
+
+	lenKeyFields := len(slice)
+	capKeyFields := cap(slice)
+	if index < lenKeyFields {
+		if slice[index] != nil {
+			panic(fmt.Sprintf("already found value '%v' at index %d", slice[index], index))
+		}
+	} else if index < capKeyFields {
+		slice = slice[0 : index+1]
+	} else {
+		slice = append(slice, make([]*keyField, index+1-capKeyFields)...)
+	}
+
+	slice[index] = value
+
+	return slice
 }
 
 func (pt *persistableType) dbNameToFieldName(dbName string) string {

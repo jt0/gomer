@@ -182,16 +182,18 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 		}
 
 		// Validate that each key in each index has fully defined key fields for this persistable
-		for _, index := range t.indexes {
-			for _, keyAttribute := range index.keyAttributes() {
-				if keyParts := keyAttribute.keyFieldsByPersistable[pName]; keyParts != nil {
-					for i, keyPart := range keyParts {
-						if keyPart == "" {
-							return gomerr.Configuration(fmt.Sprintf("Index %s is missing a key part: %s[%s][%d]", index.friendlyName(), keyAttribute.name, pName, i)).AddAttribute("keyParts", keyParts)
+		for _, idx := range t.indexes {
+			for _, attribute := range idx.keyAttributes() {
+				if keyFields := attribute.keyFieldsByPersistable[pName]; keyFields != nil {
+					for i, kf := range keyFields {
+						if kf == nil {
+							return gomerr.Configuration(
+								fmt.Sprintf("Index %s is missing a key field: %s[%s][%d]", idx.friendlyName(), attribute.name, pName, i),
+							).AddAttribute("keyFields", keyFields)
 						}
 					}
 				} else {
-					keyAttribute.keyFieldsByPersistable[pName] = []string{pt.dbNameToFieldName(keyAttribute.name)}
+					attribute.keyFieldsByPersistable[pName] = []*keyField{{name: pt.dbNameToFieldName(attribute.name), ascending: true}}
 				}
 			}
 		}
@@ -528,7 +530,7 @@ func (t *table) isFieldUnique(fieldName string, additionalFields []string) func(
 // buildQueryInput Builds the DynamoDB QueryInput types based on the provided queryable. See indexFor and
 // nextTokenizer.untokenize for possible error types.
 func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*dynamodb.QueryInput, gomerr.Gomerr) {
-	index, consistent, ge := indexFor(t, q)
+	idx, ascending, consistent, ge := indexFor(t, q)
 	if ge != nil {
 		return nil, ge
 	}
@@ -539,18 +541,18 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 	// TODO: any reason Elem() would be incorrect?
 	qElem := reflect.ValueOf(q).Elem()
 
-	keyConditionExpresion := safeName(index.pk.name, expressionAttributeNames) + "=:pk"
-	expressionAttributeValues[":pk"] = index.pk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar) // Non-null because indexFor succeeded
+	keyConditionExpresion := safeName(idx.pk.name, expressionAttributeNames) + "=:pk"
+	expressionAttributeValues[":pk"] = idx.pk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar) // Non-null because indexFor succeeded
 
 	// TODO: customers should opt-in to wildcard matches on a field-by-field basis
 	// TODO: need to provide a way to sanitize, both when saving and querying data, the delimiter char
-	if index.sk != nil {
-		if eav := index.sk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar); eav != nil {
+	if idx.sk != nil {
+		if eav := idx.sk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar); eav != nil {
 			if eav.S != nil && len(*eav.S) > 0 && ((*eav.S)[len(*eav.S)-1] == t.queryWildcardChar || (*eav.S)[len(*eav.S)-1] == t.valueSeparatorChar) {
 				*eav.S = (*eav.S)[:len(*eav.S)-1] // remove the last char
-				keyConditionExpresion += " AND begins_with(" + safeName(index.sk.name, expressionAttributeNames) + ",:sk)"
+				keyConditionExpresion += " AND begins_with(" + safeName(idx.sk.name, expressionAttributeNames) + ",:sk)"
 			} else {
-				keyConditionExpresion += " AND " + safeName(index.sk.name, expressionAttributeNames) + "=:sk"
+				keyConditionExpresion += " AND " + safeName(idx.sk.name, expressionAttributeNames) + "=:sk"
 			}
 			expressionAttributeValues[":sk"] = eav
 		}
@@ -578,7 +580,7 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 
 	input := &dynamodb.QueryInput{
 		TableName:                 t.tableName,
-		IndexName:                 index.name,
+		IndexName:                 idx.name,
 		ConsistentRead:            consistent,
 		ExpressionAttributeNames:  expressionAttributeNames,
 		ExpressionAttributeValues: expressionAttributeValues,
@@ -587,7 +589,7 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 		ExclusiveStartKey:         exclusiveStartKey,
 		Limit:                     t.limit(q.MaximumPageSize()),
 		// ProjectionExpression:      projectionExpressionPtr,
-		// ScanIndexForward:          &scanIndexForward,
+		ScanIndexForward: &ascending,
 	}
 
 	return input, nil
