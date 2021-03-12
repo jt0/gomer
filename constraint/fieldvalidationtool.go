@@ -52,7 +52,7 @@ func RegisterConstraints(constraints map[string]Constraint) {
 	}
 }
 
-var FieldValidationTool = fields.ScopingWrapper{FieldTool: fieldValidationTool{}}
+var FieldValidationTool = fields.ScopingWrapper{fieldValidationTool{}}
 
 type fieldValidationTool struct {
 	constraint Constraint
@@ -62,7 +62,7 @@ func (t fieldValidationTool) Name() string {
 	return "constraint.FieldValidationTool"
 }
 
-func (t fieldValidationTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldToolApplier, gomerr.Gomerr) {
+func (t fieldValidationTool) New(_ reflect.Type, _ reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	if input == nil {
 		return nil, nil
 	}
@@ -76,7 +76,7 @@ func (t fieldValidationTool) New(structType reflect.Type, structField reflect.St
 }
 
 func (t fieldValidationTool) Apply(_ reflect.Value, fieldValue reflect.Value, _ fields.ToolContext) gomerr.Gomerr {
-	if fieldValue.Kind() == reflect.Ptr && !fieldValue.IsZero() {
+	if fieldValue.Kind() == reflect.Ptr && !fieldValue.IsNil() {
 		fieldValue = fieldValue.Elem()
 	}
 
@@ -108,7 +108,7 @@ func constraintFor(validationsString string, logicalOp string) (Constraint, gome
 		openParenIndex := strings.Index(validationsString, "(")
 		commaIndex := strings.Index(validationsString, ",")
 
-		if openParenIndex >= 0 && (commaIndex < 0 || commaIndex > openParenIndex) { // true for 1 & 3
+		if openParenIndex >= 0 && (commaIndex < 0 || commaIndex >= openParenIndex) { // true for 1 & 3
 			constraintName := strings.ToLower(validationsString[:openParenIndex])
 			validations := validationsString[openParenIndex+1:] // '1,2)', 'required,len(1,2))
 

@@ -11,128 +11,154 @@ import (
 	"github.com/gin-gonic/gin/render"
 
 	"github.com/jt0/gomer/auth"
-	"github.com/jt0/gomer/data/dataerr"
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/resource"
 )
 
-const (
-	contentTypeHeader = "Content-Type"
+// Unmarshal defines afunction that processes the input and stores the result in the value pointed to by ptrToTarget.
+// If ptrToTarget is nil, not a pointer, or otherwise unprocessable, Unmarshal returns a gomerr.Gomerr.
+type Unmarshal func(toUnmarshal []byte, ptrToTarget interface{}) error
 
-	headersTypeKey      = "$_headers_type"
-	headersFromRequest  = "headersFromRequest"
-	headersFromResponse = "headersFromResponse"
+// Marshal provides a function to convert the toMarshal to bytes suitable for returning in a response body.
+type Marshal func(toMarshal interface{}) ([]byte, error)
+
+var (
+	// Unmarshal functions for specific content types
+	PerContentTypeUnmarshalFunctions = make(map[string]Unmarshal)
+
+	// Use this Unmarshal function if nothing else matches. Can be set to nil to only allow known content types.
+	DefaultUnmarshalFunction = json.Unmarshal
+
+	// Marshal functions for specific content types
+	// TODO:p2 add to BindToResponse
+	PerContentTypeMarshalFunctions = make(map[string]Marshal)
+
+	// Use this Marshal function if nothing else matches. Can be set to nil to only allow known content types.
+	DefaultMarshalFunction = json.Marshal
+
+	// This slice can be added to (or replaced) as needed
+	BindFromRequestTools = []fields.FieldTool{
+		BindInTool,
+		constraint.FieldValidationTool,
+	}
+
+	// This slice can be added to (or replaced) as needed
+	BindToResponseTools = []fields.FieldTool{
+		BindOutTool,
+	}
+
+	// Default prefixes for non-payload bindings
+	PathBindingPrefix       = "path."
+	HeaderBindingPrefix     = "header."
+	QueryParamBindingPrefix = "query."
+	PayloadBindingPrefix    = ""
+
+	// Default directives
+	BodyBindingDirective        = "body"
+	IgnoreFieldBindingDirective = ""  // If not explicitly specified, the field will be ignored during input/output.
+	ImplicitFieldNameDirective  = "+" //
+
+	// NB: If one scope defines a body binding, no other scope can try to access marshaled/unmarshaled data
+	hasInBodyBinding  = make(map[string]bool)
+	hasOutBodyBinding = make(map[string]bool)
 )
 
-func init() {
-	// These are the default tag keys for these tools, but an application can set different key values if they'd like or
-	// add new entries to the map so long as they do it before invoking BindFromRequest()/BindToResponse().
-	fields.TagToFieldToolAssociations(map[string]fields.FieldTool{
-		"bind.path":   BindPathTool,
-		"bind.query":  BindQueryParamTool,
-		"bind.header": BindHeaderTool,
-		"bind.body":   BindBodyTool,
-	})
-}
+const (
+	pathPartsKey      = "$_path_parts"
+	queryParamsKey    = "$_query_params"
+	headersKey        = "$_headers"
+	unmarshaledMapKey = "$_unmarshaled_map"
+	bodyBytesKey      = "$_body_bytes"
 
-func BindFromRequest(request *http.Request, resourceType reflect.Type, subject auth.Subject) (resource.Resource, gomerr.Gomerr) {
+	toolsWithContextKey = "$_tools_with_context"
+)
+
+func BindFromRequest(request *http.Request, resourceType reflect.Type, subject auth.Subject, scope string) (resource.Resource, gomerr.Gomerr) {
 	r, ge := resource.New(resourceType, subject)
 	if ge != nil {
 		return nil, ge
 	}
 
-	tc := fields.EnsureContext().
-		Add(PathPartsKey, strings.Split(strings.Trim(request.URL.Path, "/"), "/")). // remove any leading or trailing slashes
-		Add(QueryParamsKey, request.URL.Query()).
-		Add(HeadersKey, request.Header).
-		Add(headersTypeKey, headersFromRequest)
+	tc := fields.AddScopeToContext(scope).
+		Add(pathPartsKey, strings.Split(strings.Trim(request.URL.Path, "/"), "/")). // remove any leading or trailing slashes
+		Add(queryParamsKey, request.URL.Query()).
+		Add(headersKey, request.Header)
 
-	// based on content type, and the absence of any "body" attributes use the proper marshaller to put the data into
-	// the new resource
-	fs, _ := fields.Get(resourceType)
-	if len(fs.GetFieldNamesUsingTool(BindBodyTool)) == 0 && request.Body != nil {
-		bodyBytes, _ := ioutil.ReadAll(request.Body)
+	bodyBytes, err := ioutil.ReadAll(request.Body) // TODO:p3 Support streaming rather than using []byte
+	if err != nil {
+		return nil, gomerr.Internal("Failed to read request body content").Wrap(err)
+	}
 
-		// TODO:p3 rather than use a switch, probably need a heuristic to determine the right type. Should also
-		//         allow applications to specify the expected content type(s) (incl heuristics) and unmarshaler(s)
-		switch request.Header.Get(contentTypeHeader) {
-		default:
-			if ge := JsonUnmarshal(bodyBytes, &r); ge != nil {
-				return nil, ge
+	if hasInBodyBinding[resourceType.Elem().String()] {
+		tc.Add(bodyBytesKey, bodyBytes)
+	} else {
+		unmarshaled := make(map[string]interface{})
+
+		if len(bodyBytes) > 0 {
+			// based on content type, and the absence of any "body" attributes use the proper marshaller to put the data into
+			// the new resource
+			// TODO:p3 Allow applications to provide alternative means to choose an unmarshaler
+			const contentTypeHeader = "Content-Type"
+			contentType := request.Header.Get(contentTypeHeader)
+			unmarshal, ok := PerContentTypeUnmarshalFunctions[contentType]
+			if !ok {
+				if DefaultUnmarshalFunction == nil {
+					return nil, gomerr.Unmarshal("Unsupported content-type", contentType, nil)
+				}
+				unmarshal = DefaultUnmarshalFunction
+			}
+
+			if err := unmarshal(bodyBytes, &unmarshaled); err != nil {
+				return nil, gomerr.Unmarshal("Unable to unmarshal data", bodyBytes, unmarshaled).AddAttribute("ContentType", contentType).Wrap(err)
 			}
 		}
-	} else {
-		tc.Add(BodyKey, request.Body)
+
+		tc.Add(unmarshaledMapKey, unmarshaled)
 	}
 
-	return r, r.ApplyTools(
-		fields.ToolWithContext{BindPathTool.Name(), tc},
-		fields.ToolWithContext{BindQueryParamTool.Name(), tc},
-		fields.ToolWithContext{BindHeaderTool.Name(), tc},
-		fields.ToolWithContext{BindBodyTool.Name(), tc},
-	)
+	applications := toApplications(BindFromRequestTools, tc)
+	tc.Add(toolsWithContextKey, applications)
+
+	return r, r.ApplyTools(applications...)
 }
 
-// Unmarshal parses the data and stores the result in the value pointed to by ptrToTarget. If ptrToTarget is nil or
-// not a pointer, Unmarshal returns a gomerr.Gomerr.
-type Unmarshal func(data []byte, ptrToTarget interface{}) gomerr.Gomerr
-
-func JsonUnmarshal(data []byte, target interface{}) gomerr.Gomerr {
-	if err := json.Unmarshal(data, target); err != nil {
-		return gomerr.Unmarshal("Problem with data", data, target).Wrap(err)
+func toApplications(bindTools []fields.FieldTool, tc fields.ToolContext) []fields.Application {
+	applications := make([]fields.Application, len(bindTools))
+	for i, tool := range bindTools {
+		applications[i] = fields.Application{tool.Name(), tc}
 	}
-	return nil
+	return applications
 }
 
-func BindToResponse(r resource.Resource, successStatus int, c *gin.Context) gomerr.Gomerr {
-	var ge gomerr.Gomerr
-	if coll, ok := r.(resource.Collection); ok {
-		ge = readableCollectionData(coll)
-	} else if inst, ok := r.(resource.Instance); ok {
-		ge = readableInstanceData(inst)
-	} else {
-		return gomerr.Unprocessable("Resource is neither a Collection nor Instance", reflect.TypeOf(r))
-	}
-	if ge != nil {
-		return ge
+func BindToResponse(r resource.Resource, successStatus int, c *gin.Context, scope string) (ge gomerr.Gomerr) {
+	if successStatus == http.StatusNoContent {
+		return nil
 	}
 
-	// TODO:p3 alternative output content types
-	c.Render(successStatus, render.IndentedJSON{Data: r})
+	tc := fields.AddScopeToContext(scope).Add(headersKey, c.Writer.Header())
 
-	return nil
-}
-
-func readableCollectionData(c resource.Collection) gomerr.Gomerr {
-	twc := fields.ToolWithContext{auth.FieldAccessTool.Name(), auth.AddClearIfDeniedToContext(c.Subject(), auth.ReadPermission)}
-
-	for _, item := range c.Items() {
-		if r, ok := item.(resource.Instance); ok {
-			ge := r.ApplyTools(twc) // remove if not cleared count == 0?
-			if ge != nil {
-				return ge
+	if hasOutBodyBinding[reflect.TypeOf(r).Elem().String()] {
+		defer func() {
+			if ge == nil {
+				c.Data(successStatus, "", tc[bodyBytesKey].([]byte))
 			}
-		}
+		}()
+	} else {
+		output := make(map[string]interface{})
+		defer func() {
+			if ge == nil {
+				// TODO:p3 alternative output content types
+				c.Render(successStatus, render.IndentedJSON{Data: output})
+			}
+		}()
+
+		tc.Add(unmarshaledMapKey, output)
 	}
 
-	ge := c.ApplyTools(twc)
-	if ge != nil {
+	if ge = r.ApplyTools(toApplications(BindToResponseTools, tc)...); ge != nil {
 		return ge
-	}
-
-	return nil
-}
-
-func readableInstanceData(i resource.Instance) gomerr.Gomerr {
-	tool := fields.ToolWithContext{auth.FieldAccessTool.Name(), auth.AddClearIfDeniedToContext(i.Subject(), auth.ReadPermission)}
-	ge := i.ApplyTools(tool)
-	if ge != nil {
-		return ge
-	}
-
-	if tool.Context[auth.NotClearedCount] == 0 {
-		return dataerr.PersistableNotFound(i.TypeName(), i.Id()).Wrap(ge)
 	}
 
 	return nil

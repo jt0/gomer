@@ -3,66 +3,41 @@ package fields
 import (
 	"reflect"
 
-	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 )
 
-var FieldDefaultTool = ScopingWrapper{FieldTool: fieldDefaultTool{}}
+var FieldDefaultTool = ScopingWrapper{fieldDefaultTool{}}
 
-// Either 'value' or 'function' will be set based on the provided input.
-type fieldDefaultTool struct {
-	value       string
-	function    func(structValue reflect.Value) interface{}
-	bypassIfSet bool
-}
+type fieldDefaultTool struct{}
 
 func (t fieldDefaultTool) Name() string {
 	return "fields.FieldDefaultTool"
 }
 
-func (t fieldDefaultTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (FieldToolApplier, gomerr.Gomerr) {
-	if input == nil {
+func (t fieldDefaultTool) New(_ reflect.Type, _ reflect.StructField, input interface{}) (Applier, gomerr.Gomerr) {
+	defaultString, ok := input.(string)
+	if !ok || defaultString == "" {
 		return nil, nil
 	}
 
-	fdt := fieldDefaultTool{}
-
-	defaultValueString := input.(string)
-	if len(defaultValueString) == 0 {
-		return fdt, nil
+	var testForZero bool
+	if defaultString[:1] == "?" {
+		testForZero = true
+		defaultString = defaultString[1:]
 	}
 
-	if defaultValueString[:1] == "?" {
-		fdt.bypassIfSet = true
-		defaultValueString = defaultValueString[1:]
-	}
-
-	if len(defaultValueString) > 0 && defaultValueString[:1] != "$" {
-		fdt.value = defaultValueString
-	} else if fn := GetFieldFunction(defaultValueString); fn != nil {
-		fdt.function = fn
+	var defaultApplier Applier
+	if defaultString[:1] == "=" {
+		defaultApplier = ValueApplier{defaultString[1:]}
+	} else if fn := GetFieldFunction(defaultString); fn != nil {
+		defaultApplier = FunctionApplier{fn}
 	} else {
-		fdt.value = defaultValueString
+		return nil, gomerr.Configuration("Unsure how to handle input").AddAttribute("Input", input.(string))
 	}
 
-	return fdt, nil
-}
-
-func (t fieldDefaultTool) Apply(structValue reflect.Value, fieldValue reflect.Value, _ ToolContext) gomerr.Gomerr {
-	if !fieldValue.IsValid() || (t.bypassIfSet && !fieldValue.IsZero()) {
-		return nil
+	if testForZero {
+		defaultApplier = ApplyAndTestApplier{NoopApplier{}, NonZero, defaultApplier}
 	}
 
-	var defaultValue interface{}
-	if t.function != nil {
-		defaultValue = t.function(structValue)
-	} else {
-		defaultValue = t.value
-	}
-
-	if ge := flect.SetValue(fieldValue, defaultValue); ge != nil {
-		return gomerr.Configuration("Unable to set field to default value").AddAttribute("Value", defaultValue).Wrap(ge)
-	}
-
-	return nil
+	return defaultApplier, nil
 }

@@ -9,10 +9,10 @@ import (
 
 var tagToFieldToolMap = map[string]FieldTool{}
 
-// TagToFieldToolAssociations accepts a set of mappings for struct tag keys to map to a FieldTool to apply at various
-// points of a struct's lifecycle. These are additive to others tag/tools that may have been added. To remove a mapping,
-// provide a nil value for the corresponding key when calling this function.
-func TagToFieldToolAssociations(associations map[string]FieldTool) {
+// StructTagToFieldTools accepts a set of mappings for struct tag keys to map to a FieldTool to apply at various
+// points of a struct's lifecycle. These are additive to other entries that may have been provided. To remove a
+// mapping, provide a nil Value for the corresponding key when calling this Function.
+func StructTagToFieldTools(associations map[string]FieldTool) {
 	for k, v := range associations {
 		if v == nil {
 			delete(tagToFieldToolMap, k)
@@ -22,23 +22,17 @@ func TagToFieldToolAssociations(associations map[string]FieldTool) {
 	}
 }
 
-var typeToFields = map[reflect.Type]Fields{}
+var typeToFields = map[string]Fields{}
 
 func Get(structType reflect.Type) (Fields, gomerr.Gomerr) {
-	fields, ok := typeToFields[structType]
-	if !ok {
-		var ge gomerr.Gomerr
-		if fields, ge = process(structType); ge != nil {
-			return nil, ge
-		}
-
-		typeToFields[structType] = fields
+	if fields, ok := typeToFields[structType.Name()]; ok {
+		return fields, nil
 	}
 
-	return fields, nil
+	return Process(structType)
 }
 
-func process(structType reflect.Type) (Fields, gomerr.Gomerr) {
+func Process(structType reflect.Type) (Fields, gomerr.Gomerr) {
 	if structType.Kind() != reflect.Struct {
 		return nil, gomerr.Configuration("Input's kind is not a struct. Do you need to call Elem()?").AddAttribute("Kind", structType.Kind().String())
 	}
@@ -48,6 +42,8 @@ func process(structType reflect.Type) (Fields, gomerr.Gomerr) {
 		return nil, gomerr.Configuration("Failed to process Fields for " + structType.Name()).Wrap(gomerr.Batcher(errors))
 	}
 
+	typeToFields[structType.Name()] = fields
+
 	return fields, nil
 }
 
@@ -56,7 +52,7 @@ type Fields map[string][]field // key = toolName, value = list of fields that ar
 type field struct {
 	structFieldName        string
 	fullyQualifiedLocation string
-	appliersByName         map[string]FieldToolApplier
+	appliersByName         map[string]Applier
 }
 
 func processStruct(structType reflect.Type, path string, tagKeyToFieldTool map[string]FieldTool) (Fields, []gomerr.Gomerr) {
@@ -69,15 +65,8 @@ func processStruct(structType reflect.Type, path string, tagKeyToFieldTool map[s
 			continue
 		}
 
-		if structField.Type.Kind() == reflect.Struct {
-			var subFields Fields
-			var subErrors []gomerr.Gomerr
-			if structField.Anonymous {
-				subFields, subErrors = processStruct(structField.Type, path+structField.Name+"+", tagKeyToFieldTool)
-			} else {
-				subFields, subErrors = processStruct(structField.Type, path+structField.Name+".", tagKeyToFieldTool)
-			}
-
+		if structField.Type.Kind() == reflect.Struct && structField.Anonymous {
+			subFields, subErrors := processStruct(structField.Type, path+structField.Name+"+", tagKeyToFieldTool)
 			for tool, sub := range subFields {
 				fields[tool] = append(fields[tool], sub...)
 			}
@@ -88,7 +77,7 @@ func processStruct(structType reflect.Type, path string, tagKeyToFieldTool map[s
 			continue
 		}
 
-		appliersByName := make(map[string]FieldToolApplier)
+		appliersByName := make(map[string]Applier)
 		for tagKey, toolType := range tagKeyToFieldTool {
 			var newInput interface{}
 			if tagValue, ok := structField.Tag.Lookup(tagKey); ok {
@@ -118,25 +107,20 @@ func processStruct(structType reflect.Type, path string, tagKeyToFieldTool map[s
 	return fields, errors
 }
 
-type ToolWithContext struct {
-	TypeName string
+type Application struct {
+	ToolName string
 	Context  ToolContext
 }
 
-// ApplyTools will apply the tool associated with each tool type in the appliers slice in order to each field
-// in the struct.
-func (fs Fields) ApplyTools(sv reflect.Value, toolWithContexts ...ToolWithContext) gomerr.Gomerr {
-	if sv.Kind() != reflect.Struct {
-		return gomerr.Unprocessable("Not a struct type", sv.Interface())
-	}
-
+// ApplyTools will apply the tool associated with each tool type in the appliers slice, in order, to each value in sv.
+func (fs Fields) ApplyTools(sv reflect.Value, applications ...Application) gomerr.Gomerr {
 	var errors = make([]gomerr.Gomerr, 0)
-	for _, toolWithContext := range toolWithContexts {
-		for _, usesTool := range fs[toolWithContext.TypeName] {
-			fv := sv.FieldByName(usesTool.structFieldName)               // fv should always be valid
-			tool, _ := usesTool.appliersByName[toolWithContext.TypeName] // tool should always be found
+	for _, application := range applications {
+		for _, usesTool := range fs[application.ToolName] {
+			fv := sv.FieldByName(usesTool.structFieldName)           // fv should always be valid
+			tool, _ := usesTool.appliersByName[application.ToolName] // tool should always be found
 
-			if ge := tool.Apply(sv, fv, toolWithContext.Context); ge != nil {
+			if ge := tool.Apply(sv, fv, application.Context); ge != nil {
 				errors = append(errors, ge.AddAttribute("Field", usesTool.structFieldName))
 			}
 		}

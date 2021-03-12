@@ -3,94 +3,108 @@ package id
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/jt0/gomer/fields"
-	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 )
 
 //goland:noinspection GoNameStartsWithPackageName
-var IdFieldTool = fields.ScopingWrapper{FieldTool: idFieldTool{}}
+var IdFieldTool = idFieldTool{}
 
-type idFieldTool struct {
-	idFunction func(structValue reflect.Value) interface{}
-}
+type idFieldTool struct{}
 
 func (t idFieldTool) Name() string {
 	return "id.IdFieldTool"
 }
 
-// TODO: need to consider what to use for the id of a singleton resource w/o an obvious value (e.g. a '/configuration'
-//       resource that nonetheless supports GET and PUT operations and may need to redact info)
-func (t idFieldTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldToolApplier, gomerr.Gomerr) {
-	if input == nil {
+const SourceValue = "$_source_value"
+
+// Should be ordered in decreasing specificity.
+func (t idFieldTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
+	idFields, ok := input.(string)
+	if !ok {
 		return nil, nil
 	}
 
-	if idf, ok := idFieldForStruct[structType]; ok && !reflect.DeepEqual(idf, structField) {
-		return nil, gomerr.Configuration("Can't mark '" + structField.Name + "'as an id field because it conflicts with '" + idf.Name + "'")
-	}
-	idFieldForStruct[structType] = structField
-
-	if fnName, ok := input.(string); !ok || fnName != "" && fnName[0] != '$' && fnName != "$" {
-		return nil, gomerr.Configuration("Invalid Id function. Must start with a '$'.").AddAttribute("Field", structField.Name)
-	} else if fnName == "" {
-		// If there's no idFunction, the presumption is the application will handle setting the value itself. Treat as a no-op
-		return noopIdFieldTool, nil
+	if sa, exists := structIdFields[structType]; exists {
+		return nil, gomerr.Configuration("Already have an id attribute specified for this struct: " + sa.idFields[0])
 	}
 
-	idFunction := fields.GetFieldFunction(input.(string))
-	if idFunction == nil {
-		return nil, gomerr.Configuration("Id function not found").AddAttributes("Field", structField.Name, "Function", idFunction)
+	applier := idFieldApplier{hidden: make(map[string]bool)}
+	structIdFields[structType] = &applier
+
+	for _, idField := range strings.Split(idFields, ",") {
+		idField = strings.TrimSpace(idField)
+		if idField == "" {
+			continue
+		}
+		if idField[0] == '~' {
+			applier.hidden[idField] = true
+			idField = idField[1:]
+		}
+		applier.idFields = append(applier.idFields, idField)
 	}
 
-	return idFieldTool{idFunction}, nil
+	switch len(applier.idFields) {
+	case 0:
+		applier.idFields = append([]string{structField.Name}, applier.idFields...)
+	default:
+		if applier.idFields[0] != structField.Name {
+			applier.idFields = append([]string{structField.Name}, applier.idFields...)
+		}
+	}
+
+	return applier, nil
 }
 
-func (t idFieldTool) Apply(structValue reflect.Value, fieldValue reflect.Value, _ fields.ToolContext) gomerr.Gomerr {
-	if t.idFunction == nil {
+type idFieldApplier struct {
+	idFields []string
+	hidden   map[string]bool
+}
+
+func (a idFieldApplier) Apply(structValue reflect.Value, _ reflect.Value, toolContext fields.ToolContext) gomerr.Gomerr {
+	source, ok := toolContext[SourceValue].(reflect.Value)
+	if !ok {
 		return nil
 	}
 
-	if !fieldValue.IsValid() || !fieldValue.CanSet() {
-		return gomerr.Unprocessable("Field is not assignable", fieldValue)
-	}
-
-	defaultValue := t.idFunction(structValue)
-	if ge := flect.SetValue(fieldValue, defaultValue); ge != nil {
-		return gomerr.Unprocessable("Unable to set field to default value", defaultValue).Wrap(ge)
+	for _, idField := range a.idFields {
+		svf := structValue.FieldByName(idField)
+		if !svf.IsValid() || !svf.CanSet() {
+			return gomerr.Unprocessable("Field is invalid: ", idField)
+		}
+		svf.Set(source.FieldByName(idField))
 	}
 
 	return nil
 }
 
-var (
-	idFieldForStruct = make(map[reflect.Type]reflect.StructField)
-	noopIdFieldTool  = idFieldTool{}
-)
+var structIdFields = make(map[reflect.Type]*idFieldApplier)
 
-// NB: see to do above to consider how singleton resources should present an 'id'
 func Id(structValue reflect.Value) (string, gomerr.Gomerr) {
-	sf, ok := idFieldForStruct[structValue.Type()]
+	idfa, ok := structIdFields[structValue.Type()]
 	if !ok {
-		return "", gomerr.Unprocessable("Provided value is not a recognized type. Was NewFields() called on it and"+
-			" does it have a marked 'id' field?", structValue.Type())
+		return "", gomerr.Unprocessable(
+			"Provided value is not a recognized type. Was NewFields() called on it and does it have a marked 'id' field?",
+			structValue.Type())
 	}
 
-	fv := structValue.FieldByName(sf.Name)
+	fv := structValue.FieldByName(idfa.idFields[0])
 	if !fv.IsValid() {
-		return "", gomerr.Unprocessable("Provided struct's 'id' field is not valid", sf.Name)
+		return "", gomerr.Unprocessable("Provided struct's 'id' field is not valid", idfa.idFields[0])
 	}
 
-	id, ok := fv.Interface().(string)
-	if !ok {
-		stringer, ok := fv.Interface().(fmt.Stringer)
-		if !ok {
-			return "", gomerr.Unprocessable("Id value does not provide a string representation", fv.Interface())
-		}
-
-		id = stringer.String()
+	if idfa.hidden[idfa.idFields[0]] {
+		return "**********", nil
 	}
 
-	return id, nil
+	switch t := fv.Interface().(type) {
+	case string:
+		return t, nil
+	case fmt.Stringer:
+		return t.String(), nil
+	default:
+		return "", gomerr.Unprocessable("Id value does not provide a string representation", t)
+	}
 }

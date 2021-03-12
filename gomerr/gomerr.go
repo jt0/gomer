@@ -13,6 +13,7 @@ import (
 
 type Gomerr interface {
 	Wrap(err error) Gomerr
+	Attribute(key string) (value interface{}, ok bool)
 	AddAttribute(key string, value interface{}) Gomerr
 	AddAttributes(keysAndValues ...interface{}) Gomerr
 	WithAttributes(attributes map[string]interface{}) Gomerr
@@ -130,6 +131,11 @@ func (g *gomerr) Wrap(err error) Gomerr {
 	return g.self
 }
 
+func (g *gomerr) Attribute(key string) (value interface{}, ok bool) {
+	value, ok = g.attributes[key]
+	return
+}
+
 func (g *gomerr) AddAttribute(key string, value interface{}) Gomerr {
 	// XXX newGomerr? (or maybe we can just always add to g itself)
 	// gw := newGomerr(2, g.self) // wrap first to get line/file info
@@ -243,7 +249,7 @@ func (g *gomerr) ToMap() map[string]interface{} {
 	}
 
 	m["_Gomerr"] = util.UnqualifiedTypeName(g.self)
-	m["_Stack"] = g.stack //  XXX: make sure not repeated...maybe remove overlapping parts from child...
+	m["_Stack"] = g.stack // TODO:p2 avoid repeated entries when wrapped
 
 	if g.attributes != nil && len(g.attributes) > 0 {
 		m["_Attributes"] = g.attributes
@@ -274,12 +280,3 @@ func (g *gomerr) String() string {
 		return string(bytes)
 	}
 }
-
-//func (g *gomerr) Retryable(retryable bool) Gomerr {
-//	g.retryable = retryable
-//	return g
-//}
-
-//func (g *gomerr) IsRetryable() bool {
-//	return g.retryable
-//}

@@ -34,16 +34,16 @@ var successStatusCodes = map[Op]int{
 	OptionsInstance:   http.StatusOK,
 }
 
-var crudqActions = map[interface{}]func() resource.Action{
+var crudlActions = map[interface{}]func() resource.Action{
 	PostCollection: resource.CreateAction,
 	GetInstance:    resource.ReadAction,
 	PatchInstance:  resource.UpdateAction,
 	DeleteInstance: resource.DeleteAction,
-	GetCollection:  resource.QueryAction,
+	GetCollection:  resource.ListAction,
 }
 
-func CrudqActions() map[interface{}]func() resource.Action {
-	return crudqActions // returns a copy
+func CrudlActions() map[interface{}]func() resource.Action {
+	return crudlActions // returns a copy
 }
 
 var noActions = map[interface{}]func() resource.Action{}
@@ -112,21 +112,12 @@ func typeName(t reflect.Type) string {
 
 func handler(resourceType reflect.Type, actionFunc func() resource.Action, successStatus int) func(c *gin.Context) {
 	return func(c *gin.Context) {
-		var ge gomerr.Gomerr
-		defer func() {
-			if ge != nil {
-				_ = c.Error(ge)
-			} else if r := recover(); r != nil {
-				_ = c.Error(gomerr.Panic(r))
-			}
-		}()
-
 		action := actionFunc()
-		if inResource, ge := BindFromRequest(c.Request, resourceType, Subject(c)); ge != nil {
+		if inResource, ge := BindFromRequest(c.Request, resourceType, Subject(c), action.Name()); ge != nil {
 			_ = c.Error(ge)
 		} else if outResource, ge := inResource.DoAction(action); ge != nil {
 			_ = c.Error(ge)
-		} else if ge = BindToResponse(outResource, successStatus, c); ge != nil {
+		} else if ge = BindToResponse(outResource, successStatus, c, action.Name()); ge != nil {
 			_ = c.Error(ge)
 		}
 	}

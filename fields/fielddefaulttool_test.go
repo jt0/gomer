@@ -10,8 +10,8 @@ import (
 
 type DefaultTest struct {
 	StringWithDefaultFunction string `default:"$color"`
-	StringWithDefaultValue    string `default:"123"`
-	IntWithDefaultValue       int    `default:"123"`
+	StringWithDefaultValue    string `default:"=123"`
+	IntWithDefaultValue       int    `default:"=123"`
 }
 
 const orange = "orange"
@@ -23,7 +23,7 @@ func init() {
 		},
 	})
 
-	fields.TagToFieldToolAssociations(map[string]fields.FieldTool{"default": fields.FieldDefaultTool})
+	fields.StructTagToFieldTools(map[string]fields.FieldTool{"default": fields.FieldDefaultTool})
 }
 
 func TestDefaultTool(t *testing.T) {

@@ -20,7 +20,9 @@ func SetValue(target reflect.Value, value interface{}) gomerr.Gomerr {
 	// This handles non-string FieldDefaultFunction results and default strings
 	if valueValue.Type().AssignableTo(targetType) {
 		target.Set(valueValue)
-
+		return nil
+	} else if valueValue.Type().ConvertibleTo(targetType) {
+		target.Set(valueValue.Convert(targetType))
 		return nil
 	}
 
@@ -118,13 +120,20 @@ func SetValue(target reflect.Value, value interface{}) gomerr.Gomerr {
 	}
 
 	typedValue := reflect.ValueOf(typed)
+	typedValueType := typedValue.Type()
 	if target.Kind() == reflect.Ptr {
-		p := reflect.New(typedValue.Type())
+		p := reflect.New(typedValueType)
 		p.Elem().Set(typedValue)
 		typedValue = p
 	}
 
-	target.Set(typedValue)
+	if typedValueType.AssignableTo(targetType) {
+		target.Set(typedValue)
+		return nil
+	} else if typedValueType.ConvertibleTo(targetType) {
+		target.Set(typedValue.Convert(targetType))
+		return nil
+	}
 
-	return nil
+	return gomerr.Unprocessable("Unable to set value to '"+targetType.Name()+"'", typedValue)
 }

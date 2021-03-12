@@ -8,6 +8,7 @@ import (
 	"github.com/jt0/gomer/data/dataerr"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/id"
 	"github.com/jt0/gomer/limit"
 )
 
@@ -166,13 +167,17 @@ func (a *updateAction) Pre(update Resource) gomerr.Gomerr {
 		return gomerr.Unprocessable("Type does not implement resource.Updatable", update)
 	}
 
-	tool := fields.ToolWithContext{auth.FieldAccessTool.Name(), auth.AddCopyProvidedToContext(reflect.ValueOf(update).Elem())}
-	if ge := current.ApplyTools(tool); ge != nil {
+	// Get the id fields from the update
+	application := fields.Application{
+		id.IdFieldTool.Name(),
+		fields.EnsureContext().Add(id.SourceValue, reflect.ValueOf(update).Elem()),
+	}
+	if ge = current.ApplyTools(application); ge != nil {
 		return ge
 	}
 
-	// Populate other fields with data uv the underlying store
-	if ge := current.metadata().dataStore.Read(current); ge != nil {
+	// Populate other fields with data from the underlying store
+	if ge = current.metadata().dataStore.Read(current); ge != nil {
 		return ge
 	}
 
@@ -260,67 +265,60 @@ func (*deleteAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 	return convertPersistableNotFoundIfApplicable(r.(Deletable), ge)
 }
 
-type Queryable interface {
+type Listable interface {
 	Collection
-	PreQuery() gomerr.Gomerr
-	PostQuery() gomerr.Gomerr
+	PreList() gomerr.Gomerr
+	PostList() gomerr.Gomerr
 }
 
 type Collectible interface {
 	OnCollect(Resource) gomerr.Gomerr
 }
 
-type OnQueryFailer interface {
-	OnQueryFailure(gomerr.Gomerr) gomerr.Gomerr
+type OnListFailer interface {
+	OnListFailure(gomerr.Gomerr) gomerr.Gomerr
 }
 
-func QueryAction() Action {
-	return queryAction{}
+func ListAction() Action {
+	return listAction{}
 }
 
-type queryAction struct{}
+type listAction struct{}
 
-func (queryAction) Name() string {
-	return "resource.QueryAction"
+func (listAction) Name() string {
+	return "resource.ListAction"
 }
 
-func (queryAction) AppliesToCategory() Category {
+func (listAction) AppliesToCategory() Category {
 	return CollectionCategory
 }
 
-func (queryAction) FieldAccessPermissions() auth.AccessPermissions {
+func (listAction) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.WritePermissions // 'Write' because we're creating a query, not creating a resource per se
 }
 
-func (queryAction) Pre(r Resource) gomerr.Gomerr {
-	queryable, ok := r.(Queryable)
+func (listAction) Pre(r Resource) gomerr.Gomerr {
+	listable, ok := r.(Listable)
 	if !ok {
-		return gomerr.Unprocessable("Type does not implement resource.Queryable", r)
+		return gomerr.Unprocessable("Type does not implement resource.Listable", r)
 	}
 
-	return queryable.PreQuery()
+	return listable.PreList()
 }
 
-func (queryAction) Do(r Resource) (ge gomerr.Gomerr) {
-	if ge := r.metadata().dataStore.Query(r.(Queryable)); ge != nil {
+func (listAction) Do(r Resource) gomerr.Gomerr {
+	if ge := r.metadata().dataStore.Query(r.(Listable)); ge != nil {
 		return ge
 	}
 
-	tc := fields.EnsureContext()
-	for _, elem := range r.(Queryable).Items() {
+	for _, elem := range r.(Listable).Items() {
 		item := elem.(Resource)
 		item.setSelf(item)
 		item.setMetadata(r.metadata())
 		item.setSubject(r.Subject())
 
-		tool := fields.ToolWithContext{auth.FieldAccessTool.Name(), auth.AddCopyProvidedToContext(reflect.ValueOf(r).Elem(), tc)}
-		if ge := item.ApplyTools(tool); ge != nil {
-			return ge
-		}
-
 		if collectible, ok := item.(Collectible); ok {
-			ge := collectible.OnCollect(r)
-			if ge != nil {
+			if ge := collectible.OnCollect(r); ge != nil {
 				return ge
 			}
 		}
@@ -329,13 +327,13 @@ func (queryAction) Do(r Resource) (ge gomerr.Gomerr) {
 	return nil
 }
 
-func (queryAction) OnDoSuccess(r Resource) (Resource, gomerr.Gomerr) {
-	return r, r.(Queryable).PostQuery()
+func (listAction) OnDoSuccess(r Resource) (Resource, gomerr.Gomerr) {
+	return r, r.(Listable).PostList()
 }
 
-func (queryAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
-	if failer, ok := r.(OnQueryFailer); ok {
-		return failer.OnQueryFailure(ge)
+func (listAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
+	if failer, ok := r.(OnListFailer); ok {
+		return failer.OnListFailure(ge)
 	}
 
 	return ge

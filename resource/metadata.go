@@ -3,25 +3,13 @@ package resource
 import (
 	"reflect"
 
-	"github.com/jt0/gomer/auth"
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/id"
 	"github.com/jt0/gomer/util"
 )
 
 func init() {
-	// These are the default tag keys for these tools, but an application can set different key values if they'd like or
-	// add new entries to the map so long as they do it before invoking Register().
-	fields.TagToFieldToolAssociations(map[string]fields.FieldTool{
-		"access":   auth.FieldAccessTool,
-		"default":  fields.FieldDefaultTool,
-		"id":       id.IdFieldTool,
-		"validate": constraint.FieldValidationTool,
-	})
-
 	// This defines a subset of default values that map to the provided Action types assoc. An application can add
 	// alternative keys that map to these same action names if they prefer something different. To clear out these
 	// values in lieu of alternatives (or to not have any aliases), call fields.ResetScopeAliases().
@@ -30,7 +18,7 @@ func init() {
 		"read":   {ReadAction().Name()},
 		"update": {UpdateAction().Name()},
 		"delete": {DeleteAction().Name()},
-		"query":  {QueryAction().Name()},
+		"list":   {ListAction().Name()},
 	})
 }
 
@@ -51,11 +39,10 @@ func Register(instance Instance, collection Collection, actions map[interface{}]
 	if md != nil {
 		return md, nil
 	}
-	defer func() {
-		if ge == nil {
-			resourceTypeToMetadata[it] = md
-		}
-	}()
+	_, ge = fields.Process(it.Elem())
+	if ge != nil {
+		return nil, ge
+	}
 
 	if actions == nil {
 		return nil, gomerr.Configuration("Must register with a non-nil Actions")
@@ -64,11 +51,10 @@ func Register(instance Instance, collection Collection, actions map[interface{}]
 	var ct reflect.Type
 	if collection != nil {
 		ct = reflect.TypeOf(collection)
-		defer func() {
-			if ge == nil {
-				resourceTypeToMetadata[ct] = md
-			}
-		}()
+		_, ge = fields.Process(ct.Elem())
+		if ge != nil {
+			return nil, ge
+		}
 	}
 
 	nilSafeParentMetadata, _ := parentMetadata.(*metadata)
@@ -86,6 +72,11 @@ func Register(instance Instance, collection Collection, actions map[interface{}]
 
 	if nilSafeParentMetadata != nil {
 		nilSafeParentMetadata.children = append(nilSafeParentMetadata.children, md)
+	}
+
+	resourceTypeToMetadata[it] = md
+	if ct != nil {
+		resourceTypeToMetadata[ct] = md
 	}
 
 	return md, nil

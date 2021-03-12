@@ -4,17 +4,15 @@ import (
 	"reflect"
 
 	"github.com/jt0/gomer/auth"
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/id"
 )
 
 type Resource interface {
 	Metadata() Metadata
 	Subject() auth.Subject
 	DoAction(Action) (Resource, gomerr.Gomerr)
-	ApplyTools(tools ...fields.ToolWithContext) gomerr.Gomerr
+	ApplyTools(tools ...fields.Application) gomerr.Gomerr
 
 	setSelf(Resource)
 	metadata() *metadata
@@ -68,10 +66,6 @@ func (b *BaseResource) Subject() auth.Subject {
 }
 
 func (b *BaseResource) DoAction(action Action) (Resource, gomerr.Gomerr) {
-	if ge := b.prepareAndValidateFields(action); ge != nil {
-		return nil, ge
-	}
-
 	if ge := action.Pre(b.self); ge != nil {
 		return nil, ge
 	}
@@ -83,19 +77,14 @@ func (b *BaseResource) DoAction(action Action) (Resource, gomerr.Gomerr) {
 	return action.OnDoSuccess(b.self)
 }
 
-func (b *BaseResource) prepareAndValidateFields(action Action) gomerr.Gomerr {
-	tc := fields.AddScopeToContext(action.Name())
-	if action.FieldAccessPermissions()&auth.WritePermissions != 0 {
-		tc = auth.AddClearIfDeniedToContext(b.self.Subject(), action.FieldAccessPermissions(), tc)
+func (b *BaseResource) ApplyTools(tools ...fields.Application) gomerr.Gomerr {
+	selfValue := reflect.ValueOf(b.self).Elem()
+	fs, ge := fields.Get(selfValue.Type())
+	if ge != nil {
+		return ge
 	}
 
-	// Sometimes one might want different tool contexts for different tools, but in this case we can use the same one.
-	return b.self.ApplyTools(
-		fields.ToolWithContext{auth.FieldAccessTool.Name(), tc},
-		fields.ToolWithContext{fields.FieldDefaultTool.Name(), tc},
-		fields.ToolWithContext{id.IdFieldTool.Name(), tc},
-		fields.ToolWithContext{constraint.FieldValidationTool.Name(), tc},
-	)
+	return fs.ApplyTools(selfValue, tools...)
 }
 
 func (b *BaseResource) metadata() *metadata {

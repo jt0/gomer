@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/jt0/gomer/auth"
-	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
 )
@@ -73,15 +71,8 @@ func applyLimitAction(limitAction limitAction, i Resource) (limit.Limiter, gomer
 		li.setMetadata(metadata)
 		li.setSubject(i.Subject())
 
-		// Only works if the limiter has provided attributes that overlap with what the limiter needs. If any are
-		// missing, it will need to be populated by the Limited
-		tool := fields.ToolWithContext{auth.FieldAccessTool.Name(), auth.AddCopyProvidedToContext(reflect.ValueOf(i).Elem())}
-		if ge := li.ApplyTools(tool); ge != nil {
-			return nil, ge
-		}
-
 		// TODO: cache in case needed by more than one resource...
-		if ge := li.metadata().dataStore.Read(li); ge != nil {
+		if ge = li.metadata().dataStore.Read(li); ge != nil {
 			return nil, ge
 		}
 

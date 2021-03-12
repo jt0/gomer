@@ -19,8 +19,8 @@ const ScopeKey = "$_scope"
 
 var scopeAliases = make(map[string][]string)
 
-// AddScopeAliases allows the caller to define one or more values that may be used as the ScopeKey value when a
-// ToolContext is being populated. The alias values, along with the value passed in during a call to New(), will map
+// AddScopeAliases allows the caller to define one or more values that may be used as the ScopeKey Value when a
+// ToolContext is being populated. The alias values, along with the Value passed in during a call to New(), will map
 // to the same FieldTool definition. Note that scope aliases need to be set up before a struct's fields are
 // processed.
 func AddScopeAliases(scopesToAliases map[string][]string) {
@@ -42,13 +42,13 @@ func (w ScopingWrapper) Name() string {
 	return w.FieldTool.Name()
 }
 
-var scopeRegexp = regexp.MustCompile("(?:([^;:]*):)?([^;]*);?")
+var scopeRegexp = regexp.MustCompile("(?:([^;:]*):)?([^;]*)")
 
 const anyScope = "*"
 
 // Generics will make this better, but for now, we assume input is a string
-func (w ScopingWrapper) New(structType reflect.Type, structField reflect.StructField, input interface{}) (FieldToolApplier, gomerr.Gomerr) {
-	scopedAppliers := make(map[string]FieldToolApplier)
+func (w ScopingWrapper) New(structType reflect.Type, structField reflect.StructField, input interface{}) (Applier, gomerr.Gomerr) {
+	scopedAppliers := make(map[string]Applier)
 	inputString, ok := input.(string)
 	if !ok {
 		inputString = ""
@@ -94,7 +94,7 @@ func (w ScopingWrapper) New(structType reflect.Type, structField reflect.StructF
 }
 
 type scopingApplier struct {
-	scopedAppliers map[string]FieldToolApplier
+	scopedAppliers map[string]Applier
 }
 
 func (a scopingApplier) Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) gomerr.Gomerr {

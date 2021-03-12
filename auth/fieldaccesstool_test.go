@@ -34,9 +34,7 @@ var (
 )
 
 func init() {
-	fields.TagToFieldToolAssociations(map[string]fields.FieldTool{
-		"access": auth.FieldAccessTool,
-	})
+	fields.StructTagToFieldTools(map[string]fields.FieldTool{"access": auth.FieldAccessTool})
 
 	auth.RegisterFieldAccessPrincipals(one, two)
 }

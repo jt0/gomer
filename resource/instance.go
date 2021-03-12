@@ -4,7 +4,6 @@ import (
 	"reflect"
 
 	"github.com/jt0/gomer/data"
-	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/id"
 )
@@ -91,17 +90,4 @@ func (*BaseInstance) PreDelete() gomerr.Gomerr {
 
 func (*BaseInstance) PostDelete() gomerr.Gomerr {
 	return nil
-}
-
-func (*BaseInstance) PostQuery() gomerr.Gomerr {
-	return nil
-}
-
-func (i *BaseInstance) ApplyTools(tools ...fields.ToolWithContext) gomerr.Gomerr {
-	fs, ge := fields.Get(i.md.instanceType.Elem())
-	if ge != nil {
-		return ge
-	}
-
-	return fs.ApplyTools(reflect.ValueOf(i.self).Elem(), tools...)
 }

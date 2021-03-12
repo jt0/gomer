@@ -58,7 +58,7 @@ func (t fieldAccessTool) Name() string {
 	return "auth.FieldAccessTool"
 }
 
-func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, input interface{}) (fields.FieldToolApplier, gomerr.Gomerr) {
+func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	perPrincipalPermissions := input.([]map[string]string)
 	ppPermissionsCount := len(perPrincipalPermissions)
 
