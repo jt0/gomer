@@ -38,13 +38,14 @@ func (b bindInTool) New(structType reflect.Type, structField reflect.StructField
 		return nil, gomerr.Configuration("Expected input to be a string directive").AddAttribute("Input", input)
 	}
 
-	if directive == IgnoreFieldBindingDirective { // Ignore the field if the directive
+	//goland:noinspection GoBoolExpressions
+	if directive == SkipFieldDirective || directive == "" && EmptyDirectiveHandling == SkipField {
 		return nil, nil
 	}
 
 	if qIndex := strings.LastIndexByte(directive, '?'); qIndex != -1 {
 		leftDirective := directive[:qIndex]
-		if leftDirective == PayloadBindingPrefix+ImplicitFieldNameDirective {
+		if leftDirective == PayloadBindingPrefix+BindToFieldNameDirective {
 			leftDirective = PayloadBindingPrefix + structField.Name
 		}
 
@@ -54,7 +55,7 @@ func (b bindInTool) New(structType reflect.Type, structField reflect.StructField
 		return fields.ApplyAndTestApplier{applier, fields.NonZero, ifZero}, nil
 	}
 
-	if directive == PayloadBindingPrefix+ImplicitFieldNameDirective {
+	if directive == PayloadBindingPrefix+BindToFieldNameDirective {
 		return bindUnmarshaledApplier{structField.Name}, nil
 	} else if firstChar := directive[0]; firstChar == '=' {
 		return fields.ValueApplier{directive[1:]}, nil // don't include the '='
@@ -72,13 +73,13 @@ func (b bindInTool) New(structType reflect.Type, structField reflect.StructField
 		return bindPathApplier{index}, nil
 	} else if strings.HasPrefix(directive, QueryParamBindingPrefix) {
 		queryParamName := directive[len(QueryParamBindingPrefix):]
-		if queryParamName == ImplicitFieldNameDirective {
+		if queryParamName == BindToFieldNameDirective {
 			queryParamName = structField.Name
 		}
 		return bindQueryParamApplier{queryParamName}, nil
 	} else if strings.HasPrefix(directive, HeaderBindingPrefix) {
 		headerName := directive[len(HeaderBindingPrefix):]
-		if headerName == ImplicitFieldNameDirective {
+		if headerName == BindToFieldNameDirective {
 			headerName = structField.Name
 		}
 		return bindRequestHeaderApplier{headerName}, nil

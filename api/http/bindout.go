@@ -42,7 +42,8 @@ func (b bindOutTool) New(structType reflect.Type, structField reflect.StructFiel
 		return nil, gomerr.Configuration("Expected a string directive").AddAttribute("Input", input)
 	}
 
-	if directive == IgnoreFieldBindingDirective {
+	//goland:noinspection GoBoolExpressions
+	if directive == SkipFieldDirective || directive == "" && EmptyDirectiveHandling == SkipField {
 		return nil, nil
 	}
 
@@ -63,7 +64,7 @@ func (b bindOutTool) New(structType reflect.Type, structField reflect.StructFiel
 
 	if qIndex := strings.LastIndexByte(directive, '?'); qIndex != -1 {
 		leftDirective := directive[:qIndex]
-		if leftDirective == PayloadBindingPrefix+ImplicitFieldNameDirective {
+		if leftDirective == PayloadBindingPrefix+BindToFieldNameDirective {
 			leftDirective = PayloadBindingPrefix + structField.Name
 		}
 
@@ -74,7 +75,7 @@ func (b bindOutTool) New(structType reflect.Type, structField reflect.StructFiel
 		return fields.ApplyAndTestApplier{applier, func(reflect.Value) bool { return false }, ifNotValid}, nil
 	}
 
-	if directive == PayloadBindingPrefix+ImplicitFieldNameDirective {
+	if directive == PayloadBindingPrefix+BindToFieldNameDirective {
 		return bindToMapApplier{structField.Name, omitEmpty, structField.Type.Kind() == reflect.Ptr}, nil
 	} else if firstChar := directive[:1]; firstChar == "=" {
 		return fields.ValueApplier{directive[1:]}, nil // don't include the '='
@@ -86,7 +87,7 @@ func (b bindOutTool) New(structType reflect.Type, structField reflect.StructFiel
 		return fields.FunctionApplier{fn}, nil
 	} else if strings.HasPrefix(directive, HeaderBindingPrefix) {
 		headerName := directive[len(HeaderBindingPrefix):]
-		if headerName == ImplicitFieldNameDirective {
+		if headerName == BindToFieldNameDirective {
 			headerName = structField.Name
 		}
 		return bindResponseHeaderApplier{headerName}, nil

@@ -49,20 +49,30 @@ var (
 		BindOutTool,
 	}
 
-	// Default prefixes for non-payload bindings
+	// Default prefixes for qualified directives
 	PathBindingPrefix       = "path."
 	HeaderBindingPrefix     = "header."
 	QueryParamBindingPrefix = "query."
 	PayloadBindingPrefix    = ""
 
-	// Default directives
-	BodyBindingDirective        = "body"
-	IgnoreFieldBindingDirective = ""  // If not explicitly specified, the field will be ignored during input/output.
-	ImplicitFieldNameDirective  = "+" //
+	// Default values for unqualified directives
+	SkipFieldDirective       = "-"
+	BindToFieldNameDirective = "+"
+	BodyBindingDirective     = "body"
+
+	// Defines how a field's binding be handled if no directive is specified. Default is to skip.
+	EmptyDirectiveHandling = SkipField
 
 	// NB: If one scope defines a body binding, no other scope can try to access marshaled/unmarshaled data
 	hasInBodyBinding  = make(map[string]bool)
 	hasOutBodyBinding = make(map[string]bool)
+)
+
+type EmptyDirectiveHandlingType int
+
+const (
+	SkipField EmptyDirectiveHandlingType = iota
+	BindToFieldName
 )
 
 const (
