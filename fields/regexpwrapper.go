@@ -18,7 +18,7 @@ func (w RegexpWrapper) Name() string {
 	return w.FieldTool.Name()
 }
 
-func (w RegexpWrapper) New(structType reflect.Type, structField reflect.StructField, input interface{}) (Applier, gomerr.Gomerr) {
+func (w RegexpWrapper) Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (Applier, gomerr.Gomerr) {
 	inputString, ok := input.(string)
 	if !ok {
 		inputString = ""
@@ -38,5 +38,5 @@ func (w RegexpWrapper) New(structType reflect.Type, structField reflect.StructFi
 		valuesList = append(valuesList, values)
 	}
 
-	return w.FieldTool.New(structType, structField, valuesList)
+	return w.FieldTool.Applier(structType, structField, valuesList)
 }

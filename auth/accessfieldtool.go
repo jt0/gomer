@@ -41,24 +41,32 @@ const (
 // We don't currently see a use case for allowing some principals to treat an attribute as provided and others not to.
 // To keep the door open for this, though, we require that to specify a field is provided, the 'p' must be set in the
 // leftmost permissions group's write location, and the other permission groups set their write permission value to '-'.
-var FieldAccessTool = fields.RegexpWrapper{
-	Regexp:       regexp.MustCompile("(r|-)(w|c|u|p|-)"),
-	RegexpGroups: []string{"", "read", "write"},
-	FieldTool:    fieldAccessTool{},
+
+func AccessFieldTool() fields.FieldTool {
+	if toolInstance == nil {
+		toolInstance = fields.RegexpWrapper{
+			Regexp:       regexp.MustCompile("(r|-)(w|c|u|p|-)"),
+			RegexpGroups: []string{"", "read", "write"},
+			FieldTool:    accessFieldTool{},
+		}
+	}
+	return toolInstance
 }
 
-type fieldAccessTool struct {
+var toolInstance fields.FieldTool
+
+type accessFieldTool struct {
 	fieldName   string
 	permissions principalPermissions
 	provided    bool
 	zeroVal     reflect.Value
 }
 
-func (t fieldAccessTool) Name() string {
-	return "auth.FieldAccessTool"
+func (t accessFieldTool) Name() string {
+	return "auth.AccessFieldTool"
 }
 
-func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
+func (t accessFieldTool) Applier(_ reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	perPrincipalPermissions := input.([]map[string]string)
 	ppPermissionsCount := len(perPrincipalPermissions)
 
@@ -105,7 +113,7 @@ func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, in
 		fieldPermissions = (fieldPermissions << permissionsPerPrincipal) | principalPermissions(principalAccess)
 	}
 
-	return fieldAccessTool{
+	return accessFieldTool{
 		fieldName:   structField.Name,
 		permissions: fieldPermissions,
 		provided:    provided,
@@ -113,7 +121,7 @@ func (t fieldAccessTool) New(_ reflect.Type, structField reflect.StructField, in
 	}, nil
 }
 
-func (t fieldAccessTool) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext fields.ToolContext) gomerr.Gomerr {
+func (t accessFieldTool) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext fields.ToolContext) gomerr.Gomerr {
 	accessAction, ok := toolContext[accessToolAction].(action)
 	if !ok {
 		return nil // no action specified, return
@@ -132,7 +140,7 @@ const (
 )
 
 type action interface {
-	do(fieldValue reflect.Value, accessTool fieldAccessTool, toolContext fields.ToolContext) gomerr.Gomerr
+	do(fieldValue reflect.Value, accessTool accessFieldTool, toolContext fields.ToolContext) gomerr.Gomerr
 }
 
 func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...fields.ToolContext) fields.ToolContext {
@@ -146,7 +154,7 @@ type remover struct {
 	permission AccessPermissions
 }
 
-func (r remover) do(fv reflect.Value, at fieldAccessTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
+func (r remover) do(fv reflect.Value, at accessFieldTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
 			ge = gomerr.Unprocessable("Unable to remove non-writable field", r)
@@ -170,7 +178,7 @@ func AddCopyProvidedToContext(fromStruct reflect.Value, tcs ...fields.ToolContex
 
 type copyProvided reflect.Value
 
-func (cf copyProvided) do(fv reflect.Value, at fieldAccessTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
+func (cf copyProvided) do(fv reflect.Value, at accessFieldTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
 			ge = gomerr.Unprocessable("Unable to copy field", r)

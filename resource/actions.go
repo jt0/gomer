@@ -12,6 +12,16 @@ import (
 	"github.com/jt0/gomer/limit"
 )
 
+func init() {
+	// This sets up default aliases for each of the Actions defined here. An application can add other alias values or
+	// can clear any out by calling ScopeAlias with the undesired alias and an empty string scope value.
+	fields.ScopeAlias("create", CreateAction().Name())
+	fields.ScopeAlias("read", ReadAction().Name())
+	fields.ScopeAlias("update", UpdateAction().Name())
+	fields.ScopeAlias("delete", DeleteAction().Name())
+	fields.ScopeAlias("list", ListAction().Name())
+}
+
 type Creatable interface {
 	Instance
 	PreCreate() gomerr.Gomerr
@@ -168,10 +178,7 @@ func (a *updateAction) Pre(update Resource) gomerr.Gomerr {
 	}
 
 	// Get the id fields from the update
-	application := fields.Application{
-		id.IdFieldTool.Name(),
-		fields.EnsureContext().Add(id.SourceValue, reflect.ValueOf(update).Elem()),
-	}
+	application := fields.Application{id.CopyIdsFieldTool().Name(), fields.EnsureContext().Add(id.SourceValue, reflect.ValueOf(update).Elem())}
 	if ge = current.ApplyTools(application); ge != nil {
 		return ge
 	}

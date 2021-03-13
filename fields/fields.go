@@ -7,25 +7,18 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-var tagToFieldToolMap = map[string]FieldTool{}
+type Fields map[string][]field // key = toolName, value = list of fields that are applicable to the tool
 
-// StructTagToFieldTools accepts a set of mappings for struct tag keys to map to a FieldTool to apply at various
-// points of a struct's lifecycle. These are additive to other entries that may have been provided. To remove a
-// mapping, provide a nil Value for the corresponding key when calling this Function.
-func StructTagToFieldTools(associations map[string]FieldTool) {
-	for k, v := range associations {
-		if v == nil {
-			delete(tagToFieldToolMap, k)
-		} else {
-			tagToFieldToolMap[k] = v
-		}
-	}
+type field struct {
+	structFieldName        string
+	fullyQualifiedLocation string
+	appliersByName         map[string]Applier
 }
 
-var typeToFields = map[string]Fields{}
+var processed = map[string]Fields{}
 
 func Get(structType reflect.Type) (Fields, gomerr.Gomerr) {
-	if fields, ok := typeToFields[structType.Name()]; ok {
+	if fields, ok := processed[structType.Name()]; ok {
 		return fields, nil
 	}
 
@@ -37,25 +30,17 @@ func Process(structType reflect.Type) (Fields, gomerr.Gomerr) {
 		return nil, gomerr.Configuration("Input's kind is not a struct. Do you need to call Elem()?").AddAttribute("Kind", structType.Kind().String())
 	}
 
-	fields, errors := processStruct(structType, "", tagToFieldToolMap)
+	fields, errors := processStruct(structType, "")
 	if len(errors) > 0 {
 		return nil, gomerr.Configuration("Failed to process Fields for " + structType.Name()).Wrap(gomerr.Batcher(errors))
 	}
 
-	typeToFields[structType.Name()] = fields
+	processed[structType.Name()] = fields
 
 	return fields, nil
 }
 
-type Fields map[string][]field // key = toolName, value = list of fields that are applicable to the tool
-
-type field struct {
-	structFieldName        string
-	fullyQualifiedLocation string
-	appliersByName         map[string]Applier
-}
-
-func processStruct(structType reflect.Type, path string, tagKeyToFieldTool map[string]FieldTool) (Fields, []gomerr.Gomerr) {
+func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomerr) {
 	fields := Fields{}
 	errors := make([]gomerr.Gomerr, 0)
 
@@ -66,7 +51,7 @@ func processStruct(structType reflect.Type, path string, tagKeyToFieldTool map[s
 		}
 
 		if structField.Type.Kind() == reflect.Struct && structField.Anonymous {
-			subFields, subErrors := processStruct(structField.Type, path+structField.Name+"+", tagKeyToFieldTool)
+			subFields, subErrors := processStruct(structField.Type, path+structField.Name+"+")
 			for tool, sub := range subFields {
 				fields[tool] = append(fields[tool], sub...)
 			}
@@ -78,19 +63,13 @@ func processStruct(structType reflect.Type, path string, tagKeyToFieldTool map[s
 		}
 
 		appliersByName := make(map[string]Applier)
-		for tagKey, toolType := range tagKeyToFieldTool {
-			var newInput interface{}
-			if tagValue, ok := structField.Tag.Lookup(tagKey); ok {
-				newInput = tagValue
-			} else {
-				newInput = nil
-			}
-
-			tool, ge := toolType.New(structType, structField, newInput)
+		for _, fieldTool := range registeredFieldTools {
+			config := FieldToolConfigProvider.ConfigFor(fieldTool, structType, structField)
+			applier, ge := fieldTool.Applier(structType, structField, config)
 			if ge != nil {
 				errors = append(errors, ge)
-			} else if tool != nil {
-				appliersByName[toolType.Name()] = tool
+			} else if applier != nil {
+				appliersByName[fieldTool.Name()] = applier
 			}
 		}
 
@@ -120,7 +99,7 @@ func (fs Fields) ApplyTools(sv reflect.Value, applications ...Application) gomer
 			fv := sv.FieldByName(usesTool.structFieldName)           // fv should always be valid
 			tool, _ := usesTool.appliersByName[application.ToolName] // tool should always be found
 
-			if ge := tool.Apply(sv, fv, application.Context); ge != nil {
+			if ge := tool.Apply(sv, fv, EnsureContext(application.Context)); ge != nil {
 				errors = append(errors, ge.AddAttribute("Field", usesTool.structFieldName))
 			}
 		}

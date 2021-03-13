@@ -9,19 +9,6 @@ import (
 	"github.com/jt0/gomer/util"
 )
 
-func init() {
-	// This defines a subset of default values that map to the provided Action types assoc. An application can add
-	// alternative keys that map to these same action names if they prefer something different. To clear out these
-	// values in lieu of alternatives (or to not have any aliases), call fields.ResetScopeAliases().
-	fields.AddScopeAliases(map[string][]string{
-		"create": {CreateAction().Name()},
-		"read":   {ReadAction().Name()},
-		"update": {UpdateAction().Name()},
-		"delete": {DeleteAction().Name()},
-		"list":   {ListAction().Name()},
-	})
-}
-
 type Metadata interface {
 	ResourceType(Category) reflect.Type
 	Actions() map[interface{}]func() Action

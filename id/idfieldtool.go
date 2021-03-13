@@ -9,19 +9,26 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
+func CopyIdsFieldTool() fields.FieldTool {
+	if copyIdsInstance == nil {
+		copyIdsInstance = copyIdsFieldTool{}
+	}
+	return copyIdsInstance
+}
+
+var copyIdsInstance fields.FieldTool
+
 //goland:noinspection GoNameStartsWithPackageName
-var IdFieldTool = idFieldTool{}
+type copyIdsFieldTool struct{}
 
-type idFieldTool struct{}
-
-func (t idFieldTool) Name() string {
-	return "id.IdFieldTool"
+func (t copyIdsFieldTool) Name() string {
+	return "id.CopyIdsFieldTool"
 }
 
 const SourceValue = "$_source_value"
 
 // Should be ordered in decreasing specificity.
-func (t idFieldTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
+func (t copyIdsFieldTool) Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	idFields, ok := input.(string)
 	if !ok {
 		return nil, nil

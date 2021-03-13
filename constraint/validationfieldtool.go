@@ -52,17 +52,24 @@ func RegisterConstraints(constraints map[string]Constraint) {
 	}
 }
 
-var FieldValidationTool = fields.ScopingWrapper{fieldValidationTool{}}
+func ValidationFieldTool() fields.FieldTool {
+	if toolInstance == nil {
+		toolInstance = fields.ScopingWrapper{validationFieldTool{}}
+	}
+	return toolInstance
+}
 
-type fieldValidationTool struct {
+var toolInstance fields.FieldTool
+
+type validationFieldTool struct {
 	constraint Constraint
 }
 
-func (t fieldValidationTool) Name() string {
-	return "constraint.FieldValidationTool"
+func (t validationFieldTool) Name() string {
+	return "constraint.ValidationFieldTool"
 }
 
-func (t fieldValidationTool) New(_ reflect.Type, _ reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
+func (t validationFieldTool) Applier(_ reflect.Type, _ reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	if input == nil {
 		return nil, nil
 	}
@@ -72,10 +79,10 @@ func (t fieldValidationTool) New(_ reflect.Type, _ reflect.StructField, input in
 		return nil, ge.AddAttribute("Validations", input)
 	}
 
-	return fieldValidationTool{c}, nil
+	return validationFieldTool{c}, nil
 }
 
-func (t fieldValidationTool) Apply(_ reflect.Value, fieldValue reflect.Value, _ fields.ToolContext) gomerr.Gomerr {
+func (t validationFieldTool) Apply(_ reflect.Value, fieldValue reflect.Value, _ fields.ToolContext) gomerr.Gomerr {
 	if fieldValue.Kind() == reflect.Ptr && !fieldValue.IsNil() {
 		fieldValue = fieldValue.Elem()
 	}

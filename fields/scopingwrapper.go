@@ -9,30 +9,22 @@ import (
 
 const ScopeKey = "$_scope"
 
-// Format: [<scope>:]<tool_config>[;[<scope>:]<tool_config>]]*
-// Note that both ':' and ';' are special chars. Once a scope has been provided, colons are allowed until the
-// end of the input or a ';' is found. If a colon should be used for what would otherwise not contain a scope,
-// one can use the wildcard scope (e.g. "*:this_colon_:_does_not_indicate_a_scope").
-//
-// NB: scopes can't be reused. If a scope repeats, the last one wins. This is true for wildcards (implicit,
-//     explicit, or both) as well.
-
-var scopeAliases = make(map[string][]string)
-
-// AddScopeAliases allows the caller to define one or more values that may be used as the ScopeKey Value when a
-// ToolContext is being populated. The alias values, along with the Value passed in during a call to New(), will map
-// to the same FieldTool definition. Note that scope aliases need to be set up before a struct's fields are
-// processed.
-func AddScopeAliases(scopesToAliases map[string][]string) {
-	for scope, aliases := range scopesToAliases {
-		scopeAliases[scope] = append(scopeAliases[scope], aliases...)
+// ScopeAlias allows the caller to specify an alternative value to use when defining scoped configuration from the
+// scope used during the application of a tool. Aliases need to be defined before a struct is Process-ed.
+func ScopeAlias(alias, scope string) {
+	if scope == "" {
+		delete(scopeAliases, alias)
+		return
 	}
+
+	if current, ok := scopeAliases[alias]; ok && current != scope {
+		// error!
+	}
+
+	scopeAliases[alias] = scope
 }
 
-// ResetScopeAliases removes all scope -> aliases mappings.
-func ResetScopeAliases() {
-	scopeAliases = make(map[string][]string)
-}
+var scopeAliases = make(map[string]string)
 
 type ScopingWrapper struct {
 	FieldTool
@@ -46,8 +38,14 @@ var scopeRegexp = regexp.MustCompile("(?:([^;:]*):)?([^;]*)")
 
 const anyScope = "*"
 
-// Generics will make this better, but for now, we assume input is a string
-func (w ScopingWrapper) New(structType reflect.Type, structField reflect.StructField, input interface{}) (Applier, gomerr.Gomerr) {
+// Format: [<scope>:]<tool_config>[;[<scope>:]<tool_config>]]*
+// Note that both ':' and ';' are special chars. Once a scope has been provided, colons are allowed until the
+// end of the input or a ';' is found. If a colon should be used for what would otherwise not contain a scope,
+// one can use the wildcard scope (e.g. "*:this_colon_:_does_not_indicate_a_scope").
+//
+// NB: scopes can't be reused within the input. If a scope repeats, the last one wins. This is true for wildcards
+//     (implicit, explicit, or both) as well.
+func (w ScopingWrapper) Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (Applier, gomerr.Gomerr) {
 	scopedAppliers := make(map[string]Applier)
 	inputString, ok := input.(string)
 	if !ok {
@@ -58,6 +56,8 @@ func (w ScopingWrapper) New(structType reflect.Type, structField reflect.StructF
 		scope := match[1]
 		if scope == "" {
 			scope = anyScope
+		} else if unaliased, ok := scopeAliases[scope]; ok {
+			scope = unaliased
 		}
 
 		var newInput interface{}
@@ -67,17 +67,14 @@ func (w ScopingWrapper) New(structType reflect.Type, structField reflect.StructF
 			newInput = match[2]
 		}
 
-		tool, ge := w.FieldTool.New(structType, structField, newInput)
+		applier, ge := w.FieldTool.Applier(structType, structField, newInput)
 		if ge != nil {
 			return nil, ge
-		} else if tool == nil {
+		} else if applier == nil {
 			continue
 		}
 
-		scopedAppliers[scope] = tool
-		for _, alias := range scopeAliases[scope] {
-			scopedAppliers[alias] = tool
-		}
+		scopedAppliers[scope] = applier
 	}
 
 	switch len(scopedAppliers) {

@@ -9,11 +9,70 @@ import (
 
 type FieldTool interface {
 	Name() string
-	New(structType reflect.Type, structField reflect.StructField, input interface{}) (Applier, gomerr.Gomerr)
+	Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (Applier, gomerr.Gomerr)
+}
+
+var registeredFieldTools []FieldTool
+
+func RegisterFieldTools(tools ...FieldTool) {
+	if len(registeredFieldTools)+len(tools) > 100 {
+		panic("Too many tools. Max = 100")
+	}
+
+alreadyRegistered:
+	for _, tool := range tools {
+		// Skip over duplicates
+		for _, registered := range registeredFieldTools {
+			if tool.Name() == registered.Name() {
+				continue alreadyRegistered
+			}
+		}
+		registeredFieldTools = append(registeredFieldTools, tool)
+	}
 }
 
 type Applier interface {
 	Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) gomerr.Gomerr
+}
+
+type ConfigProvider interface {
+	ConfigFor(tool FieldTool, structType reflect.Type, structField reflect.StructField) interface{}
+}
+
+var FieldToolConfigProvider ConfigProvider = NewStructTagConfigProvider()
+
+type StructTagConfigProvider struct {
+	tagKeyFor map[string]string
+}
+
+func NewStructTagConfigProvider() StructTagConfigProvider {
+	return StructTagConfigProvider{map[string]string{}}
+}
+
+func (s StructTagConfigProvider) WithKey(tagKey string, tool FieldTool) StructTagConfigProvider {
+	if tagKey == "" {
+
+	}
+	RegisterFieldTools(tool)
+	s.tagKeyFor[tool.Name()] = tagKey
+	return s
+}
+
+func (s StructTagConfigProvider) ConfigFor(tool FieldTool, _ reflect.Type, structField reflect.StructField) interface{} {
+	tagKey, ok := s.tagKeyFor[tool.Name()]
+	if !ok {
+		tagKey = tool.Name()
+	}
+
+	var config interface{}
+	tagValue, ok := structField.Tag.Lookup(tagKey)
+	if ok {
+		config = tagValue
+	} else {
+		config = nil
+	}
+
+	return config
 }
 
 type FunctionApplier struct {
@@ -32,7 +91,7 @@ type ValueApplier struct {
 	Value string
 }
 
-func (a ValueApplier) Apply(structValue reflect.Value, fieldValue reflect.Value, _ ToolContext) gomerr.Gomerr {
+func (a ValueApplier) Apply(_ reflect.Value, fieldValue reflect.Value, _ ToolContext) gomerr.Gomerr {
 	if ge := flect.SetValue(fieldValue, a.Value); ge != nil {
 		return gomerr.Configuration("Unable to set field to value").AddAttribute("Value", a.Value).Wrap(ge)
 	}
@@ -71,12 +130,6 @@ func (a ApplyAndTestApplier) Apply(structValue reflect.Value, fieldValue reflect
 	}
 
 	return gomerr.Configuration("Field value failed to validate and no fallback applier is specified.")
-}
-
-type NoopApplier struct{}
-
-func (NoopApplier) Apply(reflect.Value, reflect.Value, ToolContext) gomerr.Gomerr {
-	return nil
 }
 
 type ToolContext map[string]interface{}

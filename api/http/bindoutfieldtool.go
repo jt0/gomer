@@ -12,17 +12,24 @@ import (
 	"github.com/jt0/gomer/resource"
 )
 
-var (
-	BindOutTool = fields.ScopingWrapper{bindOutTool{}}
+func BindOutFieldTool() fields.FieldTool {
+	if bindOutInstance == nil {
+		bindOutInstance = fields.ScopingWrapper{bindOutFieldTool{}}
+	}
+	return bindOutInstance
+}
 
+var (
 	DefaultOmitEmpty = true
+
+	bindOutInstance fields.FieldTool
 )
 
-type bindOutTool struct{}
+type bindOutFieldTool struct{}
 
-const bindOutToolName = "http.BindOutTool"
+const bindOutToolName = "http.BindOutFieldTool"
 
-func (b bindOutTool) Name() string {
+func (b bindOutFieldTool) Name() string {
 	return bindOutToolName
 }
 
@@ -36,7 +43,7 @@ func (b bindOutTool) Name() string {
 // Except for '-', each of the above can be combined with an ",omitempty" qualifier that acts like '-' if the field's
 // value is its zero Value.
 //
-func (b bindOutTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
+func (b bindOutFieldTool) Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	directive, ok := input.(string)
 	if !ok && input != nil {
 		return nil, gomerr.Configuration("Expected a string directive").AddAttribute("Input", input)
@@ -68,8 +75,8 @@ func (b bindOutTool) New(structType reflect.Type, structField reflect.StructFiel
 			leftDirective = PayloadBindingPrefix + structField.Name
 		}
 
-		applier, _ := b.New(structType, structField, leftDirective)
-		ifNotValid, _ := b.New(structType, structField, directive[qIndex+1:])
+		applier, _ := b.Applier(structType, structField, leftDirective)
+		ifNotValid, _ := b.Applier(structType, structField, directive[qIndex+1:])
 
 		// TODO:p2 fix isValid() function
 		return fields.ApplyAndTestApplier{applier, func(reflect.Value) bool { return false }, ifNotValid}, nil

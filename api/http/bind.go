@@ -40,13 +40,13 @@ var (
 
 	// This slice can be added to (or replaced) as needed
 	BindFromRequestTools = []fields.FieldTool{
-		BindInTool,
-		constraint.FieldValidationTool,
+		BindInFieldTool(),
+		constraint.ValidationFieldTool(),
 	}
 
 	// This slice can be added to (or replaced) as needed
 	BindToResponseTools = []fields.FieldTool{
-		BindOutTool,
+		BindOutFieldTool(),
 	}
 
 	// Default prefixes for qualified directives

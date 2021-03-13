@@ -13,13 +13,20 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-var BindInTool = fields.ScopingWrapper{bindInTool{}}
+func BindInFieldTool() fields.FieldTool {
+	if bindInInstance == nil {
+		bindInInstance = fields.ScopingWrapper{bindInFieldTool{}}
+	}
+	return bindInInstance
+}
 
-type bindInTool struct{}
+var bindInInstance fields.FieldTool
 
-const bindInToolName = "http.BindInTool"
+type bindInFieldTool struct{}
 
-func (b bindInTool) Name() string {
+const bindInToolName = "http.BindInFieldTool"
+
+func (b bindInFieldTool) Name() string {
 	return bindInToolName
 }
 
@@ -32,7 +39,7 @@ func (b bindInTool) Name() string {
 // ?<directive>  -> Applied iff field.IsZero(). Supports chaining (e.g. "query.aName?header.A-Name?=aDefault")
 // -             -> Explicitly not bound from any input
 //
-func (b bindInTool) New(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
+func (b bindInFieldTool) Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	directive, ok := input.(string)
 	if !ok && input != nil {
 		return nil, gomerr.Configuration("Expected input to be a string directive").AddAttribute("Input", input)
@@ -49,8 +56,8 @@ func (b bindInTool) New(structType reflect.Type, structField reflect.StructField
 			leftDirective = PayloadBindingPrefix + structField.Name
 		}
 
-		applier, _ := b.New(structType, structField, leftDirective)
-		ifZero, _ := b.New(structType, structField, directive[qIndex+1:])
+		applier, _ := b.Applier(structType, structField, leftDirective)
+		ifZero, _ := b.Applier(structType, structField, directive[qIndex+1:])
 
 		return fields.ApplyAndTestApplier{applier, fields.NonZero, ifZero}, nil
 	}

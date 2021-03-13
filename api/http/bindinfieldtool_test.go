@@ -26,14 +26,14 @@ var (
 type Greeting struct {
 	resource.BaseInstance `fields:"ignore"`
 
-	Style_path       string `in:"path.0"`
-	Recipient_path   string `in:"path.1"`
-	Style_query      string `in:"query.+"` // same name as attribute
-	Recipient_query  string `in:"query.recipient"`
-	Style_header     string `in:"header.+"` // same name as attribute
-	Recipient_header string `in:"header.x-recipient"`
-	Style_body       string `in:"Style"`
-	Recipient_body   string `in:"Recipient"`
+	Style_path       string `http.BindInFieldTool:"path.0"`
+	Recipient_path   string `http.BindInFieldTool:"path.1"`
+	Style_query      string `http.BindInFieldTool:"query.+"` // same name as attribute
+	Recipient_query  string `http.BindInFieldTool:"query.recipient"`
+	Style_header     string `http.BindInFieldTool:"header.+"` // same name as attribute
+	Recipient_header string `http.BindInFieldTool:"header.x-recipient"`
+	Style_body       string `http.BindInFieldTool:"Style"`
+	Recipient_body   string `http.BindInFieldTool:"Recipient"`
 }
 
 const (
@@ -69,10 +69,8 @@ func (g Greeting) recipient(location int) string {
 	}
 }
 
-func TestBindTypes(t *testing.T) {
-	fields.StructTagToFieldTools(map[string]fields.FieldTool{
-		"in": BindInTool,
-	})
+func TestBindInTypes(t *testing.T) {
+	fields.RegisterFieldTools(BindInFieldTool())
 
 	_, ge := resource.Register(&Greeting{}, nil, actions, stores.PanicStore, nil)
 	assert.Success(t, ge)

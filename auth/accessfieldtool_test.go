@@ -34,7 +34,7 @@ var (
 )
 
 func init() {
-	fields.StructTagToFieldTools(map[string]fields.FieldTool{"access": auth.FieldAccessTool})
+	fields.FieldToolConfigProvider = fields.NewStructTagConfigProvider().WithKey("access", auth.AccessFieldTool())
 
 	auth.RegisterFieldAccessPrincipals(one, two)
 }
@@ -42,13 +42,13 @@ func init() {
 func TestAccessTool(t *testing.T) {
 	copiedTo := &AccessTest{}
 	fields_test.RunTests(t, []fields_test.TestCase{
-		{"Remove non-readable as 'one'", auth.FieldAccessTool, clear(sOne, auth.ReadPermission), all(), nil, allExpected()},
-		{"Remove non-readable as 'two'", auth.FieldAccessTool, clear(sTwo, auth.ReadPermission), all(), nil, partial("ABCDI")},
-		{"Remove non-creatable as 'one'", auth.FieldAccessTool, clear(sOne, auth.CreatePermission), all(), nil, allExpected()},
-		{"Remove non-creatable as 'two'", auth.FieldAccessTool, clear(sTwo, auth.CreatePermission), all(), nil, partial("ABEFIJ")},
-		{"Remove non-updatable as 'one'", auth.FieldAccessTool, clear(sOne, auth.UpdatePermission), all(), nil, allExpected()},
-		{"Remove non-updatable as 'two'", auth.FieldAccessTool, clear(sTwo, auth.UpdatePermission), all(), nil, partial("ACEGIJ")},
-		{"Copy provided", auth.FieldAccessTool, auth.AddCopyProvidedToContext(reflect.ValueOf(all()).Elem(), nil), copiedTo, copiedTo, partial("IJ")},
+		{"Remove non-readable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.ReadPermission), all(), nil, allExpected()},
+		{"Remove non-readable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.ReadPermission), all(), nil, partial("ABCDI")},
+		{"Remove non-creatable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.CreatePermission), all(), nil, allExpected()},
+		{"Remove non-creatable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.CreatePermission), all(), nil, partial("ABEFIJ")},
+		{"Remove non-updatable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.UpdatePermission), all(), nil, allExpected()},
+		{"Remove non-updatable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.UpdatePermission), all(), nil, partial("ACEGIJ")},
+		{"Copy provided", auth.AccessFieldTool(), auth.AddCopyProvidedToContext(reflect.ValueOf(all()).Elem(), nil), copiedTo, copiedTo, partial("IJ")},
 	})
 }
 
@@ -71,7 +71,7 @@ func TestPermissionsWithProvidedVerifiesForwardsCompatibility(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.permissions, func(t *testing.T) {
-			_, ge := auth.FieldAccessTool.New(structType, structField, tt.permissions)
+			_, ge := auth.AccessFieldTool().Applier(structType, structField, tt.permissions)
 			if tt.error == nil {
 				assert.Success(t, ge)
 			} else {
