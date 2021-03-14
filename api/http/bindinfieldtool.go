@@ -107,38 +107,67 @@ type bindUnmarshaledApplier struct {
 	name string
 }
 
-func (b bindUnmarshaledApplier) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext fields.ToolContext) gomerr.Gomerr {
-	unmarshaledMap := toolContext[unmarshaledMapKey].(map[string]interface{})
-	value, ok := unmarshaledMap[b.name]
+func (b bindUnmarshaledApplier) Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext fields.ToolContext) gomerr.Gomerr {
+	inMap := toolContext[inMapKey].(map[string]interface{})
+	value, ok := inMap[b.name]
 	if !ok || value == nil {
 		return nil
 	}
 
 	switch fieldValue.Kind() {
 	case reflect.Struct:
-	case reflect.Slice:
-		vSlice := value.([]interface{})
-		vSliceLen := len(vSlice)
-
-		fte := fieldValue.Type().Elem()
-		seFs, ge := fields.Get(fte)
+		fs, ge := fields.Get(fieldValue.Type())
 		if ge != nil {
-			return ge.AddAttribute("Field", b.name)
+			return ge
 		}
-		fSlice := reflect.MakeSlice(reflect.SliceOf(fte), vSliceLen, vSliceLen)
 
-		for i := 0; i < vSliceLen; i++ {
-			toolContext[unmarshaledMapKey] = vSlice[i]
-			if ge := seFs.ApplyTools(fSlice.Index(i), fields.Application{bindInToolName, toolContext}); ge != nil {
-				return ge.AddAttributes("Field", b.name, "Index", i)
+		toolContext[inMapKey] = value
+		if ge = fs.ApplyTools(fieldValue, fields.Application{bindInToolName, toolContext}); ge != nil {
+			return ge
+		}
+		toolContext[inMapKey] = inMap
+	case reflect.Slice:
+		sliceData := value.([]interface{})
+		sliceLen := len(sliceData)
+		fieldValue.Set(reflect.MakeSlice(reflect.SliceOf(fieldValue.Type().Elem()), sliceLen, sliceLen))
+
+		// Putting each element of the slice into a map so the b.Apply() call can fetch the data back out. Allows us
+		// to easily support complex slice elem types.
+		dummyMap := make(map[string]interface{}, 1)
+		toolContext[inMapKey] = dummyMap
+		for i := 0; i < sliceLen; i++ {
+			dummyMap[b.name] = sliceData[i]
+			if ge := b.Apply(structValue, fieldValue.Index(i), toolContext); ge != nil {
+				return ge.AddAttribute("Index", i)
 			}
 		}
-		fieldValue.Set(fSlice)
-		toolContext[unmarshaledMapKey] = unmarshaledMap
+		toolContext[inMapKey] = inMap
 	case reflect.Map:
+		mapData := value.(map[string]interface{})
+		fieldValue.Set(reflect.MakeMap(fieldValue.Type()))
+		mapElem := reflect.New(fieldValue.Type().Elem())
+
+		for dataKey, dataValue := range mapData {
+			toolContext[inMapKey] = dataValue
+			if ge := b.Apply(structValue, mapElem, toolContext); ge != nil {
+				return ge.AddAttribute("Key", dataKey)
+			}
+			fieldValue.SetMapIndex(reflect.ValueOf(dataKey), mapElem)
+		}
+		toolContext[inMapKey] = inMap
+	case reflect.Interface:
+		return gomerr.Internal("Don't know what interface type to instantiate")
+	case reflect.Ptr:
+		elemKind := fieldValue.Type().Elem().Kind()
+		if elemKind == reflect.Struct || elemKind == reflect.Slice || elemKind == reflect.Map || elemKind == reflect.Ptr {
+			// No need to update toolContext
+			return b.Apply(structValue, fieldValue.Elem(), toolContext)
+		}
+
+		fallthrough
 	default:
 		if ge := flect.SetValue(fieldValue, value); ge != nil {
-			return ge.AddAttributes(unmarshaledMapKey, b.name)
+			return ge.AddAttributes(inMapKey, b.name)
 		}
 	}
 

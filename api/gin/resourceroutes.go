@@ -113,12 +113,28 @@ func typeName(t reflect.Type) string {
 func handler(resourceType reflect.Type, actionFunc func() resource.Action, successStatus int) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		action := actionFunc()
-		if inResource, ge := BindFromRequest(c.Request, resourceType, Subject(c), action.Name()); ge != nil {
+		if r, ge := BindFromRequest(c.Request, resourceType, Subject(c), action.Name()); ge != nil {
 			_ = c.Error(ge)
-		} else if outResource, ge := inResource.DoAction(action); ge != nil {
+		} else if r, ge = r.DoAction(action); ge != nil {
 			_ = c.Error(ge)
-		} else if ge = BindToResponse(outResource, successStatus, c, action.Name()); ge != nil {
+		} else if ge = BindToContext(c, r, action.Name(), successStatus); ge != nil {
 			_ = c.Error(ge)
 		}
 	}
+}
+
+func BindToContext(c *gin.Context, r resource.Resource, scope string, successStatus int) gomerr.Gomerr {
+	// TODO:p4 consider case where headers are set but no payload is returned
+	if successStatus == http.StatusNoContent {
+		return nil
+	}
+
+	bytes, ge := BindToResponse(r, c.Writer.Header(), scope)
+	if ge != nil {
+		return ge
+	}
+
+	c.Data(successStatus, c.Writer.Header().Get(ContentTypeHeader), bytes)
+
+	return nil
 }

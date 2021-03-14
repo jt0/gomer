@@ -9,7 +9,6 @@ import (
 
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/resource"
 )
 
 func BindOutFieldTool() fields.FieldTool {
@@ -20,8 +19,6 @@ func BindOutFieldTool() fields.FieldTool {
 }
 
 var (
-	DefaultOmitEmpty = true
-
 	bindOutInstance fields.FieldTool
 )
 
@@ -55,12 +52,12 @@ func (b bindOutFieldTool) Applier(structType reflect.Type, structField reflect.S
 	}
 
 	//goland:noinspection GoBoolExpressions
-	omitEmpty := DefaultOmitEmpty
+	omitEmpty := EmptyValueHandlingDefault == OmitEmpty
 	if cIndex := strings.IndexByte(directive, ','); cIndex != -1 {
 		switch flag := directive[cIndex+1:]; flag {
-		case "omitempty":
+		case OmitEmptyDirective:
 			omitEmpty = true
-		case "includeempty":
+		case IncludeEmptyDirective:
 			omitEmpty = false
 		default:
 			return nil, gomerr.Configuration("Unrecognized directive flag: " + flag)
@@ -83,7 +80,7 @@ func (b bindOutFieldTool) Applier(structType reflect.Type, structField reflect.S
 	}
 
 	if directive == PayloadBindingPrefix+BindToFieldNameDirective {
-		return bindToMapApplier{structField.Name, omitEmpty, structField.Type.Kind() == reflect.Ptr}, nil
+		return bindToMapApplier{structField.Name, omitEmpty}, nil
 	} else if firstChar := directive[:1]; firstChar == "=" {
 		return fields.ValueApplier{directive[1:]}, nil // don't include the '='
 	} else if firstChar == "$" {
@@ -105,7 +102,7 @@ func (b bindOutFieldTool) Applier(structType reflect.Type, structField reflect.S
 		hasOutBodyBinding[structType.String()] = true
 		return bodyOutApplier{}, nil
 	} else if directive != "" {
-		return bindToMapApplier{directive, omitEmpty, structField.Type.Kind() == reflect.Ptr}, nil
+		return bindToMapApplier{directive, omitEmpty}, nil
 	} else {
 		return nil, gomerr.Configuration("Do not know how to handle empty string as binding directive")
 	}
@@ -114,41 +111,84 @@ func (b bindOutFieldTool) Applier(structType reflect.Type, structField reflect.S
 type bindToMapApplier struct {
 	name      string
 	omitempty bool
-	isPtr     bool
 }
 
-func (b bindToMapApplier) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext fields.ToolContext) gomerr.Gomerr {
+func (b bindToMapApplier) Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext fields.ToolContext) gomerr.Gomerr {
 	if fieldValue.IsZero() && b.omitempty {
 		return nil
 	}
 
+	outMap := toolContext[outMapKey].(map[string]interface{})
+
 	switch fieldValue.Kind() {
 	case reflect.Struct:
-	case reflect.Slice:
-		unmarshaledMap := toolContext[unmarshaledMapKey].(map[string]interface{})
-		fLen := fieldValue.Len()
-		mSlice := make([]interface{}, fLen)
-		for i := 0; i < fLen; i++ {
-			toolContext[unmarshaledMapKey] = make(map[string]interface{})
-			if r, ok := fieldValue.Index(i).Interface().(resource.Resource); ok {
-				if ge := r.ApplyTools(fields.Application{bindOutToolName, toolContext}); ge != nil {
-					return ge.AddAttributes("Field", b.name, "Index", i)
-				}
-			} else if seFs, ge := fields.Get(fieldValue.Type().Elem()); ge == nil {
-				if ge = seFs.ApplyTools(fieldValue.Index(i), fields.Application{bindOutToolName, toolContext}); ge != nil {
-					return ge.AddAttributes("Field", b.name, "Index", i)
-				}
-			} else {
-				return ge.AddAttribute("Field", b.name)
-			}
-
-			mSlice[i] = toolContext[unmarshaledMapKey]
+		fs, ge := fields.Get(fieldValue.Type())
+		if ge != nil {
+			return ge
 		}
-		unmarshaledMap[b.name] = mSlice
-		toolContext[unmarshaledMapKey] = unmarshaledMap
+
+		structMap := make(map[string]interface{})
+		toolContext[outMapKey] = structMap
+
+		if ge = fs.ApplyTools(fieldValue, fields.Application{bindOutToolName, toolContext}); ge != nil {
+			return ge
+		}
+
+		if len(structMap) > 0 || !b.omitempty {
+			outMap[b.name] = structMap
+		}
+	case reflect.Slice:
+		fvLen := fieldValue.Len()
+		sliceOutput := make([]interface{}, 0, fvLen)
+		sliceMap := make(map[string]interface{}, 1)
+
+		for i := 0; i < fvLen; i++ {
+			toolContext[outMapKey] = sliceMap
+			if ge := b.Apply(structValue, fieldValue.Index(i), toolContext); ge != nil {
+				return ge.AddAttribute("Index", i)
+			}
+			if v, ok := sliceMap[b.name]; ok && v != nil {
+				sliceOutput = append(sliceOutput, v)
+			}
+		}
+
+		if len(sliceOutput) > 0 || !b.omitempty {
+			outMap[b.name] = sliceOutput
+		}
+
+		toolContext[outMapKey] = outMap
 	case reflect.Map:
+		if fieldValue.Elem().Kind() != reflect.String {
+			return gomerr.Configuration("Unable to produce a map without string ")
+		}
+
+		mapOutput := make(map[string]interface{}, fieldValue.Len())
+		mapMap := make(map[string]interface{})
+
+		iter := fieldValue.MapRange()
+		for iter.Next() {
+			toolContext[outMapKey] = mapMap
+			if ge := b.Apply(structValue, iter.Value(), toolContext); ge != nil {
+				return ge.AddAttribute("Key", iter.Key().Interface())
+			}
+			if v, ok := mapMap[b.name]; ok && v != nil {
+				mapOutput[iter.Key().Interface().(string)] = v
+			}
+		}
+
+		if len(mapOutput) > 0 || !b.omitempty {
+			outMap[b.name] = mapOutput
+		}
+
+		toolContext[outMapKey] = outMap
+	case reflect.Ptr, reflect.Interface:
+		if fieldValue.IsNil() {
+			return nil
+		}
+
+		return b.Apply(structValue, fieldValue.Elem(), toolContext)
 	default:
-		toolContext[unmarshaledMapKey].(map[string]interface{})[b.name] = fieldValue.Interface()
+		outMap[b.name] = fieldValue.Interface()
 	}
 
 	return nil

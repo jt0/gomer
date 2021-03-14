@@ -7,9 +7,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-	"github.com/gin-gonic/gin/render"
-
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/fields"
@@ -25,6 +22,8 @@ type Unmarshal func(toUnmarshal []byte, ptrToTarget interface{}) error
 type Marshal func(toMarshal interface{}) ([]byte, error)
 
 var (
+	DefaultContentType = "application/json"
+
 	// Unmarshal functions for specific content types
 	PerContentTypeUnmarshalFunctions = make(map[string]Unmarshal)
 
@@ -63,6 +62,13 @@ var (
 	// Defines how a field's binding be handled if no directive is specified. Default is to skip.
 	EmptyDirectiveHandling = SkipField
 
+	OmitEmptyDirective    = "omitempty"
+	IncludeEmptyDirective = "includeempty"
+
+	// Defines how an empty value is marshaled unless overridden by OmitEmptyDirective or IncludeEmptyDirective. Default
+	// is to omit.
+	EmptyValueHandlingDefault = OmitEmpty
+
 	// NB: If one scope defines a body binding, no other scope can try to access marshaled/unmarshaled data
 	hasInBodyBinding  = make(map[string]bool)
 	hasOutBodyBinding = make(map[string]bool)
@@ -75,12 +81,23 @@ const (
 	BindToFieldName
 )
 
+type EmptyValueHandlingType int
+
 const (
-	pathPartsKey      = "$_path_parts"
-	queryParamsKey    = "$_query_params"
-	headersKey        = "$_headers"
-	unmarshaledMapKey = "$_unmarshaled_map"
-	bodyBytesKey      = "$_body_bytes"
+	OmitEmpty EmptyValueHandlingType = iota
+	IncludeEmpty
+)
+
+const (
+	ContentTypeHeader = "Content-Type"
+	AcceptsHeader     = "Accepts"
+
+	pathPartsKey   = "$_path_parts"
+	queryParamsKey = "$_query_params"
+	headersKey     = "$_headers"
+	inMapKey       = "$_in_map"
+	outMapKey      = "$_out_map"
+	bodyBytesKey   = "$_body_bytes"
 
 	toolsWithContextKey = "$_tools_with_context"
 )
@@ -107,11 +124,10 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 		unmarshaled := make(map[string]interface{})
 
 		if len(bodyBytes) > 0 {
-			// based on content type, and the absence of any "body" attributes use the proper marshaller to put the data into
-			// the new resource
+			// based on content type, and the absence of any "body" attributes use the proper unmarshaler to put the
+			// data into the new resource
 			// TODO:p3 Allow applications to provide alternative means to choose an unmarshaler
-			const contentTypeHeader = "Content-Type"
-			contentType := request.Header.Get(contentTypeHeader)
+			contentType := request.Header.Get(ContentTypeHeader)
 			unmarshal, ok := PerContentTypeUnmarshalFunctions[contentType]
 			if !ok {
 				if DefaultUnmarshalFunction == nil {
@@ -125,7 +141,7 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 			}
 		}
 
-		tc.Add(unmarshaledMapKey, unmarshaled)
+		tc.Add(inMapKey, unmarshaled)
 	}
 
 	applications := toApplications(BindFromRequestTools, tc)
@@ -134,42 +150,55 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 	return r, r.ApplyTools(applications...)
 }
 
+func BindToResponse(r resource.Resource, header http.Header, scope string) (output []byte, ge gomerr.Gomerr) {
+	tc := fields.AddScopeToContext(scope).Add(headersKey, header)
+
+	outBodyBinding := hasOutBodyBinding[reflect.TypeOf(r).Elem().String()]
+	if !outBodyBinding {
+		tc.Add(outMapKey, make(map[string]interface{}))
+	}
+
+	if ge = r.ApplyTools(toApplications(BindToResponseTools, tc)...); ge != nil {
+		return nil, ge
+	}
+
+	if outBodyBinding {
+		return tc[bodyBytesKey].([]byte), nil
+	} else {
+		// based on content type, and the absence of any "body" attributes use the proper marshaler to put the
+		// data into the response bytes
+		// TODO:p3 Allow applications to provide alternative means to choose a marshaler
+		contentType := header.Get(AcceptsHeader) // TODO:p4 support multi-options
+		marshal, ok := PerContentTypeMarshalFunctions[contentType]
+		if !ok {
+			if DefaultUnmarshalFunction == nil {
+				return nil, gomerr.Unmarshal("Unsupported Accepts content type", contentType, nil)
+			}
+			marshal = DefaultMarshalFunction
+			contentType = DefaultContentType
+		}
+
+		outMap := tc[outMapKey].(map[string]interface{})
+
+		//goland:noinspection GoBoolExpressions
+		if len(outMap) == 0 && EmptyValueHandlingDefault == OmitEmpty {
+			return nil, ge
+		}
+
+		bytes, err := marshal(outMap)
+		if err != nil {
+			return nil, gomerr.Marshal("Unable to marshal data", outMap).AddAttribute("ContentType", contentType).Wrap(err)
+		}
+		header.Set(ContentTypeHeader, contentType)
+
+		return bytes, nil
+	}
+}
+
 func toApplications(bindTools []fields.FieldTool, tc fields.ToolContext) []fields.Application {
 	applications := make([]fields.Application, len(bindTools))
 	for i, tool := range bindTools {
 		applications[i] = fields.Application{tool.Name(), tc}
 	}
 	return applications
-}
-
-func BindToResponse(r resource.Resource, successStatus int, c *gin.Context, scope string) (ge gomerr.Gomerr) {
-	if successStatus == http.StatusNoContent {
-		return nil
-	}
-
-	tc := fields.AddScopeToContext(scope).Add(headersKey, c.Writer.Header())
-
-	if hasOutBodyBinding[reflect.TypeOf(r).Elem().String()] {
-		defer func() {
-			if ge == nil {
-				c.Data(successStatus, "", tc[bodyBytesKey].([]byte))
-			}
-		}()
-	} else {
-		output := make(map[string]interface{})
-		defer func() {
-			if ge == nil {
-				// TODO:p3 alternative output content types
-				c.Render(successStatus, render.IndentedJSON{Data: output})
-			}
-		}()
-
-		tc.Add(unmarshaledMapKey, output)
-	}
-
-	if ge = r.ApplyTools(toApplications(BindToResponseTools, tc)...); ge != nil {
-		return ge
-	}
-
-	return nil
 }
