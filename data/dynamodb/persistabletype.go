@@ -17,18 +17,18 @@ import (
 )
 
 type persistableType struct {
-	name             string
-	dbNames          map[string]string                // field name -> storage name
-	fieldConstraints map[string]constraint.Constraint // Map of field name -> constraint needed to be satisfied
-	resolver         ItemResolver
+	name            string
+	dbNames         map[string]string      // field name -> storage name
+	fieldConditions []constraint.Condition // Map of field name -> constraint needed to be satisfied
+	resolver        ItemResolver
 }
 
 func newPersistableType(table *table, persistableName string, pType reflect.Type) (*persistableType, gomerr.Gomerr) {
 	pt := &persistableType{
-		name:             persistableName,
-		dbNames:          make(map[string]string, 0),
-		fieldConstraints: make(map[string]constraint.Constraint, 0),
-		resolver:         resolver(pType),
+		name:            persistableName,
+		dbNames:         make(map[string]string, 0),
+		fieldConditions: make([]constraint.Condition, 0, 1),
+		resolver:        resolver(pType),
 	}
 
 	if errors := pt.processFields(pType, "", table, make([]gomerr.Gomerr, 0)); len(errors) > 0 {
@@ -100,10 +100,13 @@ func (pt *persistableType) processConstraintsTag(fieldName string, tag string, t
 		switch c[1] {
 		case "unique":
 			var additionalFields []string
+			fieldTuple := []string{fieldName}
 			if c[3] != "" {
-				additionalFields = strings.Split(c[3], ",")
+				additionalFields = strings.Split(strings.ReplaceAll(c[3], " ", ""), ",")
+				fieldTuple = append(fieldTuple, additionalFields...)
 			}
-			pt.fieldConstraints[fieldName] = constraint.NewType(t.isFieldUnique(fieldName, additionalFields), "Validate", "Field Uniqueness", "Field", fieldName, "Scope", additionalFields)
+			isFieldTupleUnique := constraint.New("Unique", additionalFields, t.isFieldTupleUnique(fieldTuple))
+			pt.fieldConditions = append(pt.fieldConditions, constraint.Condition{fieldName, isFieldTupleUnique})
 		}
 	}
 

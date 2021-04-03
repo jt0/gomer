@@ -195,12 +195,18 @@ func (g *gomerr) WithAttributes(attributes map[string]interface{}) Gomerr {
 }
 
 func addAttribute(key string, value interface{}, m *map[string]interface{}) {
-	_, exists := (*m)[key]
-	if exists {
-		// TODO: generate alternate key
-	}
+	if existing, exists := (*m)[key]; exists {
+		valueSlice, ok := value.([]interface{})
+		if !ok {
+			valueSlice = []interface{}{existing, value}
+		} else {
+			valueSlice = append(valueSlice, value)
+		}
 
-	(*m)[key] = value
+		(*m)[key] = valueSlice
+	} else {
+		(*m)[key] = value
+	}
 }
 
 func (g *gomerr) Is(err error) bool {

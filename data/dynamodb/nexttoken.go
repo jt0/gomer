@@ -10,7 +10,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/crypto"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
@@ -21,17 +20,28 @@ type nextTokenizer struct {
 }
 
 type nextToken struct {
-	Version          string             `json:"v"`
+	Version          uint               `json:"v"`
 	Filter           map[string]*string `json:"fd"`
 	LastEvaluatedKey map[string]string  `json:"lek"`
 	Expiration       time.Time          `json:"exp"`
 }
 
+func (nt nextToken) ExpiresAt() time.Time {
+	return nt.Expiration
+}
+
 const (
-	nextTokenFormatVersion = "1"
-	stringPrefix           = "S:"
-	numberPrefix           = "N:"
+	stringPrefix = "S:"
+	numberPrefix = "N:"
+
+	NextPageToken = "NextPageToken"
 )
+
+var formatVersionExpirations = []time.Time{
+	time.Date(1971, 11, 30, 3, 56, 0, 0, time.UTC), // Version "0" expired a while ago
+}
+
+var formatVersion = uint(len(formatVersionExpirations))
 
 // TODO: add queryable details into token
 func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*dynamodb.AttributeValue) (*string, gomerr.Gomerr) {
@@ -39,16 +49,16 @@ func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*
 		return nil, nil
 	}
 
-	nextToken := &nextToken{
-		Version:          nextTokenFormatVersion,
+	nt := &nextToken{
+		Version:          formatVersion,
 		Filter:           nil, // TODO
 		LastEvaluatedKey: encodeLastEvaluatedKey(lastEvaluatedKey),
 		Expiration:       expirationTime(),
 	}
 
-	toEncrypt, err := json.Marshal(nextToken)
+	toEncrypt, err := json.Marshal(nt)
 	if err != nil {
-		return nil, gomerr.Marshal("nextToken", nextToken).Wrap(err)
+		return nil, gomerr.Marshal(NextPageToken, nt).Wrap(err)
 	}
 
 	// TODO: provide an encryption context - probably w/ q data
@@ -60,8 +70,6 @@ func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*
 	encoded := base64.RawURLEncoding.EncodeToString(encrypted)
 	return &encoded, nil
 }
-
-var validTokenFormatVersions = constraint.OneOf(nextTokenFormatVersion)
 
 // untokenize will pull the NextPageToken from the queryable and (if there is one) decode the value. Possible errors:
 //
@@ -82,25 +90,26 @@ func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.Attri
 
 	encrypted, err := base64.RawURLEncoding.DecodeString(*q.NextPageToken())
 	if err != nil {
-		return nil, constraint.NotSatisfied(constraint.Base64, "NextPageToken", q.NextPageToken()).Wrap(err)
+		return nil, gomerr.MalformedValue(NextPageToken, q.NextPageToken()).WithReasons("Not base64-encoded").Wrap(err)
 	}
 
 	toUnmarshal, ge := t.cipher.Decrypt(encrypted, nil)
 	if ge != nil {
-		return nil, ge
+		return nil, gomerr.MalformedValue(NextPageToken, nil).Wrap(ge)
 	}
 
 	nt := &nextToken{}
-	if err := json.Unmarshal(toUnmarshal, nt); err != nil {
-		return nil, gomerr.Unmarshal("NextPageToken", toUnmarshal, nt).Wrap(err)
+	if err = json.Unmarshal(toUnmarshal, nt); err != nil {
+		return nil, gomerr.MalformedValue(NextPageToken, nil).Wrap(err)
 	}
 
-	if ge := validTokenFormatVersions.Validate(nt.Version); ge != nil {
-		return nil, ge
+	// only one version to check so far...
+	if nt.Version != formatVersion {
+		return nil, gomerr.ValueExpired(NextPageToken, formatVersionExpirations[nt.Version]).Wrap(ge)
 	}
 
-	if nt.expired() {
-		return nil, gomerr.Expired("NextPageToken", nt.Expiration)
+	if nt.tokenExpired() {
+		return nil, gomerr.ValueExpired(NextPageToken, nt.Expiration)
 	}
 
 	// TODO: validate filter
@@ -112,8 +121,15 @@ func expirationTime() time.Time {
 	return time.Now().UTC().Add(time.Hour * 24)
 }
 
-func (nt *nextToken) expired() bool {
+func (nt *nextToken) tokenExpired() bool {
 	return time.Now().UTC().After(nt.Expiration)
+}
+
+func (nt *nextToken) formatVersionExpired() bool {
+	if nt.Version == formatVersion {
+		return false
+	}
+	return time.Now().UTC().After(formatVersionExpirations[nt.Version])
 }
 
 func encodeLastEvaluatedKey(lastEvaluatedKey map[string]*dynamodb.AttributeValue) map[string]string {

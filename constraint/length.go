@@ -8,75 +8,80 @@ import (
 // Length determines whether the value's length is either between (inclusively) two provided values (a min and max) or a
 // single value (internally: min = max). This tests for min <= len(value) <= max. The value's type can be one of Array,
 // Chan, Map, Slice, or String. Any other type will result in a false value from the constraint. If min is greater than
-// max or min is less than 0, this is equivalent to calling Invalid().
-func Length(values ...int) *constraint {
-	var min, max int
+// max or min is less than 0, this will return a Fail() constraint.
+func Length(values ...uint) Constraint {
+	var min, max uint
 	switch len(values) {
 	case 1:
 		min, max = values[0], values[0]
 	case 2:
 		min, max = values[0], values[1]
 	default:
-		return invalid().setDetails("Replaced", "true", "Reason", fmt.Sprintf("Length requires 1 or 2 input values, received %d", len(values)))
+		return Fail(fmt.Sprintf("'Length' constraint requires 1 or 2 input values, received %d", len(values)))
 	}
 
-	if min < 0 {
-		return invalid().setDetails("Replaced", "true", "Reason", fmt.Sprintf("Length values must be non-negative, received %d", min))
-	} else if min > max {
-		return invalid().setDetails("Replaced", "true", "Reason", fmt.Sprintf("Length(%d, %d) invalid, min > max", min, max))
-	}
-
-	return length(&min, &max, "len")
+	return length(&min, &max)
 }
 
 // MinLength determines whether the value's length is greater than or equal to the min value provided.
 // Stated explicitly, this tests for min <= len(value). The value's type can be one of Array, Chan,
 // Map, Slice, or String. Any other type will result in a false value from the constraint.
-func MinLength(min int) *constraint {
-	return length(&min, nil, "minlen")
+func MinLength(min uint) Constraint {
+	return length(&min, nil)
 }
 
 // MaxLength determines whether the value's length is less than or equal to the max value provided.
 // Stated explicitly, this tests for len(value) <= max. The value's type can be one of Array, Chan,
 // Map, Slice, or String. Any other type will result in a false value from the constraint.
-func MaxLength(max int) *constraint {
-	return length(nil, &max, "maxlen")
+func MaxLength(max uint) Constraint {
+	return length(nil, &max)
 }
 
 var Empty = MaxLength(0)
 
-func length(min, max *int, lookupName string) *constraint {
-	details := []interface{}{LookupName, lookupName}
-
-	if min != nil && min == max {
-		details = append(details, "Length", *min)
-	} else {
-		if min != nil {
-			details = append(details, "MinLength", *min)
-		}
+func length(min, max *uint) Constraint {
+	var constraintType string
+	var value interface{}
+	if min != nil {
 		if max != nil {
-			details = append(details, "MaxLength", *max)
+			if *min == *max {
+				constraintType = "LengthEquals"
+				value = *min
+			} else if *min > *max {
+				return Fail(fmt.Sprintf("'Length': min (%d) cannot be greater than max (%d)", *min, *max))
+			} else {
+				constraintType = "LengthBetween"
+				value = []uint{*min, *max}
+			}
+		} else if *min < 0 {
+			return Fail(fmt.Sprintf("'Length': min (%d) cannot be less than zero", *min))
+		} else {
+			constraintType = "LengthMin"
+			value = *min
 		}
+	} else if max != nil {
+		constraintType = "LengthMax"
+		value = *max
+	} else {
+		return Fail("'Length' unexpectedly received two nil pointers")
 	}
 
-	return (&constraint{test: func(value interface{}) bool {
-		vv := reflect.ValueOf(value)
-
-		if vv.Kind() == reflect.Ptr {
-			if vv.IsNil() {
-				return lenable(vv.Type().Elem().Kind()) && min != nil && *min == 0
+	return &constraint{constraintType, value, func(toTest interface{}) bool {
+		ttv := reflect.ValueOf(toTest)
+		if ttv.Kind() == reflect.Ptr {
+			if ttv.IsNil() {
+				return lenable(ttv.Type().Elem().Kind()) && min != nil && *min == 0
 			}
-
-			vv = vv.Elem()
+			ttv = ttv.Elem()
 		}
 
-		if lenable(vv.Kind()) {
-			length := vv.Len()
-			return (min == nil || length >= *min) && (max == nil || length <= *max)
+		if !lenable(ttv.Kind()) {
+			return false
 		}
+		ttLen := uint(ttv.Len())
 
-		return false
-	}}).setDetails(details...)
+		return (min == nil || ttLen >= *min) && (max == nil || ttLen <= *max)
+	}}
 }
 
 //goland:noinspection SpellCheckingInspection

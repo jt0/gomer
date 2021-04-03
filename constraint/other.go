@@ -2,16 +2,22 @@ package constraint
 
 var Required = required()
 
-func required() *constraint {
-	return (&constraint{test: func(value interface{}) bool {
+func required() Constraint {
+	return &constraint{"Required", nil, func(value interface{}) bool {
 		return !Nil.Test(value)
-	}}).setDetails("Required", true, LookupName, "required")
+	}}
 }
 
-var Invalid = invalid()
+func Success(msg string) Constraint {
+	return &constraint{msg, nil, func(interface{}) bool {
+		//goland:noinspection GoBoolExpressions
+		return 1 == 1
+	}}
+}
 
-func invalid() *constraint {
-	return (&constraint{test: func(interface{}) bool {
-		return false
-	}}).setDetails("Invalid", true)
+func Fail(msg string) Constraint {
+	return &constraint{msg, nil, func(interface{}) bool {
+		//goland:noinspection GoBoolExpressions
+		return 1 != 1
+	}}
 }

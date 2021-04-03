@@ -62,24 +62,24 @@ func ValidationFieldTool() fields.FieldTool {
 var toolInstance fields.FieldTool
 
 type validationFieldTool struct {
-	constraint Constraint
+	condition Condition
 }
 
 func (t validationFieldTool) Name() string {
 	return "constraint.ValidationFieldTool"
 }
 
-func (t validationFieldTool) Applier(_ reflect.Type, _ reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
+func (t validationFieldTool) Applier(_ reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	if input == nil {
 		return nil, nil
 	}
 
-	c, ge := constraintFor(input.(string), "")
+	c, ge := constraintFor(input.(string), noOp)
 	if ge != nil {
 		return nil, ge.AddAttribute("Validations", input)
 	}
 
-	return validationFieldTool{c}, nil
+	return validationFieldTool{Condition{structField.Name, c}}, nil
 }
 
 func (t validationFieldTool) Apply(_ reflect.Value, fieldValue reflect.Value, _ fields.ToolContext) gomerr.Gomerr {
@@ -87,20 +87,20 @@ func (t validationFieldTool) Apply(_ reflect.Value, fieldValue reflect.Value, _ 
 		fieldValue = fieldValue.Elem()
 	}
 
-	return t.constraint.Validate(fieldValue.Interface())
+	return t.condition.Validate(fieldValue.Interface())
 }
 
-var emptyConstraint = NewType(nil)
-
-func constraintFor(validationsString string, logicalOp string) (Constraint, gomerr.Gomerr) {
+func constraintFor(validationsString string, logicalOp logicalOp) (Constraint, gomerr.Gomerr) {
+	var c Constraint
+	var ok bool
 	var constraints []Constraint
 	var ovs string
 
-	if built, ok := built[validationsString]; ok {
-		if built.Details()[LookupName] == logicalOp {
-			return built, nil
+	if c, ok = built[validationsString]; ok {
+		if c.Type() == logicalOp {
+			return c, nil
 		}
-		constraints = append(constraints, built)
+		constraints = append(constraints, c)
 		ovs = logicalOp + "(" + validationsString + ")"
 		validationsString = ""
 	} else {
@@ -114,17 +114,17 @@ func constraintFor(validationsString string, logicalOp string) (Constraint, gome
 	for len(validationsString) > 0 {
 		openParenIndex := strings.Index(validationsString, "(")
 		commaIndex := strings.Index(validationsString, ",")
+		var ge gomerr.Gomerr
 
 		if openParenIndex >= 0 && (commaIndex < 0 || commaIndex >= openParenIndex) { // true for 1 & 3
 			constraintName := strings.ToLower(validationsString[:openParenIndex])
 			validations := validationsString[openParenIndex+1:] // '1,2)', 'required,len(1,2))
 
-			constrainer, ge := parameterizedConstraint(constraintName, &validations)
+			c, ge = parameterizedConstraint(constraintName, &validations)
 			if ge != nil {
-				return emptyConstraint, ge
+				return nil, ge
 			}
 
-			constraints = append(constraints, constrainer)
 			validationsString = validations
 		} else { // true for 2
 			var constraintName string
@@ -139,33 +139,33 @@ func constraintFor(validationsString string, logicalOp string) (Constraint, gome
 				validationsString = ""
 			}
 
-			constrainer, ge := constraintFor(constraintName, "")
+			c, ge = constraintFor(constraintName, "")
 			if ge != nil {
-				return emptyConstraint, ge
+				return nil, ge
 			}
-
-			constraints = append(constraints, constrainer)
 		}
+
+		constraints = append(constraints, c)
 	}
 
 	switch len(constraints) {
 	case 0:
-		return emptyConstraint, gomerr.Configuration("No constraints found")
+		return nil, gomerr.Configuration("No constraints found")
 	case 1:
-		if logicalOp == "not" {
+		if logicalOp == notOp {
 			not := Not(constraints[0])
 			built[ovs] = not
 			return not, nil
 		}
-		// ignore "and" and "or" since they simplify to the constraint itself
+		// ignore "andOp" and "orOp" since they simplify to the constraint itself
 		return constraints[0], nil
 	default:
 		switch logicalOp {
-		case "or":
+		case orOp:
 			or := Or(constraints...)
 			built[ovs] = or
 			return or, nil
-		case "not":
+		case notOp:
 			not := Not(And(constraints...))
 			built[ovs] = not
 			return not, nil
@@ -183,7 +183,7 @@ func parameterizedConstraint(constraintName string, parenthetical *string) (Cons
 	var accumulator int
 	for parenCounter := 1; parenCounter != 0; {
 		if closeIndex := strings.Index(remainder, ")"); closeIndex < 0 {
-			return emptyConstraint, gomerr.Configuration("Unable to find a balanced expression: (" + *parenthetical)
+			return nil, gomerr.Configuration("Unable to find a balanced expression: (" + *parenthetical)
 		} else if openIndex := strings.Index(remainder, "("); openIndex >= 0 && openIndex < closeIndex {
 			parenCounter++
 			accumulator += openIndex + 1
@@ -198,21 +198,25 @@ func parameterizedConstraint(constraintName string, parenthetical *string) (Cons
 	parametersString := (*parenthetical)[:accumulator-1]
 	*parenthetical = remainder
 
-	switch constraintName {
-	case "and", "or", "not":
-		return constraintFor(parametersString, constraintName)
+	switch strings.ToLower(constraintName) {
+	case lcAndOp:
+		return constraintFor(parametersString, andOp)
+	case lcOrOp:
+		return constraintFor(parametersString, orOp)
+	case lcNotOp:
+		return constraintFor(parametersString, notOp)
 	default:
 		return buildConstraint(constraintName, parametersString)
 	}
 }
 
 func buildConstraint(constraintName, parameterString string) (Constraint, gomerr.Gomerr) {
-	constrainerFunction, ok := available[constraintName]
+	cf, ok := available[constraintName]
 	if !ok {
-		return emptyConstraint, gomerr.Configuration("Unknown validation type: " + constraintName)
+		return nil, gomerr.Configuration("Unknown validation type: " + constraintName)
 	}
 
-	cfv := reflect.ValueOf(constrainerFunction)
+	cfv := reflect.ValueOf(cf)
 	cft := cfv.Type()
 	numIn := cft.NumIn()
 	isVariadic := cft.IsVariadic()
@@ -226,10 +230,10 @@ func buildConstraint(constraintName, parameterString string) (Constraint, gomerr
 	parametersLen := len(parameters)
 	if isVariadic {
 		if parametersLen < numIn {
-			return emptyConstraint, gomerr.Configuration(fmt.Sprintf("Expecting at least %d parameters, but found %d in %v", numIn, parametersLen, parameters))
+			return nil, gomerr.Configuration(fmt.Sprintf("Expecting at least %d parameters, but found %d in %v", numIn, parametersLen, parameters))
 		}
 	} else if parametersLen != numIn {
-		return emptyConstraint, gomerr.Configuration(fmt.Sprintf("Expecting %d parameters, but found %d in %v", numIn, parametersLen, parameters))
+		return nil, gomerr.Configuration(fmt.Sprintf("Expecting %d parameters, but found %d in %v", numIn, parametersLen, parameters))
 	}
 
 	in := make([]reflect.Value, parametersLen)
@@ -239,7 +243,7 @@ func buildConstraint(constraintName, parameterString string) (Constraint, gomerr
 		parameter := strings.ReplaceAll(parameters[pIndex], " ", ",")
 		pElem := reflect.New(cft.In(pIndex)).Elem()
 		if ge := flect.SetValue(pElem, parameter); ge != nil {
-			return emptyConstraint, gomerr.Configuration(fmt.Sprintf("Unable to set input parameter %d for %s with: %s", pIndex, constraintName, parameter))
+			return nil, gomerr.Configuration(fmt.Sprintf("Unable to set input parameter %d for %s with: %s", pIndex, constraintName, parameter))
 		}
 		in[pIndex] = pElem
 	}
@@ -251,7 +255,7 @@ func buildConstraint(constraintName, parameterString string) (Constraint, gomerr
 			parameter := strings.ReplaceAll(parameters[pIndex], " ", ",")
 			pElem := reflect.New(elemType).Elem()
 			if ge := flect.SetValue(pElem, parameter); ge != nil {
-				return emptyConstraint, gomerr.Configuration(fmt.Sprintf("Unable to set variadic parameter element for %s with: %s", constraintName, parameter))
+				return nil, gomerr.Configuration(fmt.Sprintf("Unable to set variadic parameter element for %s with: %s", constraintName, parameter))
 			}
 			in[pIndex] = pElem
 		}
@@ -260,8 +264,8 @@ func buildConstraint(constraintName, parameterString string) (Constraint, gomerr
 	// The set of "available" values all result in a single response element which is a Constraint.
 	// If something goes sideways, this will panic (and indicates a bug in Gomer).
 	results := cfv.Call(in)
-	constrainer := results[0].Interface().(Constraint)
-	built[constraintName+"("+parameterString+")"] = constrainer
+	c := results[0].Interface().(Constraint)
+	built[constraintName+"("+parameterString+")"] = c
 
-	return constrainer, nil
+	return c, nil
 }

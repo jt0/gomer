@@ -71,7 +71,7 @@ type ConsistencyTyper interface {
 type ItemResolver func(interface{}) (interface{}, gomerr.Gomerr)
 
 func Store(tableName string, config *Configuration /* resolver data.ItemResolver,*/, persistables ...data.Persistable) (store data.Store, ge gomerr.Gomerr) {
-	table := &table{
+	t := &table{
 		tableName:              &tableName,
 		index:                  index{canReadConsistently: true},
 		ddb:                    config.DynamoDb,
@@ -84,21 +84,21 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 		failDeleteIfNotPresent: config.FailDeleteIfNotPresent,
 	}
 
-	if table.valueSeparatorChar, ge = validOrDefaultChar(config.ValueSeparatorChar, ValueSeparatorCharDefault); ge != nil {
+	if t.valueSeparatorChar, ge = validOrDefaultChar(config.ValueSeparatorChar, ValueSeparatorCharDefault); ge != nil {
 		return nil, ge
 	}
 
-	if table.queryWildcardChar, ge = validOrDefaultChar(config.QueryWildcardChar, QueryWildcardCharDefault); ge != nil {
+	if t.queryWildcardChar, ge = validOrDefaultChar(config.QueryWildcardChar, QueryWildcardCharDefault); ge != nil {
 		return nil, ge
 	}
 
-	if ge := table.prepare(persistables); ge != nil {
+	if ge = t.prepare(persistables); ge != nil {
 		return nil, ge
 	}
 
-	tables[tableName] = table
+	tables[tableName] = t
 
-	return table, nil
+	return t, nil
 }
 
 func validOrDefaultChar(ch byte, _default byte) (byte, gomerr.Gomerr) {
@@ -216,7 +216,7 @@ func (t *table) Create(p data.Persistable) (ge gomerr.Gomerr) {
 		}
 	}()
 
-	ge = t.put(p, t.persistableTypes[p.TypeName()].fieldConstraints, true)
+	ge = t.put(p, t.persistableTypes[p.TypeName()].fieldConditions, true)
 
 	return
 }
@@ -230,14 +230,17 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 
 	// TODO:p1 support partial update vs put()
 
-	fieldConstraints := make(map[string]constraint.Constraint)
-
+	fieldConditionsToCheck := make([]constraint.Condition, 0, 1)
 	if update != nil {
 		uv := reflect.ValueOf(update).Elem()
 		pv := reflect.ValueOf(p).Elem()
 
 		for i := 0; i < uv.NumField(); i++ {
 			uField := uv.Field(i)
+			if uField.IsZero() { // continue if update field is nil or the zero value for struct/scalar types
+				continue
+			}
+
 			// TODO:p0 Support structs. Will want to recurse through and not bother w/ CanSet() checks until we know
 			//         we're dealing w/ a scalar.
 			if !uField.CanSet() || uField.Kind() == reflect.Struct || (uField.Kind() == reflect.Ptr && uField.Elem().Kind() == reflect.Struct) {
@@ -248,51 +251,45 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 			if reflect.DeepEqual(uField.Interface(), pField.Interface()) {
 				uField.Set(reflect.Zero(uField.Type()))
 			} else if uField.Kind() == reflect.Ptr {
-				if uField.IsNil() {
-					continue
-				}
 				if !pField.IsNil() && reflect.DeepEqual(uField.Elem().Interface(), pField.Elem().Interface()) {
 					uField.Set(reflect.Zero(uField.Type()))
 				} else {
 					pField.Set(uField)
 				}
 			} else {
-				if uField.IsZero() {
-					continue
-				}
 				pField.Set(uField)
 			}
 		}
 
-		for fieldName, fieldConstraint := range t.persistableTypes[p.TypeName()].fieldConstraints {
-			// Test if the field with the constraint has been updated. If so, add the constraint to the map and continue.
-			if !uv.FieldByName(fieldName).IsZero() {
-				fieldConstraints[fieldName] = fieldConstraint
-				continue
+	nextCondition:
+		for _, condition := range t.persistableTypes[p.TypeName()].fieldConditions {
+			// Test if the field with the constraint has been updated. If so, add the constraint and continue.
+			if !uv.FieldByName(condition.Target).IsZero() {
+				fieldConditionsToCheck = append(fieldConditionsToCheck, condition)
+				continue nextCondition
 			}
 
-			// See if there are other fields in the "scope" attribute. If yes, and if those fields have been updated,
-			// add the constraint to the map and continue.
-			if otherFields, ok := fieldConstraint.Details()["Scope"].([]string); ok {
-				for _, otherField := range otherFields {
-					uField := uv.FieldByName(otherField)
-					if !uField.IsZero() && uField.Interface() != pv.FieldByName(otherField).Interface() {
-						fieldConstraints[fieldName] = fieldConstraint
-						continue
-					}
+			// See if any of the other fields that are used to determine uniqueness have been updated. If yes, add the
+			// condition to the list and continue to the next condition.
+			for _, field := range condition.Constraint.Value().([]string) {
+				uField := uv.FieldByName(field)
+				if !uField.IsZero() {
+					fieldConditionsToCheck = append(fieldConditionsToCheck, condition)
+					continue nextCondition
 				}
 			}
+
 		}
 	}
 
-	ge = t.put(p, fieldConstraints, false)
+	ge = t.put(p, fieldConditionsToCheck, false)
 
 	return
 }
 
-func (t *table) put(p data.Persistable, fieldConstraints map[string]constraint.Constraint, ensureUniqueId bool) gomerr.Gomerr {
-	for _, fieldConstraint := range fieldConstraints {
-		if ge := fieldConstraint.Validate(p); ge != nil {
+func (t *table) put(p data.Persistable, fieldConditions []constraint.Condition, ensureUniqueId bool) gomerr.Gomerr {
+	for _, condition := range fieldConditions {
+		if ge := condition.Validate(p); ge != nil {
 			return ge
 		}
 	}
@@ -458,7 +455,7 @@ func (t *table) Query(q data.Queryable) (ge gomerr.Gomerr) {
 		return ge
 	}
 
-	nextToken, ge := t.nextTokenizer.tokenize(q, output.LastEvaluatedKey)
+	nt, ge := t.nextTokenizer.tokenize(q, output.LastEvaluatedKey)
 	if ge != nil {
 		return gomerr.Internal("Unable to generate nextToken").Wrap(ge)
 	}
@@ -471,12 +468,12 @@ func (t *table) Query(q data.Queryable) (ge gomerr.Gomerr) {
 	}
 
 	q.SetItems(items)
-	q.SetNextPageToken(nextToken)
+	q.SetNextPageToken(nt)
 
 	return nil
 }
 
-func (t *table) isFieldUnique(fieldName string, additionalFields []string) func(pi interface{}) bool {
+func (t *table) isFieldTupleUnique(fields []string) func(pi interface{}) bool {
 	return func(pi interface{}) bool {
 		p, ok := pi.(data.Persistable)
 		if !ok {
@@ -484,16 +481,14 @@ func (t *table) isFieldUnique(fieldName string, additionalFields []string) func(
 		}
 
 		q := p.NewQueryable()
-		if ct, ok := p.(ConsistencyTyper); ok {
+		if ct, ok := q.(ConsistencyTyper); ok {
 			ct.SetConsistencyType(Preferred)
 		}
 
 		qv := reflect.ValueOf(q).Elem()
 		pv := reflect.ValueOf(p).Elem()
-
-		qv.FieldByName(fieldName).Set(pv.FieldByName(fieldName))
-		for _, additionalField := range additionalFields {
-			qv.FieldByName(additionalField).Set(pv.FieldByName(additionalField))
+		for _, field := range fields {
+			qv.FieldByName(field).Set(pv.FieldByName(field))
 		}
 
 		input, ge := t.buildQueryInput(q, p.TypeName())

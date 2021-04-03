@@ -9,29 +9,29 @@ import (
 type stringPtr *string
 
 func StartsWith(prefix string) *constraint {
-	return (&constraint{test: func(value interface{}) bool {
-		switch vt := value.(type) {
+	return &constraint{"StartsWith", prefix, func(toTest interface{}) bool {
+		switch tt := toTest.(type) {
 		case string:
-			return strings.HasPrefix(vt, prefix)
+			return strings.HasPrefix(tt, prefix)
 		case stringPtr:
-			return vt != nil && strings.HasPrefix(*vt, prefix)
+			return tt != nil && strings.HasPrefix(*tt, prefix)
 		default:
 			return false
 		}
-	}}).setDetails("Prefix", prefix, LookupName, "startswith")
+	}}
 }
 
 func EndsWith(suffix string) *constraint {
-	return (&constraint{test: func(value interface{}) bool {
-		switch vt := value.(type) {
+	return &constraint{"EndsWith", suffix, func(toTest interface{}) bool {
+		switch tt := toTest.(type) {
 		case string:
-			return strings.HasSuffix(vt, suffix)
+			return strings.HasSuffix(tt, suffix)
 		case stringPtr:
-			return vt != nil && strings.HasSuffix(*vt, suffix)
+			return tt != nil && strings.HasSuffix(*tt, suffix)
 		default:
 			return false
 		}
-	}}).setDetails("Suffix", suffix, LookupName, "endswith")
+	}}
 }
 
 func Regexp(r string) *constraint {
@@ -39,32 +39,32 @@ func Regexp(r string) *constraint {
 }
 
 func RegexpMatch(regexp *regexp.Regexp) *constraint {
-	return (&constraint{test: func(value interface{}) bool {
-		switch vt := value.(type) {
+	return &constraint{"Regexp", regexp.String(), func(toTest interface{}) bool {
+		switch tt := toTest.(type) {
 		case string:
-			return regexp.MatchString(vt)
+			return regexp.MatchString(tt)
 		case stringPtr:
-			return vt != nil && regexp.MatchString(*vt)
+			return tt != nil && regexp.MatchString(*tt)
 		default:
 			return false
 		}
-	}}).setDetails("Regexp", regexp.String(), LookupName, "regexp")
+	}}
 }
 
 var Base64 = base64()
 
 func base64() *constraint {
-	return (&constraint{test: func(value interface{}) bool {
+	return &constraint{"Base64Encoded", true, func(toTest interface{}) bool {
 		var err error
-		switch vt := value.(type) {
+		switch tt := toTest.(type) {
 		case string:
-			_, err = b64.RawURLEncoding.DecodeString(vt)
+			_, err = b64.RawURLEncoding.DecodeString(tt)
 		case stringPtr:
-			_, err = b64.RawURLEncoding.DecodeString(*vt)
+			_, err = b64.RawURLEncoding.DecodeString(*tt)
 		default:
 			return false
 		}
 
 		return err != nil
-	}}).setDetails("Base64Encoded", true, LookupName, "base64")
+	}}
 }

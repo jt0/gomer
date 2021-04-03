@@ -71,10 +71,10 @@ func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement,
 	return nil
 }
 
-var safeTypeConstraint = constraint.OneOf(dynamodb.ScalarAttributeTypeS, dynamodb.ScalarAttributeTypeN)
+var safeTypeCondition = constraint.Condition{"AttributeType", constraint.OneOf(dynamodb.ScalarAttributeTypeS, dynamodb.ScalarAttributeTypeN)}
 
 func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
-	ge := safeTypeConstraint.Validate(attributeType)
+	ge := safeTypeCondition.Validate(attributeType)
 	if ge != nil {
 		return "", ge
 	}

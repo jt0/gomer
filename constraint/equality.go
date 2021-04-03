@@ -1,41 +1,39 @@
 package constraint
 
 import (
-	"fmt"
 	"reflect"
 )
 
-func Equals(compareTo interface{}) *constraint {
-	return (&constraint{test: func(value interface{}) bool {
-		return value == compareTo
-	}}).setDetails("Equals", compareTo, LookupName, "equals")
+func Equals(value interface{}) Constraint {
+	return &constraint{"Equals", value, func(toTest interface{}) bool {
+		return value == toTest
+	}}
 }
 
-func NotEquals(compareTo interface{}) *constraint {
-	return (&constraint{test: func(value interface{}) bool {
-		return value != compareTo
-	}}).setDetails("NotEquals", compareTo, LookupName, "notequals")
+func NotEquals(value interface{}) Constraint {
+	return &constraint{"NotEquals", value, func(toTest interface{}) bool {
+		return value != toTest
+	}}
 }
 
-func OneOf(compareTo ...interface{}) *constraint {
-	return (&constraint{test: func(value interface{}) bool {
-		for _, c := range compareTo {
-			if value == c {
+func OneOf(values ...interface{}) Constraint {
+	return &constraint{"OneOf", values, func(toTest interface{}) bool {
+		for _, value := range values {
+			if toTest == value {
 				return true
 			}
 		}
-
 		return false
-	}}).setDetails("OneOf", fmt.Sprintf("%v", compareTo), LookupName, "oneof")
+	}}
 }
 
-func TypeOf(i interface{}) *constraint {
-	t, ok := i.(reflect.Type)
+func TypeOf(value interface{}) Constraint {
+	t, ok := value.(reflect.Type)
 	if !ok {
-		t = reflect.TypeOf(i)
+		t = reflect.TypeOf(value)
 	}
 
-	return (&constraint{test: func(value interface{}) bool {
-		return reflect.TypeOf(value) == t
-	}}).setDetails("TypeOf", t.Name(), LookupName, "typeof")
+	return &constraint{"TypeOf", value, func(toTest interface{}) bool {
+		return reflect.TypeOf(toTest) == t
+	}}
 }

@@ -7,8 +7,8 @@ import (
 var Nil = isNil()
 
 func isNil() *constraint {
-	return (&constraint{test: func(value interface{}) bool {
-		vv := reflect.ValueOf(value)
+	return &constraint{"Nil", nil, func(toTest interface{}) bool {
+		vv := reflect.ValueOf(toTest)
 		if !vv.IsValid() {
 			return false
 		}
@@ -18,13 +18,13 @@ func isNil() *constraint {
 		default:
 			return false
 		}
-	}}).setDetails("Nil", true, LookupName, "nil")
+	}}
 }
 
 var NotNil = notNil()
 
 func notNil() *constraint {
-	return (&constraint{test: func(value interface{}) bool {
-		return !Nil.Test(value)
-	}}).setDetails("Nil", false, LookupName, "notnil")
+	return &constraint{"NotNil", "", func(toTest interface{}) bool {
+		return !Nil.Test(toTest)
+	}}
 }
