@@ -14,6 +14,7 @@ var built = map[string]Constraint{
 	"base64":   Base64,
 	"empty":    Empty,
 	"nil":      Nil,
+	"nonempty": NonEmpty,
 	"notnil":   NotNil,
 	"required": Required,
 }
@@ -62,7 +63,8 @@ func ValidationFieldTool() fields.FieldTool {
 var toolInstance fields.FieldTool
 
 type validationFieldTool struct {
-	condition Condition
+	target     string
+	constraint Constraint
 }
 
 func (t validationFieldTool) Name() string {
@@ -79,7 +81,7 @@ func (t validationFieldTool) Applier(_ reflect.Type, structField reflect.StructF
 		return nil, ge.AddAttribute("Validations", input)
 	}
 
-	return validationFieldTool{Condition{structField.Name, c}}, nil
+	return validationFieldTool{structField.Name, c}, nil
 }
 
 func (t validationFieldTool) Apply(_ reflect.Value, fieldValue reflect.Value, _ fields.ToolContext) gomerr.Gomerr {
@@ -87,7 +89,7 @@ func (t validationFieldTool) Apply(_ reflect.Value, fieldValue reflect.Value, _ 
 		fieldValue = fieldValue.Elem()
 	}
 
-	return t.condition.Validate(fieldValue.Interface())
+	return t.constraint.Validate(t.target, fieldValue.Interface())
 }
 
 func constraintFor(validationsString string, logicalOp logicalOp) (Constraint, gomerr.Gomerr) {

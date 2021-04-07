@@ -71,10 +71,10 @@ func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement,
 	return nil
 }
 
-var safeTypeCondition = constraint.Condition{"AttributeType", constraint.OneOf(dynamodb.ScalarAttributeTypeS, dynamodb.ScalarAttributeTypeN)}
+var safeTypeConstraint = constraint.OneOf(dynamodb.ScalarAttributeTypeS, dynamodb.ScalarAttributeTypeN)
 
 func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
-	ge := safeTypeCondition.Validate(attributeType)
+	ge := safeTypeConstraint.Validate("AttributeType", attributeType)
 	if ge != nil {
 		return "", ge
 	}
@@ -182,7 +182,7 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 
 	// Needs more work to handle multi-attribute cases such as "between"
 	if i.sk != nil {
-		for kfi, kf := range i.sk.keyFieldsByPersistable[ptName] {
+		for _, kf := range i.sk.keyFieldsByPersistable[ptName] {
 			c.preferred = kf.preferred
 			c.ascending = kf.ascending
 
@@ -191,20 +191,10 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 			}
 
 			fv := qv.FieldByName(kf.name)
-			if !fv.IsValid() {
-				// Fixed bug where index could be dropped as a candidate if
-				// a trailing sort key member doesn't exist in the Queryable.
-				if kfi == 0 { // TODO: Why is this additional check here? It may be valid to have no SK value present for a query
-					return nil
-				} else {
-					c.skMissing++
-				}
-			} else if fv.IsZero() {
+			if !fv.IsValid() || fv.IsZero() {
 				c.skMissing++
-			} else {
-				if c.skMissing > 0 { // Cannot have gaps in the middle of the sort key
-					return nil
-				}
+			} else if c.skMissing > 0 { // Cannot have gaps in the middle of the sort key
+				return nil
 			}
 		}
 

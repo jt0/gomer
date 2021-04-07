@@ -32,7 +32,7 @@ func AttrP(k string, v *string) string {
 	if v == nil {
 		return ""
 	}
-	return Attr(k, *v)
+	return fmt.Sprintf(`"%s": "%s"`, k, *v)
 }
 
 // Raw string to attribute

@@ -14,32 +14,20 @@ type TestCase struct {
 	Tool     fields.FieldTool
 	Context  fields.ToolContext
 	Input    interface{}
-	Output   interface{}
 	Expected interface{} // can be the same type as output or a gomerr.Gomerr
 }
 
 func RunTests(t *testing.T, tests []TestCase) {
-	var testStructToFields = make(map[reflect.Type]fields.Fields)
-
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
 			targetType := reflect.TypeOf(tt.Input).Elem()
-			fs, ok := testStructToFields[targetType]
-			if !ok {
-				var ge gomerr.Gomerr
-				fs, ge = fields.Get(targetType)
-				assert.Success(t, ge)
-				testStructToFields[targetType] = fs
-			}
+			fs, ge := fields.Get(targetType)
+			assert.Success(t, ge)
 
-			ge := fs.ApplyTools(reflect.ValueOf(tt.Input).Elem(), fields.Application{tt.Tool.Name(), tt.Context})
+			ge = fs.ApplyTools(reflect.ValueOf(tt.Input).Elem(), fields.Application{tt.Tool.Name(), tt.Context})
 			if expectedError, ok := tt.Expected.(gomerr.Gomerr); !ok {
 				assert.Success(t, ge)
-				if tt.Output == nil {
-					assert.Equals(t, tt.Expected, tt.Input)
-				} else {
-					assert.Equals(t, tt.Expected, tt.Output)
-				}
+				assert.Equals(t, tt.Expected, tt.Input)
 			} else {
 				assert.ErrorType(t, ge, expectedError, "Error did not match expected type")
 			}

@@ -216,7 +216,7 @@ func (t *table) Create(p data.Persistable) (ge gomerr.Gomerr) {
 		}
 	}()
 
-	ge = t.put(p, t.persistableTypes[p.TypeName()].fieldConditions, true)
+	ge = t.put(p, t.persistableTypes[p.TypeName()].fieldConstraints, true)
 
 	return
 }
@@ -230,17 +230,13 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 
 	// TODO:p1 support partial update vs put()
 
-	fieldConditionsToCheck := make([]constraint.Condition, 0, 1)
+	fieldConstraintsToCheck := make(map[string]constraint.Constraint)
 	if update != nil {
 		uv := reflect.ValueOf(update).Elem()
 		pv := reflect.ValueOf(p).Elem()
 
 		for i := 0; i < uv.NumField(); i++ {
 			uField := uv.Field(i)
-			if uField.IsZero() { // continue if update field is nil or the zero value for struct/scalar types
-				continue
-			}
-
 			// TODO:p0 Support structs. Will want to recurse through and not bother w/ CanSet() checks until we know
 			//         we're dealing w/ a scalar.
 			if !uField.CanSet() || uField.Kind() == reflect.Struct || (uField.Kind() == reflect.Ptr && uField.Elem().Kind() == reflect.Struct) {
@@ -251,30 +247,36 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 			if reflect.DeepEqual(uField.Interface(), pField.Interface()) {
 				uField.Set(reflect.Zero(uField.Type()))
 			} else if uField.Kind() == reflect.Ptr {
+				if uField.IsNil() {
+					continue
+				}
 				if !pField.IsNil() && reflect.DeepEqual(uField.Elem().Interface(), pField.Elem().Interface()) {
 					uField.Set(reflect.Zero(uField.Type()))
 				} else {
 					pField.Set(uField)
 				}
 			} else {
+				if uField.IsZero() {
+					continue
+				}
 				pField.Set(uField)
 			}
 		}
 
 	nextCondition:
-		for _, condition := range t.persistableTypes[p.TypeName()].fieldConditions {
+		for fieldName, fieldConstraint := range t.persistableTypes[p.TypeName()].fieldConstraints {
 			// Test if the field with the constraint has been updated. If so, add the constraint and continue.
-			if !uv.FieldByName(condition.Target).IsZero() {
-				fieldConditionsToCheck = append(fieldConditionsToCheck, condition)
+			if !uv.FieldByName(fieldName).IsZero() {
+				fieldConstraintsToCheck[fieldName] = fieldConstraint
 				continue nextCondition
 			}
 
 			// See if any of the other fields that are used to determine uniqueness have been updated. If yes, add the
 			// condition to the list and continue to the next condition.
-			for _, field := range condition.Constraint.Value().([]string) {
-				uField := uv.FieldByName(field)
-				if !uField.IsZero() {
-					fieldConditionsToCheck = append(fieldConditionsToCheck, condition)
+			for _, otherField := range fieldConstraint.Value().([]string) {
+				uField := uv.FieldByName(otherField)
+				if !uField.IsZero() /* TODO: remove rest once structs supported above */ && uField.Interface() != pv.FieldByName(otherField).Interface() {
+					fieldConstraintsToCheck[fieldName] = fieldConstraint
 					continue nextCondition
 				}
 			}
@@ -282,14 +284,14 @@ func (t *table) Update(p data.Persistable, update data.Persistable) (ge gomerr.G
 		}
 	}
 
-	ge = t.put(p, fieldConditionsToCheck, false)
+	ge = t.put(p, fieldConstraintsToCheck, false)
 
 	return
 }
 
-func (t *table) put(p data.Persistable, fieldConditions []constraint.Condition, ensureUniqueId bool) gomerr.Gomerr {
-	for _, condition := range fieldConditions {
-		if ge := condition.Validate(p); ge != nil {
+func (t *table) put(p data.Persistable, fieldConstraints map[string]constraint.Constraint, ensureUniqueId bool) gomerr.Gomerr {
+	for fieldName, fieldConstraint := range fieldConstraints {
+		if ge := fieldConstraint.Validate(fieldName, p); ge != nil {
 			return ge
 		}
 	}

@@ -246,10 +246,10 @@ func (g *gomerr) ToMap() map[string]interface{} {
 		}
 
 		fi := fv.Interface()
-		m[name] = fi
+		m[name] = fmt.Sprintf("%+v", fi)
 		if tag := ft.Tag.Get("gomerr"); tag != "" {
 			if tag == "include_type" {
-				m["_"+name+"Type"] = util.UnqualifiedTypeName(fi)
+				m["_"+name+"Type"] = reflect.TypeOf(fi).String()
 			}
 		}
 	}

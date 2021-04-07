@@ -12,67 +12,35 @@ type FieldTool interface {
 	Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (Applier, gomerr.Gomerr)
 }
 
-var registeredFieldTools []FieldTool
-
-func RegisterFieldTools(tools ...FieldTool) {
-	if len(registeredFieldTools)+len(tools) > 100 {
-		panic("Too many tools. Max = 100")
-	}
-
-alreadyRegistered:
-	for _, tool := range tools {
-		// Skip over duplicates
-		for _, registered := range registeredFieldTools {
-			if tool.Name() == registered.Name() {
-				continue alreadyRegistered
-			}
-		}
-		registeredFieldTools = append(registeredFieldTools, tool)
-	}
-}
-
 type Applier interface {
 	Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) gomerr.Gomerr
 }
 
 type ConfigProvider interface {
-	ConfigFor(tool FieldTool, structType reflect.Type, structField reflect.StructField) interface{}
+	ConfigPerTool(structType reflect.Type, structField reflect.StructField) map[FieldTool]interface{}
 }
 
-var FieldToolConfigProvider ConfigProvider = NewStructTagConfigProvider()
+var FieldToolConfigProvider ConfigProvider = StructTagConfigProvider{}
 
-type StructTagConfigProvider struct {
-	tagKeyFor map[string]string
-}
-
-func NewStructTagConfigProvider() StructTagConfigProvider {
-	return StructTagConfigProvider{map[string]string{}}
-}
+type StructTagConfigProvider map[string]FieldTool
 
 func (s StructTagConfigProvider) WithKey(tagKey string, tool FieldTool) StructTagConfigProvider {
-	if tagKey == "" {
-
+	if tagKey != "" {
+		s[tagKey] = tool
 	}
-	RegisterFieldTools(tool)
-	s.tagKeyFor[tool.Name()] = tagKey
+
 	return s
 }
 
-func (s StructTagConfigProvider) ConfigFor(tool FieldTool, _ reflect.Type, structField reflect.StructField) interface{} {
-	tagKey, ok := s.tagKeyFor[tool.Name()]
-	if !ok {
-		tagKey = tool.Name()
+func (s StructTagConfigProvider) ConfigPerTool(_ reflect.Type, structField reflect.StructField) map[FieldTool]interface{} {
+	cpt := make(map[FieldTool]interface{})
+	for tagKey, fieldTool := range s {
+		if tagValue, ok := structField.Tag.Lookup(tagKey); ok {
+			cpt[fieldTool] = tagValue
+		}
 	}
 
-	var config interface{}
-	tagValue, ok := structField.Tag.Lookup(tagKey)
-	if ok {
-		config = tagValue
-	} else {
-		config = nil
-	}
-
-	return config
+	return cpt
 }
 
 type FunctionApplier struct {

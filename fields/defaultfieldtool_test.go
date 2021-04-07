@@ -30,14 +30,14 @@ func init() {
 		},
 	})
 
-	fields.FieldToolConfigProvider = fields.NewStructTagConfigProvider().WithKey("default", defaultTool)
+	fields.FieldToolConfigProvider = fields.StructTagConfigProvider{}.WithKey("default", defaultTool)
 }
 
 var defaultTool = fields.DefaultFieldTool()
 
 func TestDefaultTool(t *testing.T) {
 	fields_test.RunTests(t, []fields_test.TestCase{
-		{"Simple test", defaultTool, fields.EnsureContext(), &DefaultTest{}, nil, &DefaultTest{orange, "123", 123}},
+		{"Simple test", defaultTool, fields.EnsureContext(), &DefaultTest{}, &DefaultTest{orange, "123", 123}},
 	})
 }
 
@@ -49,10 +49,10 @@ func ExampleDefaultFieldTool() {
 		BattingAverage float32 `default:"?=.500"`
 	}
 
-	fields.FieldToolConfigProvider = fields.NewStructTagConfigProvider().WithKey("default", fields.DefaultFieldTool())
+	fields.FieldToolConfigProvider = fields.StructTagConfigProvider{}.WithKey("default", fields.DefaultFieldTool())
 
 	newPlayer := BaseballPlayer{FieldPosition: "pitcher"}
-	baseballPlayerFields, _ := fields.Process(reflect.TypeOf(newPlayer))
+	baseballPlayerFields, _ := fields.Process(reflect.TypeOf(newPlayer), fields.AsNew)
 	baseballPlayerFields.ApplyTools(reflect.ValueOf(&newPlayer).Elem(), fields.Application{ToolName: fields.DefaultFieldTool().Name()})
 
 	fmt.Printf("Player #%d (BA: %.3f) playing as a %s for %s",

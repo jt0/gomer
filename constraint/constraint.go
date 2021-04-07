@@ -4,23 +4,11 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-type Condition struct {
-	Target     string
-	Constraint Constraint
-}
-
-func (c *Condition) Validate(toTest interface{}) gomerr.Gomerr {
-	if !c.Constraint.Test(toTest) {
-		return gomerr.Build(new(NotSatisfiedError), c, toTest).(*NotSatisfiedError)
-	}
-
-	return nil
-}
-
 type Constraint interface {
 	Type() string
 	Value() interface{}
-	Test(interface{}) bool
+	Test(value interface{}) bool
+	Validate(target string, value interface{}) gomerr.Gomerr
 }
 
 func New(constraintType string, value interface{}, testFunction func(toTest interface{}) bool) Constraint {
@@ -43,4 +31,12 @@ func (c *constraint) Value() interface{} {
 
 func (c *constraint) Test(value interface{}) bool {
 	return c.test(value)
+}
+
+func (c *constraint) Validate(target string, value interface{}) gomerr.Gomerr {
+	if !c.Test(value) {
+		return gomerr.Build(new(NotSatisfiedError), target, c, value).(*NotSatisfiedError)
+	}
+
+	return nil
 }

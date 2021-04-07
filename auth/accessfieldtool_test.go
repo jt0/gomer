@@ -34,7 +34,7 @@ var (
 )
 
 func init() {
-	fields.FieldToolConfigProvider = fields.NewStructTagConfigProvider().WithKey("access", auth.AccessFieldTool())
+	fields.FieldToolConfigProvider = fields.StructTagConfigProvider{}.WithKey("access", auth.AccessFieldTool())
 
 	auth.RegisterFieldAccessPrincipals(one, two)
 }
@@ -42,13 +42,13 @@ func init() {
 func TestAccessTool(t *testing.T) {
 	copiedTo := &AccessTest{}
 	fields_test.RunTests(t, []fields_test.TestCase{
-		{"Remove non-readable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.ReadPermission), all(), nil, allExpected()},
-		{"Remove non-readable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.ReadPermission), all(), nil, partial("ABCDI")},
-		{"Remove non-creatable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.CreatePermission), all(), nil, allExpected()},
-		{"Remove non-creatable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.CreatePermission), all(), nil, partial("ABEFIJ")},
-		{"Remove non-updatable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.UpdatePermission), all(), nil, allExpected()},
-		{"Remove non-updatable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.UpdatePermission), all(), nil, partial("ACEGIJ")},
-		{"Copy provided", auth.AccessFieldTool(), auth.AddCopyProvidedToContext(reflect.ValueOf(all()).Elem(), nil), copiedTo, copiedTo, partial("IJ")},
+		{"Remove non-readable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.ReadPermission), all(), allExpected()},
+		{"Remove non-readable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.ReadPermission), all(), partial("ABCDI")},
+		{"Remove non-creatable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.CreatePermission), all(), allExpected()},
+		{"Remove non-creatable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.CreatePermission), all(), partial("ABEFIJ")},
+		{"Remove non-updatable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.UpdatePermission), all(), allExpected()},
+		{"Remove non-updatable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.UpdatePermission), all(), partial("ACEGIJ")},
+		{"Copy provided", auth.AccessFieldTool(), auth.AddCopyProvidedToContext(reflect.ValueOf(all()).Elem(), nil), copiedTo, partial("IJ")},
 	})
 }
 

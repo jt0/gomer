@@ -5,52 +5,61 @@ import (
 	"testing"
 
 	"github.com/jt0/gomer/_test/assert"
-	"github.com/jt0/gomer/_test/helpers/fields_test"
 	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/id"
 )
 
-// type IdTest struct {
-// 	Id string `id:"$id"`
-// }
-//
-// type CreateIdTest struct {
-// 	Id string `id:"create:$id"`
-// }
-//
-// type UpdateIdTest struct {
-// 	Id string `id:"update:$id"`
-// }
-
-const defaultId = "DeFaUlTiD"
-
-func init() {
-	fields.RegisterFieldFunctions(map[string]func(reflect.Value) interface{}{
-		"$id": func(_ reflect.Value) interface{} {
-			return defaultId
-		},
-	})
-
-	fields.FieldToolConfigProvider = fields.NewStructTagConfigProvider().WithKey("id", id.CopyIdsFieldTool())
+type Base struct {
+	BaseId   string
+	SecretId string
 }
 
-func TestIdTool(t *testing.T) {
-	fields_test.RunTests(t, []fields_test.TestCase{
-		// {"No scope, implicit id assignment", id.CopyIdsFieldTool(), fields.ToolContext{}, &IdTest{}, nil, &IdTest{defaultId}},
-		// {"Wrong scope ('unknown'), implicit id assignment", id.CopyIdsFieldTool(), fields.AddScopeToContext("unknown"), &IdTest{}, nil, &IdTest{defaultId}},
-		// {"No scope, id not assigned", id.CopyIdsFieldTool(), fields.ToolContext{}, &CreateIdTest{}, nil, &CreateIdTest{}},
-		// {"Right scope ('create'), explicit id assignment", id.CopyIdsFieldTool(), fields.AddScopeToContext("create"), &CreateIdTest{}, nil, &CreateIdTest{defaultId}},
-		// {"Wrong scope ('update'), id not assigned", id.CopyIdsFieldTool(), fields.AddScopeToContext("update"), &CreateIdTest{}, nil, &CreateIdTest{}},
-		// {"Wrong scope ('create'), id not assigned", id.CopyIdsFieldTool(), fields.AddScopeToContext("create"), &UpdateIdTest{}, nil, &UpdateIdTest{}},
-		// {"Right scope ('update'), explicit id assignment", id.CopyIdsFieldTool(), fields.AddScopeToContext("update"), &UpdateIdTest{}, nil, &UpdateIdTest{defaultId}},
-	})
+type One struct {
+	Base
+	Id string `id:"BaseId,~SecretId"`
+}
+
+type Two struct {
+	One
+}
+
+func init() {
+	fields.FieldToolConfigProvider = fields.StructTagConfigProvider{}.WithKey("id", id.CopyIdsFieldTool())
+}
+
+func TestCopyFromStruct(t *testing.T) {
+	source := &One{Base{"base_id", "secret_id"}, "wrapper_id"}
+	toolContext := fields.EnsureContext().Add(id.SourceValue, source)
+
+	destination := &One{}
+	targetType := reflect.TypeOf(destination).Elem()
+	fs, ge := fields.Get(targetType)
+	assert.Success(t, ge)
+
+	ge = fs.ApplyTools(reflect.ValueOf(destination).Elem(), fields.Application{id.CopyIdsFieldTool().Name(), toolContext})
+	assert.Success(t, ge)
+	assert.Equals(t, source, destination)
+}
+
+func TestCopyFromAnonymous(t *testing.T) {
+	source := &Two{One{Base{"base_id", "secret_id"}, "wrapper_id"}}
+	toolContext := fields.EnsureContext().Add(id.SourceValue, source)
+
+	destination := &Two{}
+	targetType := reflect.TypeOf(destination).Elem()
+	fs, ge := fields.Get(targetType)
+	assert.Success(t, ge)
+
+	ge = fs.ApplyTools(reflect.ValueOf(destination).Elem(), fields.Application{id.CopyIdsFieldTool().Name(), toolContext})
+	assert.Success(t, ge)
+	assert.Equals(t, source, destination)
 }
 
 func TestTwoIdFieldsFail(t *testing.T) {
 	type TwoIdsTest struct {
-		Id1 string `id:"$id"`
-		Id2 string `id:"$id"`
+		Id1 string `id:""`
+		Id2 string `id:""`
 	}
 
 	_, ge := fields.Get(reflect.TypeOf(TwoIdsTest{}))

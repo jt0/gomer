@@ -26,7 +26,7 @@ func Register(instance Instance, collection Collection, actions map[interface{}]
 	if md != nil {
 		return md, nil
 	}
-	_, ge = fields.Process(it.Elem())
+	_, ge = fields.Get(it.Elem())
 	if ge != nil {
 		return nil, ge
 	}
@@ -38,7 +38,7 @@ func Register(instance Instance, collection Collection, actions map[interface{}]
 	var ct reflect.Type
 	if collection != nil {
 		ct = reflect.TypeOf(collection)
-		_, ge = fields.Process(ct.Elem())
+		_, ge = fields.Get(ct.Elem())
 		if ge != nil {
 			return nil, ge
 		}

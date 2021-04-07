@@ -6,11 +6,11 @@ import (
 
 type NotSatisfiedError struct {
 	gomerr.Gomerr
-
-	Condition Condition
-	Provided  interface{}
+	Target     string
+	Constraint Constraint
+	Value      interface{}
 }
 
-func NotSatisfied(condition Condition, provided interface{}) *NotSatisfiedError {
-	return gomerr.Build(new(NotSatisfiedError), condition, provided).(*NotSatisfiedError)
+func NotSatisfied(target string, constraint Constraint, value interface{}) *NotSatisfiedError {
+	return gomerr.Build(new(NotSatisfiedError), target, constraint, value).(*NotSatisfiedError)
 }

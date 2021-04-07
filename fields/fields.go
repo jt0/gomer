@@ -22,10 +22,17 @@ func Get(structType reflect.Type) (Fields, gomerr.Gomerr) {
 		return fields, nil
 	}
 
-	return Process(structType)
+	return Process(structType, AsNew)
 }
 
-func Process(structType reflect.Type) (Fields, gomerr.Gomerr) {
+type ProcessType int
+
+const (
+	AsNew = iota
+	Update
+)
+
+func Process(structType reflect.Type, processType ProcessType) (Fields, gomerr.Gomerr) {
 	if structType.Kind() != reflect.Struct {
 		return nil, gomerr.Configuration("Input's kind is not a struct. Do you need to call Elem()?").AddAttribute("Kind", structType.Kind().String())
 	}
@@ -35,7 +42,13 @@ func Process(structType reflect.Type) (Fields, gomerr.Gomerr) {
 		return nil, gomerr.Configuration("Failed to process Fields for " + structType.Name()).Wrap(gomerr.Batcher(errors))
 	}
 
-	processed[structType.Name()] = fields
+	if existing := processed[structType.Name()]; existing != nil && processType == Update {
+		for toolName, updated := range fields {
+			existing[toolName] = updated
+		}
+	} else {
+		processed[structType.Name()] = fields
+	}
 
 	return fields, nil
 }
@@ -63,8 +76,7 @@ func processStruct(structType reflect.Type, path string) (Fields, []gomerr.Gomer
 		}
 
 		appliersByName := make(map[string]Applier)
-		for _, fieldTool := range registeredFieldTools {
-			config := FieldToolConfigProvider.ConfigFor(fieldTool, structType, structField)
+		for fieldTool, config := range FieldToolConfigProvider.ConfigPerTool(structType, structField) {
 			applier, ge := fieldTool.Applier(structType, structField, config)
 			if ge != nil {
 				errors = append(errors, ge)

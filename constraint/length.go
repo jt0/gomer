@@ -37,7 +37,17 @@ func MaxLength(max uint) Constraint {
 	return length(nil, &max)
 }
 
-var Empty = MaxLength(0)
+var Empty = func() Constraint {
+	c := MaxLength(0).(*constraint)
+	c.type_ = "Empty"
+	return c
+}()
+
+var NonEmpty = func() Constraint {
+	c := MinLength(1).(*constraint)
+	c.type_ = "NonEmpty"
+	return c
+}()
 
 func length(min, max *uint) Constraint {
 	var constraintType string
