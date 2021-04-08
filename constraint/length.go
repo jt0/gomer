@@ -76,7 +76,7 @@ func length(min, max *uint) Constraint {
 		return Fail("'Length' unexpectedly received two nil pointers")
 	}
 
-	return &constraint{constraintType, value, func(toTest interface{}) bool {
+	return New(constraintType, value, func(toTest interface{}) bool {
 		ttv := reflect.ValueOf(toTest)
 		if ttv.Kind() == reflect.Ptr {
 			if ttv.IsNil() {
@@ -91,7 +91,7 @@ func length(min, max *uint) Constraint {
 		ttLen := uint(ttv.Len())
 
 		return (min == nil || ttLen >= *min) && (max == nil || ttLen <= *max)
-	}}
+	})
 }
 
 //goland:noinspection SpellCheckingInspection

@@ -61,7 +61,6 @@ var GomerrToStatusCode = map[string]int{
 	util.UnqualifiedTypeName(limit.ExceededError{}):       HttpStatusLimitExceeded,
 	util.UnqualifiedTypeName(gomerr.NotFoundError{}):      http.StatusNotFound,
 
-	// XXX: finish populating..
 }
 
 func defaultGomerrRenderer(ge gomerr.Gomerr, _ *gin.Context) (statusCode int, responsePayload interface{}) {
@@ -76,6 +75,6 @@ func defaultGomerrRenderer(ge gomerr.Gomerr, _ *gin.Context) (statusCode int, re
 }
 
 func defaultGomerrBatchRenderer(bge gomerr.BatchError, _ *gin.Context) (statusCode int, responsePayload interface{}) {
-	// XXX
+	// TODO:p1 Basic impl
 	return 0, nil
 }

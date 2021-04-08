@@ -8,8 +8,8 @@ import (
 
 type stringPtr *string
 
-func StartsWith(prefix string) *constraint {
-	return &constraint{"StartsWith", prefix, func(toTest interface{}) bool {
+func StartsWith(prefix string) Constraint {
+	return New("StartsWith", prefix, func(toTest interface{}) bool {
 		switch tt := toTest.(type) {
 		case string:
 			return strings.HasPrefix(tt, prefix)
@@ -18,11 +18,11 @@ func StartsWith(prefix string) *constraint {
 		default:
 			return false
 		}
-	}}
+	})
 }
 
-func EndsWith(suffix string) *constraint {
-	return &constraint{"EndsWith", suffix, func(toTest interface{}) bool {
+func EndsWith(suffix string) Constraint {
+	return New("EndsWith", suffix, func(toTest interface{}) bool {
 		switch tt := toTest.(type) {
 		case string:
 			return strings.HasSuffix(tt, suffix)
@@ -31,15 +31,15 @@ func EndsWith(suffix string) *constraint {
 		default:
 			return false
 		}
-	}}
+	})
 }
 
-func Regexp(r string) *constraint {
+func Regexp(r string) Constraint {
 	return RegexpMatch(regexp.MustCompile(r))
 }
 
-func RegexpMatch(regexp *regexp.Regexp) *constraint {
-	return &constraint{"Regexp", regexp.String(), func(toTest interface{}) bool {
+func RegexpMatch(regexp *regexp.Regexp) Constraint {
+	return New("Regexp", regexp.String(), func(toTest interface{}) bool {
 		switch tt := toTest.(type) {
 		case string:
 			return regexp.MatchString(tt)
@@ -48,13 +48,13 @@ func RegexpMatch(regexp *regexp.Regexp) *constraint {
 		default:
 			return false
 		}
-	}}
+	})
 }
 
 var Base64 = base64()
 
-func base64() *constraint {
-	return &constraint{"Base64Encoded", true, func(toTest interface{}) bool {
+func base64() Constraint {
+	return New("Base64Encoded", true, func(toTest interface{}) bool {
 		var err error
 		switch tt := toTest.(type) {
 		case string:
@@ -66,5 +66,5 @@ func base64() *constraint {
 		}
 
 		return err != nil
-	}}
+	})
 }

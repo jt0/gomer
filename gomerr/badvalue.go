@@ -5,14 +5,13 @@ import "time"
 type BadValueType string
 
 const (
+	ExpiredValueType    BadValueType = "Expired"
 	GenericBadValueType BadValueType = "BadValue"
 	InvalidValueType    BadValueType = "Invalid"
 	MalformedValueType  BadValueType = "Malformed"
-	ExpiredValueType    BadValueType = "Expired"
 
-	DefaultReasonAttributeKey    = "Reason"
-	DefaultValidAttributeKey     = "Valid"
-	DefaultExpiredAtAttributeKey = "ExpiredAt"
+	DefaultReasonAttributeKey = "Reason"
+	DefaultValidAttributeKey  = "Valid"
 )
 
 type BadValueError struct {
@@ -20,14 +19,6 @@ type BadValueError struct {
 	Type  BadValueType
 	Name  string
 	Value interface{}
-}
-
-func (bve *BadValueError) WithReasons(reasons ...string) *BadValueError {
-	for _, reason := range reasons {
-		_ = bve.AddAttribute(DefaultReasonAttributeKey, reason)
-	}
-
-	return bve
 }
 
 func BadValue(badValueType BadValueType, name string, value interface{}) *BadValueError {
@@ -43,5 +34,10 @@ func MalformedValue(name string, value interface{}) *BadValueError {
 }
 
 func ValueExpired(name string, expiredAt time.Time) *BadValueError {
-	return Build(new(BadValueError), ExpiredValueType, name, time.Now()).AddAttribute(DefaultExpiredAtAttributeKey, expiredAt).(*BadValueError)
+	return Build(new(BadValueError), ExpiredValueType, name, expiredAt).(*BadValueError)
+}
+
+func (bve *BadValueError) WithReason(reason string) *BadValueError {
+	bve.AddAttribute(DefaultReasonAttributeKey, reason)
+	return bve
 }

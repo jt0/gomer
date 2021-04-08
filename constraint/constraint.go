@@ -1,6 +1,8 @@
 package constraint
 
 import (
+	"fmt"
+
 	"github.com/jt0/gomer/gomerr"
 )
 
@@ -9,16 +11,22 @@ type Constraint interface {
 	Value() interface{}
 	Test(value interface{}) bool
 	Validate(target string, value interface{}) gomerr.Gomerr
+	fmt.Stringer
 }
 
-func New(constraintType string, value interface{}, testFunction func(toTest interface{}) bool) Constraint {
-	return &constraint{constraintType, value, testFunction}
+func New(constraintType string, value interface{}, testFunction func(toTest interface{}) bool, optionalStringVal ...string) Constraint {
+	var stringVal string
+	if len(optionalStringVal) > 0 {
+		stringVal = optionalStringVal[0]
+	}
+	return &constraint{constraintType, value, testFunction, stringVal}
 }
 
 type constraint struct {
-	type_ string
-	value interface{}
-	test  func(interface{}) bool
+	type_     string
+	value     interface{}
+	test      func(interface{}) bool
+	stringVal string
 }
 
 func (c *constraint) Type() string {
@@ -39,4 +47,16 @@ func (c *constraint) Validate(target string, value interface{}) gomerr.Gomerr {
 	}
 
 	return nil
+}
+
+func (c *constraint) String() string {
+	if c.stringVal != "" {
+		return c.stringVal
+	}
+
+	if c.value == nil {
+		return c.type_
+	}
+
+	return fmt.Sprintf("%s(%v)", c.type_, c.value)
 }

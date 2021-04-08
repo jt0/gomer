@@ -7,11 +7,12 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
+	"io"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/kms"
 	"github.com/aws/aws-sdk-go/service/kms/kmsiface"
-	"io"
 
 	"github.com/jt0/gomer/gomerr"
 )
@@ -126,22 +127,23 @@ func KmsDataKeyDecrypter(kmsClient kmsiface.KMSAPI) Decrypter {
 	}
 }
 
-// Decrypt returns the decrypted form of the encrypted content given the optional encryptionContext. If
+// Decrypt returns the same data (and errors) as DecryptWithContext using just the Background context.
+func (k kmsDataKeyDecrypter) Decrypt(encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
+	return k.DecryptWithContext(context.Background(), encrypted, encryptionContext)
+}
+
+// TODO: add support for grant tokens?
+// DecryptWithContext returns the decrypted form of the encrypted content given the optional encryptionContext.
 //
 //  gomerr.UnmarshalError:
 //      There is a problem reading the the encoded data
-//  gomerr.BadValueError:
+//  gomerr.BadValueError (type = Invalid):
 //      The encryption context did not match the encrypted data, or the encrypted data is corrupted, or the KMS
 //      key is in an invalid state
 //  gomerr.InternalError:
 //      A problem with the underlying crypto libraries
 //  gomerr.DependencyError:
 //      An unexpected error occurred calling KMS
-func (k kmsDataKeyDecrypter) Decrypt(encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
-	return k.DecryptWithContext(context.Background(), encrypted, encryptionContext)
-}
-
-// TODO: add support for grant tokens?
 func (k kmsDataKeyDecrypter) DecryptWithContext(context context.Context, encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
 	ciphertext, ciphertextBlob, nonce, ge := k.decode(encrypted)
 	if ge != nil {
@@ -158,7 +160,7 @@ func (k kmsDataKeyDecrypter) DecryptWithContext(context context.Context, encrypt
 		if awsErr, ok := err.(awserr.Error); ok {
 			switch awsErr.Code() {
 			case kms.ErrCodeInvalidCiphertextException:
-				return nil, gomerr.BadValue(gomerr.InvalidValueType, "ciphertext", input).Wrap(err)
+				return nil, gomerr.InvalidValue("ciphertext", input, nil).Wrap(err)
 			case kms.ErrCodeDisabledException:
 				return nil, gomerr.InvalidValue("KmsKey.KeyState", kms.KeyStateDisabled, kms.KeyStateEnabled).Wrap(err)
 			case kms.ErrCodeInvalidStateException:

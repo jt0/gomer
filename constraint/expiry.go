@@ -17,11 +17,11 @@ var expired = func(toTest interface{}) bool {
 }
 
 func Expired(value interface{}) Constraint {
-	return &constraint{"Expired", value, expired}
+	return New("Expired", value, expired)
 }
 
 func NotExpired(value interface{}) Constraint {
-	return &constraint{"NotExpired", value, func(toTest interface{}) bool {
+	return New("NotExpired", value, func(toTest interface{}) bool {
 		return !expired(toTest)
-	}}
+	})
 }

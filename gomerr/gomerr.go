@@ -7,8 +7,6 @@ import (
 	"runtime"
 	"strings"
 	"unicode"
-
-	"github.com/jt0/gomer/util"
 )
 
 type Gomerr interface {
@@ -58,10 +56,12 @@ func build(v reflect.Value, attributes []interface{}, gomerr *gomerr) (attribute
 			}
 		}
 
-		if attributesProcessed < attributesLength && reflect.TypeOf(attributes[attributesProcessed]).AssignableTo(fv.Type()) {
-			fv.Set(reflect.ValueOf(attributes[attributesProcessed]))
+		if attributesProcessed < attributesLength {
+			av := reflect.ValueOf(attributes[attributesProcessed])
+			if av.IsValid() && av.Type().AssignableTo(fv.Type()) {
+				fv.Set(av)
+			}
 			attributesProcessed++
-			continue
 		}
 	}
 
@@ -137,7 +137,6 @@ func (g *gomerr) Attribute(key string) (value interface{}, ok bool) {
 }
 
 func (g *gomerr) AddAttribute(key string, value interface{}) Gomerr {
-	// XXX newGomerr? (or maybe we can just always add to g itself)
 	// gw := newGomerr(2, g.self) // wrap first to get line/file info
 	//
 	// // If the notes are being added in the same place g is introduced, use g instead of the new one
@@ -234,42 +233,35 @@ func (g *gomerr) ToMap() map[string]interface{} {
 	for i := 0; i < gt.NumField(); i++ {
 		ft := gt.Field(i)
 		fv := gv.Field(i)
-
-		if ft.Anonymous || unicode.IsLower([]rune(ft.Name)[0]) || fv.IsZero() {
+		if ft.Anonymous || unicode.IsLower([]rune(ft.Name)[0]) || !fv.IsValid() || fv.IsZero() {
 			continue
 		}
 
-		name := ft.Name
-		// conventionally, strip of trailing underscore when calling ToMap()
-		if strings.HasSuffix(name, "_") {
-			name = name[0 : len(name)-1]
-		}
-
+		fieldKey := ft.Name
 		fi := fv.Interface()
-		m[name] = fmt.Sprintf("%+v", fi)
 		if tag := ft.Tag.Get("gomerr"); tag != "" {
 			if tag == "include_type" {
-				m["_"+name+"Type"] = reflect.TypeOf(fi).String()
+				fieldKey += " (" + reflect.TypeOf(fi).String() + ")"
 			}
 		}
+		if s, ok := fi.(fmt.Stringer); ok {
+			fi = s.String()
+		}
+		m[fieldKey] = fi
 	}
 
-	m["_Gomerr"] = util.UnqualifiedTypeName(g.self)
-	m["_Stack"] = g.stack // TODO:p2 avoid repeated entries when wrapped
-
 	if g.attributes != nil && len(g.attributes) > 0 {
-		m["_Attributes"] = g.attributes
+		m["_attributes"] = g.attributes
 	}
 
 	if wrapped := g.Unwrap(); wrapped != nil {
-		if g, ok := wrapped.(Gomerr); ok {
-			m["_Cause"] = g.ToMap()
+		var val interface{}
+		if gWrapped, ok := wrapped.(Gomerr); ok {
+			val = gWrapped.ToMap()
 		} else {
-			m["_Cause"] = map[string]interface{}{
-				util.UnqualifiedTypeName(wrapped): wrapped,
-				"_Error()":                        wrapped.Error(),
-			}
+			val = wrapped.Error()
 		}
+		m[reflect.TypeOf(wrapped).String()] = val
 	}
 
 	return m
@@ -280,7 +272,17 @@ func (g *gomerr) Error() string {
 }
 
 func (g *gomerr) String() string {
-	if bytes, err := json.MarshalIndent(g.self.ToMap(), "  ", "  "); err != nil {
+	var innermost Gomerr = g
+	for candidate, ok := innermost.Unwrap().(Gomerr); ok; candidate, ok = innermost.Unwrap().(Gomerr) {
+		innermost = candidate
+	}
+
+	asMap := map[string]interface{} {
+		reflect.TypeOf(g.self).String(): g.self.ToMap(),
+		"stack":  innermost.Stack(),
+	}
+
+	if bytes, err := json.MarshalIndent(asMap, "", "  "); err != nil {
 		return "Failed to create gomerr string representation: " + err.Error()
 	} else {
 		return string(bytes)

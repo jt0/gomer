@@ -73,14 +73,13 @@ func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*
 
 // untokenize will pull the NextPageToken from the queryable and (if there is one) decode the value. Possible errors:
 //
-//  constraint.NotSatisfied (using constraint.Base64):
-//      The 'NextPageToken' is not base64-encoded
-//  gomerr.Unprocessable:
-//      The token's 'nextTokenFormatVersion' is not valid
-//  gomerr.Unmarshal:
-//      Failed to extract the token data into an internal data structure
-//  gomerr.Expired:
-//      If the 'NextPageToken' was generated more than 24 hours ago (a hard-coded duration)
+//  gomerr.BadValueError's Type:
+//      Expired:
+//      	If the token was generated more than 24 hours ago (a hard-coded duration)
+//          If the token is using an old format version
+//      Malformed:
+//          If the token is not Base64-encoded
+//          If the token fails decryption
 //
 // See the crypto.kmsDataKeyDecrypter Decrypt operation for additional errors types.
 func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.AttributeValue, gomerr.Gomerr) {
@@ -90,7 +89,7 @@ func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.Attri
 
 	encrypted, err := base64.RawURLEncoding.DecodeString(*q.NextPageToken())
 	if err != nil {
-		return nil, gomerr.MalformedValue(NextPageToken, q.NextPageToken()).WithReasons("Not base64-encoded").Wrap(err)
+		return nil, gomerr.MalformedValue(NextPageToken, nil).Wrap(err)
 	}
 
 	toUnmarshal, ge := t.cipher.Decrypt(encrypted, nil)

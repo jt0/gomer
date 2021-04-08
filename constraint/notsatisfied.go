@@ -8,7 +8,7 @@ type NotSatisfiedError struct {
 	gomerr.Gomerr
 	Target     string
 	Constraint Constraint
-	Value      interface{}
+	Value      interface{} `gomerr:"include_type"`
 }
 
 func NotSatisfied(target string, constraint Constraint, value interface{}) *NotSatisfiedError {

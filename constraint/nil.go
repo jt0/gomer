@@ -4,8 +4,8 @@ import (
 	"reflect"
 )
 
-var Nil = func() *constraint {
-	return &constraint{"Nil", nil, func(toTest interface{}) bool {
+var Nil = func() Constraint {
+	return New("Nil", nil, func(toTest interface{}) bool {
 		vv := reflect.ValueOf(toTest)
 		if !vv.IsValid() {
 			return false
@@ -16,11 +16,11 @@ var Nil = func() *constraint {
 		default:
 			return false
 		}
-	}}
+	})
 }()
 
-var NotNil = func() *constraint {
-	return &constraint{"NotNil", "", func(toTest interface{}) bool {
+var NotNil = func() Constraint {
+	return New("NotNil", nil, func(toTest interface{}) bool {
 		return !Nil.Test(toTest)
-	}}
+	})
 }()

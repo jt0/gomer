@@ -55,9 +55,10 @@ var (
 	PayloadBindingPrefix    = ""
 
 	// Default values for unqualified directives
-	SkipFieldDirective       = "-"
-	BindToFieldNameDirective = "+"
-	BodyBindingDirective     = "body"
+	SkipFieldDirective         = "-"
+	BindToFieldNameDirective   = "+"
+	BodyBindingDirective       = "body"
+	StatusCodeBindingDirective = "statuscode"
 
 	// Defines how a field's binding be handled if no directive is specified. Default is to skip.
 	EmptyDirectiveHandling = SkipField
@@ -149,6 +150,8 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 
 	return r, r.ApplyTools(applications...)
 }
+
+// TODO: add support for data format type
 
 func BindToResponse(r resource.Resource, header http.Header, scope string) (output []byte, ge gomerr.Gomerr) {
 	tc := fields.AddScopeToContext(scope).Add(headersKey, header)
