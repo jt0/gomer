@@ -18,7 +18,6 @@ func CopyIdsFieldTool() fields.FieldTool {
 
 var copyIdsInstance fields.FieldTool
 
-//goland:noinspection GoNameStartsWithPackageName
 type copyIdsFieldTool struct{}
 
 func (t copyIdsFieldTool) Name() string {
@@ -27,6 +26,10 @@ func (t copyIdsFieldTool) Name() string {
 
 const SourceValue = "$_source_value"
 
+var structIdFields = make(map[string]*idFieldApplier)
+
+// Applier for the CopyIdsFieldTool produces a fields.Applier that will take each of the defined id fields and propagate
+// them to another structValue. In addition, processing the
 // Should be ordered in decreasing specificity.
 func (t copyIdsFieldTool) Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	idFields, ok := input.(string)
@@ -44,13 +47,7 @@ func (t copyIdsFieldTool) Applier(structType reflect.Type, structField reflect.S
 		return nil, gomerr.Configuration(fmt.Sprintf("Only one explicit type name may be specified, found %d in %s", len(parts)-1, idFields))
 	}
 
-	if sa, exists := structIdFields[typeName]; exists {
-		return nil, gomerr.Configuration("Already have an id attribute specified for this struct: " + sa.idFields[0])
-	}
-
 	applier := idFieldApplier{hidden: make(map[string]bool)}
-	structIdFields[typeName] = &applier
-
 	for _, idField := range strings.Split(idFields, ",") {
 		idField = strings.TrimSpace(idField)
 		if idField == "" {
@@ -70,6 +67,14 @@ func (t copyIdsFieldTool) Applier(structType reflect.Type, structField reflect.S
 		if applier.idFields[0] != structField.Name {
 			applier.idFields = append([]string{structField.Name}, applier.idFields...)
 		}
+	}
+
+	if sa, exists := structIdFields[typeName]; exists {
+		if !reflect.DeepEqual(*sa, applier) {
+			return nil, gomerr.Configuration("Already have an id attribute specified for this struct: " + sa.idFields[0])
+		}
+	} else {
+		structIdFields[typeName] = &applier
 	}
 
 	return applier, nil
@@ -105,14 +110,10 @@ func (a idFieldApplier) Apply(structValue reflect.Value, _ reflect.Value, toolCo
 	return nil
 }
 
-var structIdFields = make(map[string]*idFieldApplier)
-
 func Id(structValue reflect.Value) (string, gomerr.Gomerr) {
 	idfa, ok := structIdFields[structValue.Type().String()]
 	if !ok {
-		return "", gomerr.Unprocessable(
-			"Provided value is not a recognized type. Was NewFields() called on it and does it have a marked 'id' field?",
-			structValue.Type())
+		return "", gomerr.Unprocessable("Unprocessed type or no field marked as an 'id'", structValue.Type())
 	}
 
 	fv := structValue.FieldByName(idfa.idFields[0])

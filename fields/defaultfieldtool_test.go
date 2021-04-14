@@ -18,14 +18,14 @@ type DefaultTest struct {
 const orange = "orange"
 
 func init() {
-	fields.RegisterFieldFunctions(map[string]func(reflect.Value) interface{}{
-		"$color": func(_ reflect.Value) interface{} {
+	fields.RegisterFieldFunctions(map[string]func(reflect.Value, reflect.Value, fields.ToolContext) interface{}{
+		"$color": func(reflect.Value, reflect.Value, fields.ToolContext) interface{} {
 			return orange
 		},
-		"$next_jersey": func(_ reflect.Value) interface{} {
+		"$next_jersey": func(reflect.Value, reflect.Value, fields.ToolContext) interface{} {
 			return 64
 		},
-		"$open_position": func(_ reflect.Value) interface{} {
+		"$open_position": func(reflect.Value, reflect.Value, fields.ToolContext) interface{} {
 			return "outfielder"
 		},
 	})
@@ -53,7 +53,10 @@ func ExampleDefaultFieldTool() {
 
 	newPlayer := BaseballPlayer{FieldPosition: "pitcher"}
 	baseballPlayerFields, _ := fields.Process(reflect.TypeOf(newPlayer), fields.AsNew)
-	baseballPlayerFields.ApplyTools(reflect.ValueOf(&newPlayer).Elem(), fields.Application{ToolName: fields.DefaultFieldTool().Name()})
+	ge := baseballPlayerFields.ApplyTools(reflect.ValueOf(&newPlayer).Elem(), fields.Application{ToolName: fields.DefaultFieldTool().Name()})
+	if ge != nil {
+		fmt.Println("Error: ", ge.Error())
+	}
 
 	fmt.Printf("Player #%d (BA: %.3f) playing as a %s for %s",
 		newPlayer.JerseyNumber, newPlayer.BattingAverage, newPlayer.FieldPosition, newPlayer.Team)

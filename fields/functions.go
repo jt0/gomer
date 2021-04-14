@@ -4,11 +4,11 @@ import (
 	"reflect"
 )
 
-var fieldFunctions = map[string]func(structValue reflect.Value) interface{}{}
+var fieldFunctions = map[string]func(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) interface{}{}
 
-func RegisterFieldFunctions(functions map[string]func(structValue reflect.Value) interface{}) {
+func RegisterFieldFunctions(functions map[string]func(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) interface{}) {
 	if fieldFunctions == nil {
-		fieldFunctions = make(map[string]func(structValue reflect.Value) interface{})
+		fieldFunctions = make(map[string]func(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) interface{})
 	}
 
 	for fnName, function := range functions {
@@ -24,6 +24,6 @@ func RegisterFieldFunctions(functions map[string]func(structValue reflect.Value)
 	}
 }
 
-func GetFieldFunction(functionName string) func(structValue reflect.Value) interface{} {
+func GetFieldFunction(functionName string) func(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) interface{} {
 	return fieldFunctions[functionName]
 }

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -13,16 +14,36 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-func BindInFieldTool() fields.FieldTool {
-	if bindInInstance == nil {
-		bindInInstance = fields.ScopingWrapper{bindInFieldTool{}}
-	}
-	return bindInInstance
+type bindInFieldToolConfiguration struct {
+	DefaultContentType               string
+	PerContentTypeUnmarshalFunctions map[string]Unmarshal
+	DefaultUnmarshalFunction         Unmarshal
+	BindDirectiveConfiguration
 }
 
-var bindInInstance fields.FieldTool
+func NewBindInFieldToolConfiguration() bindInFieldToolConfiguration {
+	return bindInFieldToolConfiguration{
+		DefaultContentType:               DefaultContentType,
+		PerContentTypeUnmarshalFunctions: make(map[string]Unmarshal),
+		DefaultUnmarshalFunction:         json.Unmarshal,
+		BindDirectiveConfiguration:       NewBindDirectiveConfiguration(),
+	}
+}
 
-type bindInFieldTool struct{}
+// Unmarshal defines afunction that processes the input and stores the result in the value pointed to by ptrToTarget.
+// If ptrToTarget is nil, not a pointer, or otherwise unprocessable, Unmarshal returns a gomerr.Gomerr.
+type Unmarshal func(toUnmarshal []byte, ptrToTarget interface{}) error
+
+var bindInInstance bindInFieldTool
+
+func BindInFieldTool(configuration bindInFieldToolConfiguration) fields.FieldTool {
+	bindInInstance = bindInFieldTool{&configuration}
+	return fields.ScopingWrapper{bindInInstance}
+}
+
+type bindInFieldTool struct {
+	*bindInFieldToolConfiguration
+}
 
 const bindInToolName = "http.BindInFieldTool"
 
@@ -30,6 +51,10 @@ func (b bindInFieldTool) Name() string {
 	return bindInToolName
 }
 
+var hasInBodyBinding = make(map[string]bool)
+
+// Applier
+//
 // <name>        -> Payload input value matching <name>. If name == "" then name = StructField.Name
 // path.<n>      -> <n>th path part from the request's URL
 // query.<name>  -> Query parameter with name <name>
@@ -38,7 +63,6 @@ func (b bindInFieldTool) Name() string {
 // $<function>   -> Application-defined dynamic value
 // ?<directive>  -> Applied iff field.IsZero(). Supports chaining (e.g. "query.aName?header.A-Name?=aDefault")
 // -             -> Explicitly not bound from any input
-//
 func (b bindInFieldTool) Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	directive, ok := input.(string)
 	if !ok && input != nil {
@@ -46,51 +70,51 @@ func (b bindInFieldTool) Applier(structType reflect.Type, structField reflect.St
 	}
 
 	//goland:noinspection GoBoolExpressions
-	if directive == SkipFieldDirective || directive == "" && EmptyDirectiveHandling == SkipField {
+	if directive == b.SkipFieldDirective || directive == "" && b.EmptyDirectiveHandling == SkipField {
 		return nil, nil
 	}
 
 	if qIndex := strings.LastIndexByte(directive, '?'); qIndex != -1 {
 		leftDirective := directive[:qIndex]
-		if leftDirective == PayloadBindingPrefix+BindToFieldNameDirective {
-			leftDirective = PayloadBindingPrefix + structField.Name
+		if leftDirective == b.PayloadBindingPrefix+b.BindToFieldNameDirective {
+			leftDirective = b.PayloadBindingPrefix + structField.Name
 		}
 
 		applier, _ := b.Applier(structType, structField, leftDirective)
 		ifZero, _ := b.Applier(structType, structField, directive[qIndex+1:])
 
-		return fields.ApplyAndTestApplier{applier, fields.NonZero, ifZero}, nil
+		return fields.ApplyAndTestApplier{structField.Name, applier, fields.NonZero, ifZero}, nil
 	}
 
-	if directive == PayloadBindingPrefix+BindToFieldNameDirective {
+	if directive == b.PayloadBindingPrefix+b.BindToFieldNameDirective {
 		return bindUnmarshaledApplier{structField.Name}, nil
 	} else if firstChar := directive[0]; firstChar == '=' {
-		return fields.ValueApplier{directive[1:]}, nil // don't include the '='
+		return fields.ValueApplier{structField.Name, directive[1:]}, nil // don't include the '='
 	} else if firstChar == '$' {
 		fn := fields.GetFieldFunction(directive) // include the '$'
 		if fn == nil {
 			return nil, gomerr.Configuration("Field function not found: " + directive)
 		}
-		return fields.FunctionApplier{fn}, nil
-	} else if strings.HasPrefix(directive, PathBindingPrefix) {
-		index, err := strconv.Atoi(directive[len(PathBindingPrefix):])
+		return fields.FunctionApplier{structField.Name, fn}, nil
+	} else if strings.HasPrefix(directive, b.PathBindingPrefix) {
+		index, err := strconv.Atoi(directive[len(b.PathBindingPrefix):])
 		if err != nil {
 			return nil, gomerr.Configuration("Expected numeric index value for path binding, received: " + directive)
 		}
 		return bindPathApplier{index}, nil
-	} else if strings.HasPrefix(directive, QueryParamBindingPrefix) {
-		queryParamName := directive[len(QueryParamBindingPrefix):]
-		if queryParamName == BindToFieldNameDirective {
+	} else if strings.HasPrefix(directive, b.QueryParamBindingPrefix) {
+		queryParamName := directive[len(b.QueryParamBindingPrefix):]
+		if queryParamName == b.BindToFieldNameDirective {
 			queryParamName = structField.Name
 		}
 		return bindQueryParamApplier{queryParamName}, nil
-	} else if strings.HasPrefix(directive, HeaderBindingPrefix) {
-		headerName := directive[len(HeaderBindingPrefix):]
-		if headerName == BindToFieldNameDirective {
+	} else if strings.HasPrefix(directive, b.HeaderBindingPrefix) {
+		headerName := directive[len(b.HeaderBindingPrefix):]
+		if headerName == b.BindToFieldNameDirective {
 			headerName = structField.Name
 		}
 		return bindRequestHeaderApplier{headerName}, nil
-	} else if directive == BodyBindingDirective {
+	} else if directive == b.BodyBindingDirective {
 		if structField.Type != byteSliceType {
 			return nil, gomerr.Configuration("Body field must be of type []byte, not: " + structField.Type.String())
 		}

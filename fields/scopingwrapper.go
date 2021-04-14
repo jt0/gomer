@@ -34,10 +34,16 @@ func (w ScopingWrapper) Name() string {
 	return w.FieldTool.Name()
 }
 
+func (w ScopingWrapper) MustUse() bool {
+	tool, ok := w.FieldTool.(MustUse)
+	return ok && tool.MustUse()
+}
+
 var scopeRegexp = regexp.MustCompile("(?:([^;:]*):)?([^;]*)")
 
 const anyScope = "*"
 
+// Applier
 // Format: [<scope>:]<tool_config>[;[<scope>:]<tool_config>]]*
 // Note that both ':' and ';' are special chars. Once a scope has been provided, colons are allowed until the
 // end of the input or a ';' is found. If a colon should be used for what would otherwise not contain a scope,

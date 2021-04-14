@@ -112,7 +112,7 @@ func (fs Fields) ApplyTools(sv reflect.Value, applications ...Application) gomer
 			tool, _ := usesTool.appliersByName[application.ToolName] // tool should always be found
 
 			if ge := tool.Apply(sv, fv, EnsureContext(application.Context)); ge != nil {
-				errors = append(errors, ge.AddAttribute("Field", usesTool.structFieldName))
+				errors = append(errors, ge)
 			}
 		}
 	}

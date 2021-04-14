@@ -1,6 +1,7 @@
 package fields
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/jt0/gomer/flect"
@@ -10,6 +11,10 @@ import (
 type FieldTool interface {
 	Name() string
 	Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (Applier, gomerr.Gomerr)
+}
+
+type MustUse interface {
+	MustUse() bool
 }
 
 type Applier interface {
@@ -37,6 +42,8 @@ func (s StructTagConfigProvider) ConfigPerTool(_ reflect.Type, structField refle
 	for tagKey, fieldTool := range s {
 		if tagValue, ok := structField.Tag.Lookup(tagKey); ok {
 			cpt[fieldTool] = tagValue
+		} else if tool, ok := fieldTool.(MustUse); ok && tool.MustUse() {
+			cpt[fieldTool] = ""
 		}
 	}
 
@@ -44,32 +51,59 @@ func (s StructTagConfigProvider) ConfigPerTool(_ reflect.Type, structField refle
 }
 
 type FunctionApplier struct {
-	Function func(structValue reflect.Value) interface{}
+	FieldName string
+	Function  func(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) interface{}
 }
 
-func (a FunctionApplier) Apply(structValue reflect.Value, fieldValue reflect.Value, _ ToolContext) gomerr.Gomerr {
-	defaultValue := a.Function(structValue)
-	if ge := flect.SetValue(fieldValue, defaultValue); ge != nil {
-		return gomerr.Configuration("Unable to set field to function result").AddAttribute("FunctionResult", defaultValue).Wrap(ge)
+func (a FunctionApplier) Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) gomerr.Gomerr {
+	functionValue := a.Function(structValue, fieldValue, toolContext)
+	if ge := flect.SetValue(fieldValue, functionValue); ge != nil {
+		return gomerr.Configuration("Unable to set field to function result").AddAttributes("Field", a.FieldName, "FunctionResult", functionValue).Wrap(ge)
 	}
+
+	return nil
+}
+
+type MethodApplier struct {
+	FieldName  string
+	MethodName string
+}
+
+func (a MethodApplier) Apply(structValue reflect.Value, fieldValue reflect.Value, _ ToolContext) gomerr.Gomerr {
+	method := structValue.MethodByName(a.MethodName)
+
+	var in []reflect.Value
+	if method.Type().NumIn() == 1 {
+		in = []reflect.Value{fieldValue}
+	}
+
+	results := method.Call(in)
+	result := results[0].Interface()
+	if ge := flect.SetValue(fieldValue, result); ge != nil {
+		return gomerr.Configuration("Unable to set field to method result").AddAttributes("Field", a.FieldName, "Method", a.MethodName, "MethodResult", result).Wrap(ge)
+	}
+
 	return nil
 }
 
 type ValueApplier struct {
-	Value string
+	FieldName   string
+	StaticValue string
 }
 
 func (a ValueApplier) Apply(_ reflect.Value, fieldValue reflect.Value, _ ToolContext) gomerr.Gomerr {
-	if ge := flect.SetValue(fieldValue, a.Value); ge != nil {
-		return gomerr.Configuration("Unable to set field to value").AddAttribute("Value", a.Value).Wrap(ge)
+	if ge := flect.SetValue(fieldValue, a.StaticValue); ge != nil {
+		return gomerr.Configuration("Unable to set field to value").AddAttributes("Field", a.FieldName, "Value", a.StaticValue).Wrap(ge)
 	}
+
 	return nil
 }
 
 type ApplyAndTestApplier struct {
-	Applier  Applier
-	IsValid  func(value reflect.Value) bool
-	Fallback Applier
+	FieldName string
+	Left      Applier
+	Test      func(value reflect.Value) bool
+	Right     Applier
 }
 
 var (
@@ -77,27 +111,29 @@ var (
 )
 
 func (a ApplyAndTestApplier) Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) gomerr.Gomerr {
-	var applierGe gomerr.Gomerr
+	var leftGe gomerr.Gomerr
 
-	if a.Applier != nil {
-		applierGe = a.Applier.Apply(structValue, fieldValue, toolContext)
+	if a.Left != nil {
+		leftGe = a.Left.Apply(structValue, fieldValue, toolContext)
 	}
 
-	if applierGe == nil && a.IsValid(fieldValue) {
+	if leftGe == nil && a.Test(fieldValue) {
 		return nil
 	}
 
-	if a.Fallback != nil {
-		ge := a.Fallback.Apply(structValue, fieldValue, toolContext)
+	if a.Right != nil {
+		ge := a.Right.Apply(structValue, fieldValue, toolContext)
 		if ge != nil {
-			return ge.Wrap(applierGe) // Okay if applierGe is nil or not-nil
+			return ge.AddAttributes("Field", a.FieldName).Wrap(leftGe) // Okay if applierGe is nil or not-nil
+		} else if leftGe != nil {
+			fmt.Println("Left-side applier failed, but right side succeeded. Left error:\n", leftGe.Error())
 		}
 		return nil
-	} else if applierGe != nil {
-		return applierGe
+	} else if leftGe != nil {
+		return leftGe.AddAttributes("Field", a.FieldName)
 	}
 
-	return gomerr.Configuration("Field value failed to validate and no fallback applier is specified.")
+	return gomerr.Configuration("Field value failed to validate and no secondary applier is specified.").AddAttributes("Field", a.FieldName)
 }
 
 type ToolContext map[string]interface{}

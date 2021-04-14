@@ -64,7 +64,7 @@ func Equals(tb testing.TB, expected, actual interface{}, msgAndArgs ...interface
 				msgArgs = msgAndArgs[1:]
 			}
 		}
-		fmt.Printf("Failed equality check: "+msg+"\n\tExpected: %#v\n Actual: %#v\n", append(append([]interface{}{}, msgArgs...), expected, actual)...)
+		fmt.Printf("Failed equality check: "+msg+"\n\tExpected: %#v\n\tActual: %#v\n", append(append([]interface{}{}, msgArgs...), expected, actual)...)
 		printStack()
 		tb.FailNow()
 	}

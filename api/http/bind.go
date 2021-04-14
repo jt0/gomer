@@ -1,7 +1,6 @@
 package http
 
 import (
-	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"reflect"
@@ -14,66 +13,44 @@ import (
 	"github.com/jt0/gomer/resource"
 )
 
-// Unmarshal defines afunction that processes the input and stores the result in the value pointed to by ptrToTarget.
-// If ptrToTarget is nil, not a pointer, or otherwise unprocessable, Unmarshal returns a gomerr.Gomerr.
-type Unmarshal func(toUnmarshal []byte, ptrToTarget interface{}) error
-
-// Marshal provides a function to convert the toMarshal to bytes suitable for returning in a response body.
-type Marshal func(toMarshal interface{}) ([]byte, error)
-
-var (
-	DefaultContentType = "application/json"
-
-	// Unmarshal functions for specific content types
-	PerContentTypeUnmarshalFunctions = make(map[string]Unmarshal)
-
-	// Use this Unmarshal function if nothing else matches. Can be set to nil to only allow known content types.
-	DefaultUnmarshalFunction = json.Unmarshal
-
-	// Marshal functions for specific content types
-	// TODO:p2 add to BindToResponse
-	PerContentTypeMarshalFunctions = make(map[string]Marshal)
-
-	// Use this Marshal function if nothing else matches. Can be set to nil to only allow known content types.
-	DefaultMarshalFunction = json.Marshal
-
-	// This slice can be added to (or replaced) as needed
-	BindFromRequestTools = []fields.FieldTool{
-		BindInFieldTool(),
-		constraint.ValidationFieldTool(),
-	}
-
-	// This slice can be added to (or replaced) as needed
-	BindToResponseTools = []fields.FieldTool{
-		BindOutFieldTool(),
-	}
-
+type BindDirectiveConfiguration struct {
 	// Default prefixes for qualified directives
-	PathBindingPrefix       = "path."
-	HeaderBindingPrefix     = "header."
-	QueryParamBindingPrefix = "query."
-	PayloadBindingPrefix    = ""
+	PathBindingPrefix       string
+	HeaderBindingPrefix     string
+	QueryParamBindingPrefix string
+	PayloadBindingPrefix    string
 
 	// Default values for unqualified directives
-	SkipFieldDirective         = "-"
-	BindToFieldNameDirective   = "+"
-	BodyBindingDirective       = "body"
-	StatusCodeBindingDirective = "statuscode"
+	SkipFieldDirective       string
+	BindToFieldNameDirective string
+	BodyBindingDirective     string
 
 	// Defines how a field's binding be handled if no directive is specified. Default is to skip.
-	EmptyDirectiveHandling = SkipField
+	EmptyDirectiveHandling EmptyDirectiveHandlingType
 
-	OmitEmptyDirective    = "omitempty"
-	IncludeEmptyDirective = "includeempty"
+	OmitEmptyDirective    string
+	IncludeEmptyDirective string
 
 	// Defines how an empty value is marshaled unless overridden by OmitEmptyDirective or IncludeEmptyDirective. Default
 	// is to omit.
-	EmptyValueHandlingDefault = OmitEmpty
+	EmptyValueHandlingDefault EmptyValueHandlingType
+}
 
-	// NB: If one scope defines a body binding, no other scope can try to access marshaled/unmarshaled data
-	hasInBodyBinding  = make(map[string]bool)
-	hasOutBodyBinding = make(map[string]bool)
-)
+func NewBindDirectiveConfiguration() BindDirectiveConfiguration {
+	return BindDirectiveConfiguration{
+		PathBindingPrefix:         DefaultPathBindingPrefix,
+		HeaderBindingPrefix:       DefaultHeaderBindingPrefix,
+		QueryParamBindingPrefix:   DefaultQueryParamBindingPrefix,
+		PayloadBindingPrefix:      DefaultPayloadBindingPrefix,
+		SkipFieldDirective:        DefaultSkipFieldDirective,
+		BindToFieldNameDirective:  DefaultBindToFieldNameDirective,
+		BodyBindingDirective:      DefaultBodyBindingDirective,
+		EmptyDirectiveHandling:    DefaultEmptyDirectiveHandling,
+		OmitEmptyDirective:        DefaultOmitEmptyDirective,
+		IncludeEmptyDirective:     DefaultIncludeEmptyDirective,
+		EmptyValueHandlingDefault: DefaultEmptyValueHandlingDefault,
+	}
+}
 
 type EmptyDirectiveHandlingType int
 
@@ -90,8 +67,23 @@ const (
 )
 
 const (
+	DefaultContentType               = "application/json"
+	DefaultPathBindingPrefix         = "path."
+	DefaultHeaderBindingPrefix       = "header."
+	DefaultQueryParamBindingPrefix   = "query."
+	DefaultPayloadBindingPrefix      = ""
+	DefaultSkipFieldDirective        = "-"
+	DefaultBindToFieldNameDirective  = "+"
+	DefaultBodyBindingDirective      = "body"
+	DefaultEmptyDirectiveHandling    = SkipField
+	DefaultOmitEmptyDirective        = "omitempty"
+	DefaultIncludeEmptyDirective     = "includeempty"
+	DefaultEmptyValueHandlingDefault = OmitEmpty
+
 	ContentTypeHeader = "Content-Type"
 	AcceptsHeader     = "Accepts"
+
+	AcceptLanguageKey = "$_accept_language"
 
 	pathPartsKey   = "$_path_parts"
 	queryParamsKey = "$_query_params"
@@ -102,6 +94,11 @@ const (
 
 	toolsWithContextKey = "$_tools_with_context"
 )
+
+var BindFromRequestTools = []fields.FieldTool{
+	BindInFieldTool(NewBindInFieldToolConfiguration()),
+	constraint.ValidationFieldTool(),
+}
 
 func BindFromRequest(request *http.Request, resourceType reflect.Type, subject auth.Subject, scope string) (resource.Resource, gomerr.Gomerr) {
 	r, ge := resource.New(resourceType, subject)
@@ -129,15 +126,15 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 			// data into the new resource
 			// TODO:p3 Allow applications to provide alternative means to choose an unmarshaler
 			contentType := request.Header.Get(ContentTypeHeader)
-			unmarshal, ok := PerContentTypeUnmarshalFunctions[contentType]
+			unmarshal, ok := bindInInstance.PerContentTypeUnmarshalFunctions[contentType]
 			if !ok {
-				if DefaultUnmarshalFunction == nil {
+				if bindInInstance.DefaultUnmarshalFunction == nil {
 					return nil, gomerr.Unmarshal("Unsupported content-type", contentType, nil)
 				}
-				unmarshal = DefaultUnmarshalFunction
+				unmarshal = bindInInstance.DefaultUnmarshalFunction
 			}
 
-			if err := unmarshal(bodyBytes, &unmarshaled); err != nil {
+			if err = unmarshal(bodyBytes, &unmarshaled); err != nil {
 				return nil, gomerr.Unmarshal("Unable to unmarshal data", bodyBytes, unmarshaled).AddAttribute("ContentType", contentType).Wrap(err)
 			}
 		}
@@ -151,17 +148,26 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 	return r, r.ApplyTools(applications...)
 }
 
+var BindToResponseTools = []fields.FieldTool{
+	BindOutFieldTool(NewBindOutFieldToolConfiguration()),
+}
+
+// BindToResponse
 // TODO: add support for data format type
+func BindToResponse(result reflect.Value, header http.Header, scope string, acceptLanguage string) (output []byte, ge gomerr.Gomerr) {
+	tc := fields.AddScopeToContext(scope).Add(headersKey, header).Add(AcceptLanguageKey, acceptLanguage)
 
-func BindToResponse(r resource.Resource, header http.Header, scope string) (output []byte, ge gomerr.Gomerr) {
-	tc := fields.AddScopeToContext(scope).Add(headersKey, header)
-
-	outBodyBinding := hasOutBodyBinding[reflect.TypeOf(r).Elem().String()]
+	outBodyBinding := hasOutBodyBinding[result.Type().String()]
 	if !outBodyBinding {
 		tc.Add(outMapKey, make(map[string]interface{}))
 	}
 
-	if ge = r.ApplyTools(toApplications(BindToResponseTools, tc)...); ge != nil {
+	fs, ge := fields.Get(result.Type())
+	if ge != nil {
+		return nil, ge
+	}
+
+	if ge = fs.ApplyTools(result, toApplications(BindToResponseTools, tc)...); ge != nil {
 		return nil, ge
 	}
 
@@ -172,19 +178,17 @@ func BindToResponse(r resource.Resource, header http.Header, scope string) (outp
 		// data into the response bytes
 		// TODO:p3 Allow applications to provide alternative means to choose a marshaler
 		contentType := header.Get(AcceptsHeader) // TODO:p4 support multi-options
-		marshal, ok := PerContentTypeMarshalFunctions[contentType]
+		marshal, ok := bindOutInstance.PerContentTypeMarshalFunctions[contentType]
 		if !ok {
-			if DefaultUnmarshalFunction == nil {
-				return nil, gomerr.Unmarshal("Unsupported Accepts content type", contentType, nil)
+			if bindOutInstance.DefaultMarshalFunction == nil {
+				return nil, gomerr.Marshal("Unsupported Accepts content type", contentType)
 			}
-			marshal = DefaultMarshalFunction
+			marshal = bindOutInstance.DefaultMarshalFunction
 			contentType = DefaultContentType
 		}
 
 		outMap := tc[outMapKey].(map[string]interface{})
-
-		//goland:noinspection GoBoolExpressions
-		if len(outMap) == 0 && EmptyValueHandlingDefault == OmitEmpty {
+		if len(outMap) == 0 && bindOutInstance.EmptyValueHandlingDefault == OmitEmpty {
 			return nil, ge
 		}
 

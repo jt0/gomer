@@ -18,6 +18,11 @@ func (w RegexpWrapper) Name() string {
 	return w.FieldTool.Name()
 }
 
+func (w RegexpWrapper) MustUse() bool {
+	tool, ok := w.FieldTool.(MustUse)
+	return ok && tool.MustUse()
+}
+
 func (w RegexpWrapper) Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (Applier, gomerr.Gomerr) {
 	inputString, ok := input.(string)
 	if !ok {

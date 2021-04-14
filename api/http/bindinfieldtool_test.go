@@ -71,7 +71,7 @@ func (g Greeting) recipient(location int) string {
 
 func TestBindInTypes(t *testing.T) {
 	fields.FieldToolConfigProvider = fields.StructTagConfigProvider{}.
-		WithKey("http.BindInFieldTool", BindInFieldTool())
+		WithKey("http.BindInFieldTool", BindInFieldTool(NewBindInFieldToolConfiguration()))
 
 	_, ge := resource.Register(&Greeting{}, nil, actions, stores.PanicStore, nil)
 	assert.Success(t, ge)

@@ -44,7 +44,7 @@ const (
 
 func AccessFieldTool() fields.FieldTool {
 	if toolInstance == nil {
-		toolInstance = fields.RegexpWrapper{
+		toolInstance = &fields.RegexpWrapper{
 			Regexp:       regexp.MustCompile("(r|-)(w|c|u|p|-)"),
 			RegexpGroups: []string{"", "read", "write"},
 			FieldTool:    accessFieldTool{},
@@ -64,6 +64,10 @@ type accessFieldTool struct {
 
 func (t accessFieldTool) Name() string {
 	return "auth.AccessFieldTool"
+}
+
+func (t accessFieldTool) MustUse() bool {
+	return true
 }
 
 func (t accessFieldTool) Applier(_ reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {

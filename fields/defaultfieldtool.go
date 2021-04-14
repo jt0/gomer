@@ -30,7 +30,7 @@ func (defaultFieldTool) Name() string {
 	return "fields.DefaultFieldTool"
 }
 
-func (t defaultFieldTool) Applier(_ reflect.Type, _ reflect.StructField, config interface{}) (Applier, gomerr.Gomerr) {
+func (t defaultFieldTool) Applier(_ reflect.Type, structField reflect.StructField, config interface{}) (Applier, gomerr.Gomerr) {
 	defaultString, ok := config.(string)
 	if !ok || defaultString == "" {
 		return nil, nil
@@ -44,15 +44,15 @@ func (t defaultFieldTool) Applier(_ reflect.Type, _ reflect.StructField, config 
 
 	var defaultApplier Applier
 	if defaultString[:1] == "=" {
-		defaultApplier = ValueApplier{defaultString[1:]}
+		defaultApplier = ValueApplier{structField.Name, defaultString[1:]}
 	} else if fn := GetFieldFunction(defaultString); fn != nil {
-		defaultApplier = FunctionApplier{fn}
+		defaultApplier = FunctionApplier{structField.Name, fn}
 	} else {
 		return nil, gomerr.Configuration("Unsure how to handle config").AddAttribute("Config", config.(string))
 	}
 
 	if testForZero {
-		defaultApplier = ApplyAndTestApplier{nil, NonZero, defaultApplier}
+		defaultApplier = ApplyAndTestApplier{structField.Name, nil, NonZero, defaultApplier}
 	}
 
 	return defaultApplier, nil

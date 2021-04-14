@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -11,18 +12,35 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-func BindOutFieldTool() fields.FieldTool {
-	if bindOutInstance == nil {
-		bindOutInstance = fields.ScopingWrapper{bindOutFieldTool{}}
-	}
-	return bindOutInstance
+type bindOutFieldToolConfiguration struct {
+	DefaultContentType             string
+	PerContentTypeMarshalFunctions map[string]Marshal
+	DefaultMarshalFunction         Marshal
+	BindDirectiveConfiguration
 }
 
-var (
-	bindOutInstance fields.FieldTool
-)
+func NewBindOutFieldToolConfiguration() bindOutFieldToolConfiguration {
+	return bindOutFieldToolConfiguration{
+		DefaultContentType:             DefaultContentType,
+		PerContentTypeMarshalFunctions: make(map[string]Marshal),
+		DefaultMarshalFunction:         json.Marshal,
+		BindDirectiveConfiguration:     NewBindDirectiveConfiguration(),
+	}
+}
 
-type bindOutFieldTool struct{}
+// Marshal provides a function to convert the toMarshal to bytes suitable for returning in a response body.
+type Marshal func(toMarshal interface{}) ([]byte, error)
+
+var bindOutInstance bindOutFieldTool
+
+func BindOutFieldTool(configuration bindOutFieldToolConfiguration) fields.FieldTool {
+	bindOutInstance = bindOutFieldTool{&configuration}
+	return fields.ScopingWrapper{bindOutInstance}
+}
+
+type bindOutFieldTool struct {
+	*bindOutFieldToolConfiguration
+}
 
 const bindOutToolName = "http.BindOutFieldTool"
 
@@ -30,34 +48,38 @@ func (b bindOutFieldTool) Name() string {
 	return bindOutToolName
 }
 
-// <name>        -> Output attribute name for value. If name == "" then name = StructField.Name
-// header.<name> -> Output header for value
-// =<static>     -> Static output value
-// $<function>   -> Dynamic output value
-// ?<directive>  -> Applied iff field.IsZero(). Supports chaining (e.g. "?$foo?=last")
-// -             -> Explicitly not included in the output
+var hasOutBodyBinding = make(map[string]bool)
+
+// Applier
 //
-// Except for '-', each of the above can be combined with an ",omitempty" qualifier that acts like '-' if the field's
-// value is its zero Value.
+// +                   -> Use field name as value's key. Required if EmptyDirectiveHandling == SkipField
+// <name>              -> Use 'name' as value's key (if PayloadBindingPrefix != "", form is similar to header)
+// header.<name>       -> Use 'name' as the header for value (if HeaderBindingPrefix == 'header')
+// =<static>           -> Static output value
+// $<function>         -> Function-derived output value
+// ?<directive>        -> Applied iff field.IsZero(). Supports chaining (e.g. "?$foo?=last")
+// <directive>&<right> -> Will apply the left directive followed by the right (e.g. "=OutValue&header.X-My-Header)
+// -                   -> Explicitly not included in the output
 //
+// Except for '-', each of the above can be combined with an ",omitempty" or ",includempty" qualifier that acts like
+// '-' or '+' respectively if the field's value is its zero Value.
 func (b bindOutFieldTool) Applier(structType reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
 	directive, ok := input.(string)
 	if !ok && input != nil {
 		return nil, gomerr.Configuration("Expected a string directive").AddAttribute("Input", input)
 	}
 
-	//goland:noinspection GoBoolExpressions
-	if directive == SkipFieldDirective || directive == "" && EmptyDirectiveHandling == SkipField {
+	if directive == b.SkipFieldDirective || (directive == "" && b.EmptyDirectiveHandling == SkipField) {
 		return nil, nil
 	}
 
 	//goland:noinspection GoBoolExpressions
-	omitEmpty := EmptyValueHandlingDefault == OmitEmpty
+	omitEmpty := b.EmptyValueHandlingDefault == OmitEmpty
 	if cIndex := strings.IndexByte(directive, ','); cIndex != -1 {
 		switch flag := directive[cIndex+1:]; flag {
-		case OmitEmptyDirective:
+		case b.OmitEmptyDirective:
 			omitEmpty = true
-		case IncludeEmptyDirective:
+		case b.IncludeEmptyDirective:
 			omitEmpty = false
 		default:
 			return nil, gomerr.Configuration("Unrecognized directive flag: " + flag)
@@ -66,36 +88,52 @@ func (b bindOutFieldTool) Applier(structType reflect.Type, structField reflect.S
 		directive = directive[:cIndex]
 	}
 
-	if qIndex := strings.LastIndexByte(directive, '?'); qIndex != -1 {
-		leftDirective := directive[:qIndex]
-		if leftDirective == PayloadBindingPrefix+BindToFieldNameDirective {
-			leftDirective = PayloadBindingPrefix + structField.Name
+	if tIndex := strings.LastIndexAny(directive, "?&"); tIndex != -1 {
+		leftDirective := directive[:tIndex]
+		if leftDirective == b.PayloadBindingPrefix+b.BindToFieldNameDirective {
+			leftDirective = b.PayloadBindingPrefix + structField.Name
 		}
 
-		applier, _ := b.Applier(structType, structField, leftDirective)
-		ifNotValid, _ := b.Applier(structType, structField, directive[qIndex+1:])
+		left, ge := b.Applier(structType, structField, leftDirective)
+		if ge != nil {
+			return nil, gomerr.Configuration("Unable to process 'left' directive: " + leftDirective).Wrap(ge)
+		}
+		right, ge := b.Applier(structType, structField, directive[tIndex+1:])
+		if ge != nil {
+			return nil, gomerr.Configuration("Unable to process 'right' directive: " + directive[tIndex+1:]).Wrap(ge)
+		}
 
-		// TODO:p2 fix isValid() function
-		return fields.ApplyAndTestApplier{applier, func(reflect.Value) bool { return false }, ifNotValid}, nil
+		var testFn func(reflect.Value) bool
+		if directive[tIndex] == '?' {
+			testFn = reflect.Value.IsZero
+		} else { // '&'
+			testFn = func(reflect.Value) bool { return false }
+		}
+
+		return fields.ApplyAndTestApplier{structField.Name, left, testFn, right}, nil
 	}
 
-	if directive == PayloadBindingPrefix+BindToFieldNameDirective {
+	if directive == b.PayloadBindingPrefix+b.BindToFieldNameDirective {
 		return bindToMapApplier{structField.Name, omitEmpty}, nil
-	} else if firstChar := directive[:1]; firstChar == "=" {
-		return fields.ValueApplier{directive[1:]}, nil // don't include the '='
-	} else if firstChar == "$" {
-		fn := fields.GetFieldFunction(directive) // include the '$'
-		if fn == nil {
-			return nil, gomerr.Configuration("Field function not found: " + directive)
+	} else if firstChar := directive[0]; firstChar == '=' {
+		return fields.ValueApplier{structField.Name, directive[1:]}, nil // don't include the '='
+	} else if firstChar == '$' {
+		if directive[1] == '.' {
+			return fields.MethodApplier{structField.Name, directive[2:]}, nil
+		} else {
+			fn := fields.GetFieldFunction(directive) // include the '$'
+			if fn == nil {
+				return nil, gomerr.Configuration("Field function not found: " + directive)
+			}
+			return fields.FunctionApplier{structField.Name, fn}, nil
 		}
-		return fields.FunctionApplier{fn}, nil
-	} else if strings.HasPrefix(directive, HeaderBindingPrefix) {
-		headerName := directive[len(HeaderBindingPrefix):]
-		if headerName == BindToFieldNameDirective {
+	} else if strings.HasPrefix(directive, b.HeaderBindingPrefix) {
+		headerName := directive[len(b.HeaderBindingPrefix):]
+		if headerName == b.BindToFieldNameDirective {
 			headerName = structField.Name
 		}
 		return bindResponseHeaderApplier{headerName}, nil
-	} else if directive == BodyBindingDirective {
+	} else if directive == b.BodyBindingDirective {
 		if structField.Type != byteSliceType {
 			return nil, gomerr.Configuration("Body field must be of type []byte, not: " + structField.Type.String())
 		}
@@ -158,7 +196,7 @@ func (b bindToMapApplier) Apply(structValue reflect.Value, fieldValue reflect.Va
 
 		toolContext[outMapKey] = outMap
 	case reflect.Map:
-		if fieldValue.Elem().Kind() != reflect.String {
+		if fieldValue.Type().Key().Kind() != reflect.String {
 			return gomerr.Configuration("Unable to produce a map without string ")
 		}
 
@@ -268,4 +306,9 @@ type bodyOutApplier struct{}
 func (bodyOutApplier) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext fields.ToolContext) gomerr.Gomerr {
 	toolContext[bodyBytesKey] = fieldValue.Interface()
 	return nil
+}
+
+var directiveFunctions = map[string]func(reflect.Value) bool{
+	"?":    reflect.Value.IsZero,
+	"then": func(reflect.Value) bool { return false },
 }

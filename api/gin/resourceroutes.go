@@ -52,8 +52,6 @@ func NoActions() map[interface{}]func() resource.Action {
 	return noActions
 }
 
-type PreRender func(resource.Resource) gomerr.Gomerr
-
 func BuildRoutes(r *gin.Engine, topLevelResources ...resource.Metadata) {
 	for _, md := range topLevelResources {
 		buildRoutes(r, md, "")
@@ -114,27 +112,22 @@ func handler(resourceType reflect.Type, actionFunc func() resource.Action, succe
 	return func(c *gin.Context) {
 		action := actionFunc()
 		if r, ge := BindFromRequest(c.Request, resourceType, Subject(c), action.Name()); ge != nil {
-			_ = c.Error(ge)
+			c.Error(ge)
 		} else if r, ge = r.DoAction(action); ge != nil {
-			_ = c.Error(ge)
-		} else if ge = BindToContext(c, r, action.Name(), successStatus); ge != nil {
-			_ = c.Error(ge)
+			c.Error(ge)
+		} else if ge = renderResult(reflect.ValueOf(r).Elem(), c, action.Name(), successStatus); ge != nil {
+			c.Error(ge)
 		}
 	}
 }
 
-func BindToContext(c *gin.Context, r resource.Resource, scope string, successStatus int) gomerr.Gomerr {
-	// TODO:p4 consider case where headers are set but no payload is returned
-	if successStatus == http.StatusNoContent {
-		return nil
-	}
-
-	bytes, ge := BindToResponse(r, c.Writer.Header(), scope)
+func renderResult(result reflect.Value, c *gin.Context, scope string, statusCode int) gomerr.Gomerr {
+	bytes, ge := BindToResponse(result, c.Writer.Header(), scope, c.Request.Header.Get("Accept-Language"))
 	if ge != nil {
 		return ge
 	}
 
-	c.Data(successStatus, c.Writer.Header().Get(ContentTypeHeader), bytes)
+	c.Data(statusCode, c.Writer.Header().Get(ContentTypeHeader), bytes)
 
 	return nil
 }
