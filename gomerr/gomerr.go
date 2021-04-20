@@ -268,21 +268,27 @@ func (g *gomerr) ToMap() map[string]interface{} {
 }
 
 func (g *gomerr) Error() string {
-	return g.String()
+	return g.string(json.Marshal)
 }
 
 func (g *gomerr) String() string {
+	return g.string(func(v interface{}) ([]byte, error) {
+		return json.MarshalIndent(v, "", "  ")
+	})
+}
+
+func (g *gomerr) string(marshal func(interface{}) ([]byte, error)) string {
 	var innermost Gomerr = g
 	for candidate, ok := innermost.Unwrap().(Gomerr); ok; candidate, ok = innermost.Unwrap().(Gomerr) {
 		innermost = candidate
 	}
 
-	asMap := map[string]interface{} {
+	asMap := map[string]interface{}{
 		reflect.TypeOf(g.self).String(): g.self.ToMap(),
-		"stack":  innermost.Stack(),
+		"stack":                         innermost.Stack(),
 	}
 
-	if bytes, err := json.MarshalIndent(asMap, "", "  "); err != nil {
+	if bytes, err := marshal(asMap); err != nil {
 		return "Failed to create gomerr string representation: " + err.Error()
 	} else {
 		return string(bytes)

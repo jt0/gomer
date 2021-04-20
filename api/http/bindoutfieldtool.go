@@ -175,6 +175,8 @@ func (b bindToMapApplier) Apply(structValue reflect.Value, fieldValue reflect.Va
 		if len(structMap) > 0 || !b.omitempty {
 			outMap[b.name] = structMap
 		}
+
+		toolContext[outMapKey] = outMap
 	case reflect.Slice:
 		fvLen := fieldValue.Len()
 		sliceOutput := make([]interface{}, 0, fvLen)
@@ -220,11 +222,12 @@ func (b bindToMapApplier) Apply(structValue reflect.Value, fieldValue reflect.Va
 
 		toolContext[outMapKey] = outMap
 	case reflect.Ptr, reflect.Interface:
-		if fieldValue.IsNil() {
+		if !fieldValue.IsNil() {
+			return b.Apply(structValue, fieldValue.Elem(), toolContext)
+		} else if b.omitempty {
 			return nil
 		}
-
-		return b.Apply(structValue, fieldValue.Elem(), toolContext)
+		fallthrough
 	default:
 		outMap[b.name] = fieldValue.Interface()
 	}
