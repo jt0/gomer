@@ -4,52 +4,85 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/jt0/gomer/gomerr"
 )
 
-func Assert(tb testing.TB, condition bool, msg string, msgArgs ...interface{}) {
+func Assert(tb testing.TB, condition bool, msgAndArgs ...interface{}) {
+	var msg string
+	var msgArgs []interface{}
+	if len(msg) > 0 {
+		msg = msgAndArgs[0].(string)
+		if len(msg) > 1 {
+			msgArgs = msgAndArgs[1:]
+		}
+	}
+
 	if !condition {
-		fmt.Printf("Assert failed: "+msg+"\n", msgArgs...)
-		printStack()
+		fmt.Printf("Assert failed. "+msg+"\n", msgArgs...)
 		tb.FailNow()
 	}
 }
 
 func Success(tb testing.TB, err error) {
 	if err != nil {
-		fmt.Printf("Expected success, but got: %s\n", err.Error())
-		if _, ok := err.(gomerr.Gomerr); !ok {
-			printStack() // Gomerr already includes stack info
-		}
+		fmt.Printf("Expected success, but got: %s\n", errString(err))
 		tb.FailNow()
 	}
 }
 
-func Error(tb testing.TB, err error, msg string, msgArgs ...interface{}) {
+func Fail(tb testing.TB, err error) {
 	if err == nil {
-		fmt.Printf("Expected error to be non-nil: "+msg+"\n", msgArgs...)
-		printStack()
+		fmt.Println("Expected an error, but err is nil")
 		tb.FailNow()
 	}
 }
 
-func ErrorType(tb testing.TB, actual error, expected error, msg string, msgArgs ...interface{}) {
-	if actual == nil {
-		fmt.Printf("Expected an error: "+msg+"\n", msgArgs...)
-		printStack()
+func Error(tb testing.TB, err error, msgAndArgs ...interface{}) {
+	var msg string
+	var msgArgs []interface{}
+	if len(msg) > 0 {
+		msg = msgAndArgs[0].(string)
+		if len(msg) > 1 {
+			msgArgs = msgAndArgs[1:]
+		}
+	}
+
+	if err == nil {
+		fmt.Printf("Expected error to be non-nil. "+msg+"\n", msgArgs...)
+		tb.FailNow()
+	}
+}
+
+func ErrorType(tb testing.TB, err error, target error, msgAndArgs ...interface{}) {
+	var msg string
+	var msgArgs []interface{}
+	if len(msg) > 0 {
+		msg = msgAndArgs[0].(string)
+		if len(msg) > 1 {
+			msgArgs = msgAndArgs[1:]
+		}
+	}
+
+	if err == nil {
+		fmt.Printf("Expected an error. "+msg+"\n", msgArgs...)
 		tb.FailNow()
 	}
 
-	if !errors.Is(actual, expected) {
-		fmt.Printf("Wrong error type. Expected 'errors.Is(actual, %s)' to succeed: "+msg+"\n", append([]interface{}{reflect.TypeOf(expected).String()}, msgArgs...)...)
-		fmt.Printf("Actual: " + actual.Error() + "\n")
-		if _, ok := actual.(gomerr.Gomerr); !ok {
-			printStack() // Gomerr already includes stack info
+	isTargetType := errors.Is(err, target)
+
+	// If a batch error, validate each one in turn. TODO:p3 support an array of target error types
+	if be, ok := err.(*gomerr.BatchError); ok && !isTargetType {
+		for _, ge := range be.Errors() {
+			ErrorType(tb, ge, target, msgAndArgs)
 		}
+		return
+	}
+
+	if !isTargetType {
+		fmt.Printf("Wrong error type. Expected 'errors.Is(%s, %s)' to succeed. "+msg+"\n", append([]interface{}{reflect.TypeOf(err).String(), reflect.TypeOf(target).String()}, msgArgs...)...)
+		fmt.Printf("Received: " + errString(err) + "\n")
 		tb.FailNow()
 	}
 }
@@ -64,8 +97,7 @@ func Equals(tb testing.TB, expected, actual interface{}, msgAndArgs ...interface
 				msgArgs = msgAndArgs[1:]
 			}
 		}
-		fmt.Printf("Failed equality check: "+msg+"\n\tExpected: %#v\n\tActual: %#v\n", append(append([]interface{}{}, msgArgs...), expected, actual)...)
-		printStack()
+		fmt.Printf("Failed equality check: "+msg+"\n\tExpected: %#v\n\tActual:   %#v\n", append(append([]interface{}{}, msgArgs...), expected, actual)...)
 		tb.FailNow()
 	}
 }
@@ -81,26 +113,13 @@ func NotEquals(tb testing.TB, expected, actual interface{}, msgAndArgs ...interf
 			}
 		}
 		fmt.Printf("Failed non-equality check: "+msg+"\n\tExpected: %#v\n Actual: %#v\n", append(append([]interface{}{}, msgArgs...), expected, actual)...)
-		printStack()
 		tb.FailNow()
 	}
 }
 
-func printStack() {
-	callers := make([]uintptr, 30)
-	depth := runtime.Callers(3, callers)
-	callers = callers[:depth]
-
-	stack := make([]string, depth)
-	frames := runtime.CallersFrames(callers)
-	fmt.Println("\nStack:")
-	for i := 0; i < depth; i++ {
-		frame, _ := frames.Next()
-		if strings.HasPrefix(frame.Function, "runtime.") {
-			stack = stack[:i]
-			break
-		}
-		function := frame.Function[strings.LastIndexByte(frame.Function, '/')+1:]
-		fmt.Printf("%s -- %s:%d\n", function, frame.File, frame.Line)
+func errString(err error) string {
+	if ge, ok := err.(gomerr.Gomerr); ok {
+		return "\n" + ge.String()
 	}
+	return err.Error()
 }
