@@ -3,137 +3,196 @@ package flect
 import (
 	"reflect"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/jt0/gomer/gomerr"
 )
 
-func SetValue(target reflect.Value, value interface{}) gomerr.Gomerr {
-	valueValue := reflect.ValueOf(value)
-	targetType := target.Type()
+type zeroVal struct{}
 
-	if target.Kind() == reflect.Ptr && valueValue.Kind() != reflect.Ptr {
+var ZeroVal = zeroVal{}
+
+func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
+	if value == nil {
+		return nil
+	} else if value == ZeroVal {
+		targetValue.Set(reflect.Zero(targetValue.Type()))
+		return nil
+	}
+
+	indirectTargetValueType := targetValue.Type()
+	var tvtPtr bool
+	if indirectTargetValueType.Kind() == reflect.Ptr { // Doesn't handle pointer pointers
+		indirectTargetValueType = indirectTargetValueType.Elem()
+		tvtPtr = true
+	}
+
+	if stringValue, ok := value.(string); ok {
+		if typedValue, ge := StringToType(stringValue, indirectTargetValueType); ge != nil {
+			return ge
+		} else if typedValue != nil {
+			value = typedValue
+		}
+	}
+
+	valueValue, ok := value.(reflect.Value)
+	if !ok {
+		valueValue = reflect.ValueOf(value)
+	}
+
+	indirectValueValueType := valueValue.Type()
+	var vvtPtr bool
+	if indirectValueValueType.Kind() == reflect.Ptr {
+		indirectValueValueType = indirectValueValueType.Elem()
+		vvtPtr = true
+	}
+
+	ivvtIsiitvt := indirectValueValueType == indirectTargetValueType
+	var vvConvertibleToTv bool
+	if !ivvtIsiitvt {
+		vvConvertibleToTv = indirectValueValueType.ConvertibleTo(indirectTargetValueType)
+		if !vvConvertibleToTv && !indirectValueValueType.AssignableTo(indirectTargetValueType) {
+			return gomerr.Unprocessable("Unable to set value with type '"+valueValue.Type().String()+"' to '"+targetValue.Type().String()+"'", value)
+		}
+	}
+
+	type ptrType struct {
+		tvtPtr bool
+		vvtPtr bool
+	}
+	pt := ptrType{tvtPtr, vvtPtr}
+	switch pt {
+	case ptrType{true, true}:
+		if targetValue.Type() == valueValue.Type() {
+			break
+		}
+		valueValue = valueValue.Elem()
+		fallthrough
+	case ptrType{true, false}:
+		if vvConvertibleToTv {
+			valueValue = valueValue.Convert(indirectTargetValueType)
+			vvConvertibleToTv = false // already done
+		}
 		p := reflect.New(valueValue.Type())
 		p.Elem().Set(valueValue)
 		valueValue = p
+	case ptrType{false, true}:
+		if valueValue.IsNil() {
+			targetValue.Set(reflect.Zero(targetValue.Type())) // won't this break length constraint that wants a nil value?
+			return nil
+		}
+		valueValue = valueValue.Elem()
+	case ptrType{false, false}:
+		// nothing to do
 	}
 
-	// This handles non-string FieldDefaultFunction results and default strings
-	if valueValue.Type().AssignableTo(targetType) {
-		target.Set(valueValue)
-		return nil
-	} else if valueValue.Type().ConvertibleTo(targetType) {
-		target.Set(valueValue.Convert(targetType))
-		return nil
+	if !ivvtIsiitvt && vvConvertibleToTv {
+		valueValue = valueValue.Convert(indirectTargetValueType)
 	}
 
-	stringValue, ok := value.(string)
-	if !ok {
-		return gomerr.Unprocessable("Not a 'string' or '"+targetType.Name()+"'", value)
-	}
+	targetValue.Set(valueValue)
 
-	if targetType.Kind() == reflect.Ptr {
-		targetType = targetType.Elem()
-	}
+	return nil
+}
 
-	var typed interface{}
+// StringToType returns a value corresponding to the provided targetType. If the targetType isn't recognized, this
+// returns nil rather than an error. An error occurs if the targetType is recognized, but it's not possible to convert
+// the string into that type.
+func StringToType(valueString string, targetType reflect.Type) (interface{}, gomerr.Gomerr) {
+	var value interface{}
 	var err error
+
 	switch targetType.Kind() {
+	case reflect.String:
+		value = valueString
 	case reflect.Bool:
-		typed, err = strconv.ParseBool(stringValue)
+		value, err = strconv.ParseBool(valueString)
 	case reflect.Int:
-		parsed, parseErr := strconv.ParseInt(stringValue, 0, 64)
+		parsed, parseErr := strconv.ParseInt(valueString, 0, 64)
 		if parseErr != nil {
 			err = parseErr
 		} else {
-			typed = int(parsed)
+			value = int(parsed)
 		}
 	case reflect.Int8:
-		parsed, parseErr := strconv.ParseInt(stringValue, 0, 8)
+		parsed, parseErr := strconv.ParseInt(valueString, 0, 8)
 		if parseErr != nil {
 			err = parseErr
 		} else {
-			typed = int8(parsed)
+			value = int8(parsed)
 		}
 	case reflect.Int16:
-		parsed, parseErr := strconv.ParseInt(stringValue, 0, 16)
+		parsed, parseErr := strconv.ParseInt(valueString, 0, 16)
 		if parseErr != nil {
 			err = parseErr
 		} else {
-			typed = int16(parsed)
+			value = int16(parsed)
 		}
 	case reflect.Int32:
-		parsed, parseErr := strconv.ParseInt(stringValue, 0, 32)
+		parsed, parseErr := strconv.ParseInt(valueString, 0, 32)
 		if parseErr != nil {
 			err = parseErr
 		} else {
-			typed = int32(parsed)
+			value = int32(parsed)
 		}
 	case reflect.Int64:
-		typed, err = strconv.ParseInt(stringValue, 0, 64)
+		value, err = strconv.ParseInt(valueString, 0, 64)
 	case reflect.Uint:
-		parsed, parseErr := strconv.ParseUint(stringValue, 0, 64)
+		parsed, parseErr := strconv.ParseUint(valueString, 0, 64)
 		if parseErr != nil {
 			err = parseErr
 		} else {
-			typed = uint(parsed)
+			value = uint(parsed)
 		}
 	case reflect.Uint8:
-		parsed, parseErr := strconv.ParseUint(stringValue, 0, 8)
+		parsed, parseErr := strconv.ParseUint(valueString, 0, 8)
 		if parseErr != nil {
 			err = parseErr
 		} else {
-			typed = uint8(parsed)
+			value = uint8(parsed)
 		}
 	case reflect.Uint16:
-		parsed, parseErr := strconv.ParseUint(stringValue, 0, 16)
+		parsed, parseErr := strconv.ParseUint(valueString, 0, 16)
 		if parseErr != nil {
 			err = parseErr
 		} else {
-			typed = uint16(parsed)
+			value = uint16(parsed)
 		}
 	case reflect.Uint32:
-		parsed, parseErr := strconv.ParseUint(stringValue, 0, 32)
+		parsed, parseErr := strconv.ParseUint(valueString, 0, 32)
 		if parseErr != nil {
 			err = parseErr
 		} else {
-			typed = uint32(parsed)
+			value = uint32(parsed)
 		}
 	case reflect.Uint64:
-		typed, err = strconv.ParseUint(stringValue, 0, 64)
+		value, err = strconv.ParseUint(valueString, 0, 64)
 	case reflect.Uintptr:
-		typed, err = strconv.ParseUint(stringValue, 0, 64)
+		value, err = strconv.ParseUint(valueString, 0, 64)
 	case reflect.Float32:
-		parsed, parseErr := strconv.ParseFloat(stringValue, 32)
+		parsed, parseErr := strconv.ParseFloat(valueString, 32)
 		if parseErr != nil {
 			err = parseErr
 		} else {
-			typed = float32(parsed)
+			value = float32(parsed)
 		}
 	case reflect.Float64:
-		typed, err = strconv.ParseFloat(stringValue, 64)
-	default:
-		return gomerr.Unprocessable("Unable to set value to '"+targetType.Name()+"'", value)
+		value, err = strconv.ParseFloat(valueString, 64)
+	case reflect.Struct:
+		if targetType == timeType {
+			if strings.Index(valueString, "T") == -1 {
+				valueString = valueString + "T00:00:00Z"
+			}
+			value, err = time.Parse(time.RFC3339Nano, valueString)
+		}
 	}
 
 	if err != nil {
-		return gomerr.Unmarshal("value", value, target.Interface()).Wrap(err)
+		return nil, gomerr.Unmarshal("valueString", valueString, targetType.String()).Wrap(err)
 	}
 
-	typedValue := reflect.ValueOf(typed)
-	typedValueType := typedValue.Type()
-	if target.Kind() == reflect.Ptr {
-		p := reflect.New(typedValueType)
-		p.Elem().Set(typedValue)
-		typedValue = p
-	}
-
-	if typedValueType.AssignableTo(targetType) {
-		target.Set(typedValue)
-		return nil
-	} else if typedValueType.ConvertibleTo(targetType) {
-		target.Set(typedValue.Convert(targetType))
-		return nil
-	}
-
-	return gomerr.Unprocessable("Unable to set value to '"+targetType.Name()+"'", typedValue)
+	return value, nil
 }
+
+var timeType = reflect.TypeOf((*time.Time)(nil)).Elem()
