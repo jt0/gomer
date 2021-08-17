@@ -10,8 +10,8 @@ const (
 	InvalidValueType    BadValueType = "Invalid"
 	MalformedValueType  BadValueType = "Malformed"
 
-	DefaultReasonAttributeKey = "Reason"
-	DefaultValidAttributeKey  = "Valid"
+	reasonAttributeKey   = "Reason"
+	expectedAttributeKey = "Expected"
 )
 
 type BadValueError struct {
@@ -25,8 +25,8 @@ func BadValue(badValueType BadValueType, name string, value interface{}) *BadVal
 	return Build(new(BadValueError), badValueType, name, value).(*BadValueError)
 }
 
-func InvalidValue(name string, value interface{}, valid interface{}) *BadValueError {
-	return Build(new(BadValueError), InvalidValueType, name, value).AddAttribute(DefaultValidAttributeKey, valid).(*BadValueError)
+func InvalidValue(name string, value interface{}, expected interface{}) *BadValueError {
+	return Build(new(BadValueError), InvalidValueType, name, value).AddAttributes(expectedAttributeKey, expected).(*BadValueError)
 }
 
 func MalformedValue(name string, value interface{}) *BadValueError {
@@ -38,6 +38,5 @@ func ValueExpired(name string, expiredAt time.Time) *BadValueError {
 }
 
 func (bve *BadValueError) WithReason(reason string) *BadValueError {
-	bve.AddAttribute(DefaultReasonAttributeKey, reason)
-	return bve
+	return bve.AddAttribute(reasonAttributeKey, reason).(*BadValueError)
 }

@@ -1,5 +1,9 @@
 package gomerr
 
+import (
+	"reflect"
+)
+
 type BatchError struct {
 	Gomerr
 	errors []Gomerr
@@ -22,13 +26,23 @@ func (b *BatchError) Errors() []Gomerr {
 	return b.errors
 }
 
+var batchTypeString = reflect.TypeOf((*BatchError)(nil)).String()
+
 func (b *BatchError) ToMap() map[string]interface{} {
-	m := b.Gomerr.ToMap()
 	errors := make([]map[string]interface{}, len(b.errors))
-	for i, g := range b.errors {
-		errors[i] = g.ToMap()
+	for i, ge := range b.errors {
+		errors[i] = ge.ToMap()
 	}
-	m["_Errors"] = errors
+
+	m := map[string]interface{}{
+		"$.errorType": batchTypeString,
+		"Errors":      errors,
+	}
+
+	g := b.Gomerr.(*gomerr)
+	if g.attributes != nil && len(g.attributes) > 0 {
+		m["_attributes"] = g.attributes
+	}
 
 	return m
 }

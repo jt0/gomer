@@ -10,18 +10,22 @@ import (
 )
 
 type Gomerr interface {
+	error
+	Unwrap() error
+	Is(err error) bool
+
 	Wrap(err error) Gomerr
-	Attribute(key string) (value interface{}, ok bool)
 	AddAttribute(key string, value interface{}) Gomerr
 	AddAttributes(keysAndValues ...interface{}) Gomerr
 	WithAttributes(attributes map[string]interface{}) Gomerr
 
-	Is(error) bool
-	Unwrap() error
+	Attribute(key string) (value interface{}, ok bool)
 	Attributes() map[string]interface{}
-	Stack() []string
+	String() string
 	ToMap() map[string]interface{}
-	Error() string
+
+	// Ensures that Gomerrs behave as expected
+	isFromBuildFunc() bool
 }
 
 var gomerrType = reflect.TypeOf((*Gomerr)(nil)).Elem()
@@ -140,7 +144,7 @@ func (g *gomerr) AddAttribute(key string, value interface{}) Gomerr {
 	// gw := newGomerr(2, g.self) // wrap first to get line/file info
 	//
 	// // If the notes are being added in the same place g is introduced, use g instead of the new one
-	// if g.stack[0].Line == gw.stack[0].Line && g.stack[0].File == gw.stack[0].File {
+	// if g.Stack[0].Line == gw.Stack[0].Line && g.Stack[0].File == gw.Stack[0].File {
 	// 	gw = g
 	// }
 
@@ -213,6 +217,7 @@ func (g *gomerr) Is(err error) bool {
 }
 
 // Implicitly used by errors.Is()/errors.As()
+
 func (g *gomerr) Unwrap() error {
 	return g.wrapped
 }
@@ -226,13 +231,16 @@ func (g *gomerr) Stack() []string {
 }
 
 func (g *gomerr) ToMap() map[string]interface{} {
-	gt := reflect.TypeOf(g.self).Elem()
-	gv := reflect.ValueOf(g.self).Elem()
-	m := make(map[string]interface{}, gt.NumField())
+	gt := reflect.TypeOf(g.self)
+	gte := gt.Elem()
+	gve := reflect.ValueOf(g.self).Elem()
 
-	for i := 0; i < gt.NumField(); i++ {
-		ft := gt.Field(i)
-		fv := gv.Field(i)
+	m := make(map[string]interface{}, gte.NumField()+1)
+	m["$.errorType"] = gt.String()
+
+	for i := 0; i < gte.NumField(); i++ {
+		ft := gte.Field(i)
+		fv := gve.Field(i)
 		if ft.Anonymous || unicode.IsLower([]rune(ft.Name)[0]) || !fv.IsValid() || fv.IsZero() {
 			continue
 		}
@@ -255,13 +263,24 @@ func (g *gomerr) ToMap() map[string]interface{} {
 	}
 
 	if wrapped := g.Unwrap(); wrapped != nil {
-		var val interface{}
+		var w map[string]interface{}
 		if gWrapped, ok := wrapped.(Gomerr); ok {
-			val = gWrapped.ToMap()
+			w = gWrapped.ToMap()
 		} else {
-			val = wrapped.Error()
+			w = make(map[string]interface{}, 3)
+			w["$.errorType"] = reflect.TypeOf(wrapped).String()
+			w["_errorString"] = wrapped.Error()
+			if marshaled, err := json.Marshal(wrapped); err == nil {
+				wm := make(map[string]interface{})
+				if err = json.Unmarshal(marshaled, &wm); err == nil {
+					w["_error"] = wm
+				}
+			}
+			w["_stack"] = g.stack // provide a stack for the deepest error (non-Gomerr)
 		}
-		m[reflect.TypeOf(wrapped).String()] = val
+		m["_wrapped"] = w
+	} else {
+		m["_stack"] = g.stack // provide a stack for the deepest error (Gomerr)
 	}
 
 	return m
@@ -278,19 +297,13 @@ func (g *gomerr) String() string {
 }
 
 func (g *gomerr) string(marshal func(interface{}) ([]byte, error)) string {
-	var innermost Gomerr = g
-	for candidate, ok := innermost.Unwrap().(Gomerr); ok; candidate, ok = innermost.Unwrap().(Gomerr) {
-		innermost = candidate
-	}
-
-	asMap := map[string]interface{}{
-		reflect.TypeOf(g.self).String(): g.self.ToMap(),
-		"stack":                         innermost.Stack(),
-	}
-
-	if bytes, err := marshal(asMap); err != nil {
+	if bytes, err := marshal(g.self.ToMap()); err != nil {
 		return "Failed to create gomerr string representation: " + err.Error()
 	} else {
 		return string(bytes)
 	}
+}
+
+func (g *gomerr) isFromBuildFunc() bool {
+	return true
 }
