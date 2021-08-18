@@ -1,19 +1,25 @@
 package constraint
 
-var Required = func() Constraint {
-	return New("Required", nil, func(value interface{}) bool {
-		return !Nil.Test(value)
-	})
-}()
+import (
+	"github.com/jt0/gomer/gomerr"
+)
+
+var Required = New("Required", nil, func(toTest interface{}) gomerr.Gomerr {
+	ttv, isNil := indirectValueOf(toTest)
+	if isNil || ttv.IsZero() {
+		return NotSatisfied(toTest)
+	}
+	return nil
+})
 
 func Success(msg string) Constraint {
-	return New(msg, nil, func(interface{}) bool {
-		return true
+	return New("Success: "+msg, nil, func(interface{}) gomerr.Gomerr {
+		return nil
 	})
 }
 
 func Fail(msg string) Constraint {
-	return New(msg, nil, func(interface{}) bool {
-		return false
+	return New(msg, nil, func(toTest interface{}) gomerr.Gomerr {
+		return NotSatisfied(toTest)
 	})
 }

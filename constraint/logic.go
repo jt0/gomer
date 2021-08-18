@@ -1,69 +1,96 @@
 package constraint
 
 import (
-	"strings"
+	"github.com/jt0/gomer/gomerr"
 )
 
-type logicalOp = string
+type logicOp = string
 
 const (
-	andOp logicalOp = "And"
-	orOp  logicalOp = "Or"
-	notOp logicalOp = "Not"
-	noOp  logicalOp = ""
+	andOp logicOp = "And"
+	orOp  logicOp = "Or"
+	notOp logicOp = "Not"
+	none  logicOp = ""
 
 	lcAndOp = "and"
 	lcOrOp  = "or"
 	lcNotOp = "not"
 )
 
-func And(operands ...Constraint) Constraint {
-	switch len(operands) {
+type logicParams []Constraint
+
+func (lp logicParams) String() string {
+	var result string
+	for _, operand := range lp { // each logic function has at least one operand
+		result = result + operand.String() + ", "
+	}
+	return result[:len(result)-2] // drop the last two chars
+}
+
+func And(constraints ...Constraint) Constraint {
+	switch len(constraints) {
 	case 0:
-		return Fail("'And' constraint requires at least one operand")
+		panic("'And' requires at least one constraint")
 	case 1:
-		return operands[0]
+		return constraints[0]
 	}
 
-	return New(andOp, operands, func(toTest interface{}) bool {
-		for _, operand := range operands {
-			if !operand.Test(toTest) {
-				return false
+	return dynamicIfNeeded(New(andOp, logicParams(constraints), func(toTest interface{}) gomerr.Gomerr {
+		for _, operand := range constraints {
+			if ge := operand.Test(toTest); ge != nil {
+				if nse, ok := ge.(*NotSatisfiedError); ok {
+					if nse.Constraint == nil {
+						nse.Constraint = operand
+					}
+				} else {
+					if _, ok = ge.Attribute("Constraint"); !ok {
+						ge.AddAttribute("Constraint", operand)
+					}
+				}
+				return ge
 			}
 		}
-		return true
-	}, logicalOpString(andOp, operands...))
+		return nil
+	}), constraints...)
 }
 
-func Or(operands ...Constraint) Constraint {
-	switch len(operands) {
+func Or(constraints ...Constraint) Constraint {
+	switch len(constraints) {
 	case 0:
-		return Fail("'Or' constraint requires at least one operand")
+		panic("'Or' requires at least one constraint")
 	case 1:
-		return operands[0]
+		return constraints[0]
 	}
 
-	return New(orOp, operands, func(toTest interface{}) bool {
-		for _, operand := range operands {
-			if operand.Test(toTest) {
-				return true
+	return dynamicIfNeeded(New(orOp, logicParams(constraints), func(toTest interface{}) gomerr.Gomerr {
+		var errors []gomerr.Gomerr
+		for _, operand := range constraints {
+			ge := operand.Test(toTest)
+			if ge == nil {
+				return nil // any success results in success
 			}
+
+			if nse, ok := ge.(*NotSatisfiedError); ok {
+				if nse.Constraint == nil {
+					nse.Constraint = operand
+				}
+			} else {
+				if _, ok = ge.Attribute("Constraint"); !ok {
+					ge.AddAttribute("Constraint", operand)
+				}
+			}
+
+			errors = append(errors, ge)
 		}
-		return false
-	}, logicalOpString(orOp, operands...))
+		return gomerr.Batcher(errors)
+	}), constraints...)
 }
 
-func Not(operand Constraint) Constraint {
-	return New(notOp, operand, func(toTest interface{}) bool {
-		return !operand.Test(toTest)
-	}, logicalOpString(andOp, operand))
-}
-
-func logicalOpString(op logicalOp, operands ...Constraint) string {
-	var os []string
-	for _, operand := range operands {
-		os = append(os, operand.String())
-	}
-
-	return op+"("+strings.Join(os, ", ")+")"
+func Not(constraint Constraint) Constraint {
+	return dynamicIfNeeded(New(notOp, constraint, func(toTest interface{}) gomerr.Gomerr {
+		if ge := constraint.Test(toTest); ge == nil {
+			return NotSatisfied(toTest) // TODO:p1 ensure .String() captures what is "Not"ed
+		}
+		return nil
+	}), constraint)
 }

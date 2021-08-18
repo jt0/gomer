@@ -1,39 +1,39 @@
 package constraint
 
 import (
-	"reflect"
+	"github.com/jt0/gomer/gomerr"
 )
 
 func Equals(value interface{}) Constraint {
-	return New("Equals", value, func(toTest interface{}) bool {
-		return value == toTest
+	return New("Equals", value, func(toTest interface{}) gomerr.Gomerr {
+		tt, isNil := indirect(toTest)
+		if isNil || tt != value {
+			return NotSatisfied(toTest)
+		}
+		return nil
 	})
 }
 
 func NotEquals(value interface{}) Constraint {
-	return New("NotEquals", value, func(toTest interface{}) bool {
-		return value != toTest
+	return New("NotEquals", value, func(toTest interface{}) gomerr.Gomerr {
+		tt, isNil := indirect(toTest)
+		if isNil || tt == value {
+			return NotSatisfied(toTest)
+		}
+		return nil
 	})
 }
 
 func OneOf(values ...interface{}) Constraint {
-	return New("OneOf", values, func(toTest interface{}) bool {
-		for _, value := range values {
-			if toTest == value {
-				return true
+	return New("OneOf", values, func(toTest interface{}) gomerr.Gomerr {
+		tt, isNil := indirect(toTest)
+		if !isNil {
+			for _, value := range values {
+				if tt == value {
+					return nil
+				}
 			}
 		}
-		return false
-	})
-}
-
-func TypeOf(value interface{}) Constraint {
-	t, ok := value.(reflect.Type)
-	if !ok {
-		t = reflect.TypeOf(value)
-	}
-
-	return New("TypeOf", value, func(toTest interface{}) bool {
-		return reflect.TypeOf(toTest) == t
+		return NotSatisfied(toTest)
 	})
 }

@@ -2,25 +2,25 @@ package constraint
 
 import (
 	"reflect"
+
+	"github.com/jt0/gomer/gomerr"
 )
 
-var Nil = func() Constraint {
-	return New("Nil", nil, func(toTest interface{}) bool {
-		vv := reflect.ValueOf(toTest)
-		if !vv.IsValid() {
-			return false
-		}
-		switch vv.Kind() {
-		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
-			return vv.IsNil()
-		default:
-			return false
-		}
-	})
-}()
+var (
+	Nil    = nilConstraint("IsNil", false)
+	NotNil = nilConstraint("IsNotNil", true)
+)
 
-var NotNil = func() Constraint {
-	return New("NotNil", nil, func(toTest interface{}) bool {
-		return !Nil.Test(toTest)
+func nilConstraint(name string, errorIfNil bool) Constraint {
+	return New(name, nil, func(toTest interface{}) gomerr.Gomerr {
+		switch vv := reflect.ValueOf(toTest); vv.Kind() {
+		case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+			if vv.IsNil() == errorIfNil {
+				return NotSatisfied(toTest)
+			}
+			return nil
+		default:
+			return gomerr.Unprocessable("Test value is not a nil-able type", reflect.TypeOf(toTest))
+		}
 	})
-}()
+}
