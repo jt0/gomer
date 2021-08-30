@@ -13,7 +13,6 @@ import (
 	"github.com/jt0/gomer/_test/helpers/stores"
 	. "github.com/jt0/gomer/api/http"
 	"github.com/jt0/gomer/auth"
-	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/resource"
 )
 
@@ -26,14 +25,14 @@ var (
 type Greeting struct {
 	resource.BaseInstance `fields:"ignore"`
 
-	Style_path       string `http.BindInFieldTool:"path.0"`
-	Recipient_path   string `http.BindInFieldTool:"path.1"`
-	Style_query      string `http.BindInFieldTool:"query.+"` // same name as attribute
-	Recipient_query  string `http.BindInFieldTool:"query.recipient"`
-	Style_header     string `http.BindInFieldTool:"header.+"` // same name as attribute
-	Recipient_header string `http.BindInFieldTool:"header.x-recipient"`
-	Style_body       string `http.BindInFieldTool:"Style"`
-	Recipient_body   string `http.BindInFieldTool:"Recipient"`
+	Style_path       string `in:"path.0"`
+	Recipient_path   string `in:"path.1"`
+	Style_query      string `in:"query.+"` // same name as attribute
+	Recipient_query  string `in:"query.recipient"`
+	Style_header     string `in:"header.+"` // same name as attribute
+	Recipient_header string `in:"header.x-recipient"`
+	Style_body       string `in:"Style"`
+	Recipient_body   string `in:"Recipient"`
 }
 
 const (
@@ -70,9 +69,6 @@ func (g Greeting) recipient(location int) string {
 }
 
 func TestBindInTypes(t *testing.T) {
-	fields.FieldToolConfigProvider = fields.StructTagConfigProvider{}.
-		WithKey("http.BindInFieldTool", BindInFieldTool(NewBindInFieldToolConfiguration()))
-
 	_, ge := resource.Register(&Greeting{}, nil, actions, stores.PanicStore, nil)
 	assert.Success(t, ge)
 
