@@ -22,6 +22,16 @@ func Batcher(errors []Gomerr) Gomerr {
 	}
 }
 
+func Batch(errors ...Gomerr) Gomerr {
+	var nnErrors []Gomerr
+	for _, ge := range errors {
+		if ge != nil {
+			nnErrors = append(nnErrors, ge)
+		}
+	}
+	return Batcher(nnErrors)
+}
+
 func (b *BatchError) Errors() []Gomerr {
 	return b.errors
 }
