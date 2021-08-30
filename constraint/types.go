@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/jt0/gomer/fields"
+	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/structs"
 )
 
 // UseBracketsForContainedTargets specifies whether the generated target value is in 'json' or 'Gomer' format. The
@@ -23,23 +24,17 @@ import (
 // Foo.M.Cat). If the value is true, the key value will be Foo.M.cat and the latter will be Foo.M[cat].
 var UseBracketsForContainedTargets = false
 
-func Struct(validationToolName string) Constraint {
+func Struct(validationTool *structs.Tool) Constraint {
 	return New("Struct", nil, func(toTest interface{}) gomerr.Gomerr {
-		ttv, isNil := indirectValueOf(toTest)
-		if isNil {
+		// Do we need to check for 'nil' here?
+		_, ok := flect.ReadableIndirectValue(toTest)
+		if !ok {
 			return nil
 		}
 
-		if ttv.Kind() != reflect.Struct {
-			return gomerr.Unprocessable("Test value is not a struct", toTest)
-		}
-
-		fs, ge := fields.Get(ttv.Type())
-		if ge != nil {
-			return gomerr.Unprocessable("Unable to get fields for test value", toTest).Wrap(ge)
-		}
-
-		if ge = fs.ApplyTools(ttv, fields.Application{ToolName: validationToolName}); ge != nil {
+		// TODO:p1 support scope
+		// TODO:p1 should need to have validationTool?
+		if ge := structs.ApplyTools(toTest, structs.ToolContext{}, validationTool); ge != nil {
 			return ge
 		}
 
@@ -57,8 +52,8 @@ func MapValues(valueConstraint Constraint) Constraint {
 
 func Map(keyConstraint Constraint, valueConstraint Constraint) Constraint {
 	return dynamicIfNeeded(New("Map", nil, func(toTest interface{}) gomerr.Gomerr {
-		ttv, isNil := indirectValueOf(toTest)
-		if isNil {
+		ttv, ok := flect.ReadableIndirectValue(toTest)
+		if !ok {
 			return nil
 		}
 
@@ -97,8 +92,8 @@ type Entry struct {
 
 func Entries(entryConstraint Constraint) Constraint {
 	return dynamicIfNeeded(New("Entries", nil, func(toTest interface{}) gomerr.Gomerr {
-		ttv, isNil := indirectValueOf(toTest)
-		if isNil {
+		ttv, ok := flect.ReadableIndirectValue(toTest)
+		if !ok {
 			return nil
 		}
 
@@ -126,8 +121,8 @@ func Entries(entryConstraint Constraint) Constraint {
 
 func Elements(constraint Constraint) Constraint {
 	return dynamicIfNeeded(New("Elements", nil, func(toTest interface{}) gomerr.Gomerr {
-		ttv, isNil := indirectValueOf(toTest)
-		if isNil {
+		ttv, ok := flect.ReadableIndirectValue(toTest)
+		if !ok {
 			return nil
 		}
 

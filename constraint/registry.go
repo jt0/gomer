@@ -10,13 +10,14 @@ import (
 )
 
 var built = map[string]Constraint{
-	"base64":   Base64,
 	"empty":    Empty,
-	"isregexp": IsRegexp,
-	"nil":      Nil,
 	"nonempty": NonEmpty,
-	"notnil":   NotNil,
+	"isregexp": IsRegexp,
+	"nil":      IsNil,
+	"notnil":   IsNotNil,
 	"required": Required,
+	"zero":     IsZero,
+	"notzero":  IsNotZero,
 }
 
 var builders = map[string]interface{}{
@@ -37,8 +38,11 @@ var builders = map[string]interface{}{
 	"mapvalues":    MapValues,
 	"maxlen":       MaxLength,
 	"minlen":       MinLength,
+	"nil":          Nil,
 	"not":          Not,
 	"notequals":    NotEquals,
+	"notnil":       NotNil,
+	"notzero":      NotZero,
 	"neq":          NotEquals,
 	"oneof":        OneOf,
 	"or":           Or,
@@ -50,6 +54,7 @@ var builders = map[string]interface{}{
 	"typeof":       TypeOf,
 	"uint":         UintCompare,
 	"uintbetween":  UintBetween,
+	"zero":         Zero,
 }
 
 func RegisterEach(constraintsAndBuilders map[string]interface{}) gomerr.Gomerr {

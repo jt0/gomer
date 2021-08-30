@@ -108,10 +108,7 @@ func (c *constraint) String() string {
 	}
 }
 
-var (
-	timeType     = reflect.TypeOf((*time.Time)(nil)).Elem()
-	stringerType = reflect.TypeOf((*fmt.Stringer)(nil)).Elem()
-)
+var timeType = reflect.TypeOf((*time.Time)(nil)).Elem()
 
 func parametersToString(pv reflect.Value) string {
 	if !pv.IsValid() {
@@ -134,17 +131,15 @@ func parametersToString(pv reflect.Value) string {
 	case reflect.Struct:
 		if pv.Type() == timeType {
 			return pv.Interface().(time.Time).Format(time.RFC3339)
-		} else if pv.Type().AssignableTo(stringerType) {
-			return pv.Interface().(fmt.Stringer).String()
 		}
 		fallthrough
 	default:
-		return fmt.Sprintf("%v", pv.Interface())
+		return fmt.Sprintf("%v", pv)
 	}
 }
 
-// static location -> $.SomeField --> structValue.FieldByName().Interface()
-// dynamic location -> $.MyFunction() --> structValue.MethodByName()....
+// static location -> $.SomeField --> sv.FieldByName().Interface()
+// dynamic location -> $.MyFunction() --> sv.MethodByName()....
 // Some other function(?) -> $$SomeFunction
 // at `apply` need to get the value of what the constraint is going to use to check
 type dynamicConstraint struct {
@@ -170,26 +165,4 @@ func dynamicIfNeeded(newConstraint Constraint, constraints ...Constraint) Constr
 	}
 
 	return newConstraint
-}
-
-func indirect(toTest interface{}) (interface{}, bool) {
-	ttv := reflect.ValueOf(toTest)
-	if ttv.Kind() == reflect.Ptr {
-		if ttv.IsNil() {
-			return nil, true
-		}
-		return ttv.Elem().Interface(), false
-	}
-	return toTest, false
-}
-
-func indirectValueOf(toTest interface{}) (reflect.Value, bool) {
-	ttv := reflect.ValueOf(toTest)
-	if ttv.Kind() == reflect.Ptr {
-		if ttv.IsNil() {
-			return reflect.Value{}, true
-		}
-		return ttv.Elem(), false
-	}
-	return ttv, false
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 )
 
@@ -18,7 +19,7 @@ func Length(values ...*uint64) Constraint {
 	case 2:
 		return length("LengthBetween", []interface{}{*values[0], *values[1]}, values[0], values[1])
 	default:
-		return Fail(fmt.Sprintf("'Length' constraint requires 1 or 2 input values, received %d", len(values)))
+		return ConfigurationError(fmt.Sprintf("'Length' constraint requires 1 or 2 input values, received %d", len(values)))
 	}
 }
 
@@ -37,19 +38,19 @@ func MaxLength(max *uint64) Constraint {
 }
 
 var (
-	zero = uint64(0)
-	one  = uint64(1)
+	uintZero = uint64(0)
+	uintOne  = uint64(1)
 
-	Empty    = length("Empty", nil, nil, &zero)
-	NonEmpty = length("NonEmpty", nil, &one, nil)
+	Empty    = length("Empty", nil, nil, &uintZero)
+	NonEmpty = length("NonEmpty", nil, &uintOne, nil)
 
 	zeroLength = reflect.ValueOf([]interface{}{})
 )
 
 func length(lengthType string, lengthParams interface{}, min, max *uint64) Constraint {
 	return New(lengthType, lengthParams, func(toTest interface{}) gomerr.Gomerr {
-		ttv, isNil := indirectValueOf(toTest)
-		if isNil {
+		ttv, ok := flect.ReadableIndirectValue(toTest)
+		if !ok {
 			ttv = zeroLength
 		}
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 )
 
@@ -37,8 +38,8 @@ func IntCompare(comparisonType ComparisonType, compareTo *int64) Constraint {
 			return nil
 		}
 
-		ttv, isNil := indirectValueOf(toTest)
-		if isNil {
+		ttv, ok := flect.ReadableIndirectValue(toTest)
+		if !ok {
 			return nil // should be NotSatisfied?
 		}
 
@@ -86,8 +87,8 @@ func UintCompare(comparisonType ComparisonType, compareTo *uint64) Constraint {
 			return nil
 		}
 
-		ttv, isNil := indirectValueOf(toTest)
-		if isNil {
+		ttv, ok := flect.ReadableIndirectValue(toTest)
+		if !ok {
 			return nil // should be NotSatisfied?
 		}
 
@@ -134,8 +135,8 @@ func FloatCompare(comparisonType ComparisonType, compareTo *float64) Constraint 
 			return nil
 		}
 
-		ttv, isNil := indirectValueOf(toTest)
-		if isNil {
+		ttv, ok := flect.ReadableIndirectValue(toTest)
+		if !ok {
 			return nil // should be NotSatisfied?
 		}
 
@@ -181,8 +182,8 @@ func TimeCompare(comparisonType ComparisonType, compareTo *time.Time) Constraint
 			return nil
 		}
 
-		ttv, isNil := indirectValueOf(toTest)
-		if isNil {
+		ttv, ok := flect.ReadableIndirectValue(toTest)
+		if !ok {
 			return nil // should be NotSatisfied?
 		}
 
