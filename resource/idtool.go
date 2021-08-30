@@ -52,6 +52,8 @@ func (idTool) Applier(st reflect.Type, sf reflect.StructField, directive string)
 		if idField[0] == '~' {
 			applier.hidden[idField] = true
 			idField = idField[1:]
+		} else if idField == "+" {
+			idField = sf.Name
 		}
 		applier.idFields = append(applier.idFields, idField)
 	}

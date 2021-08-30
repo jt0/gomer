@@ -7,17 +7,17 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
+// Reserved AccessPrincipal names
 const (
-	// Reserved AccessPrincipal names:
 	ReadWriteAll = "ReadWriteAll"
 	ReadAll      = "ReadAll"
 	NoAccess     = "NoAccess"
 )
 
+// Built-in, field-scoped AccessPrincipals. Additional principals can be specified by calling
+// RegisterFieldAccessPrincipals
 //goland:noinspection GoUnusedGlobalVariable
 var (
-	// Built-in, field-scoped AccessPrincipals. Additional principals can be specified by calling
-	// RegisterFieldAccessPrincipals
 	ReadWriteAllFields = AccessPrincipal{ReadWriteAll, fieldAccessPrincipal}
 	ReadAllFields      = AccessPrincipal{ReadAll, fieldAccessPrincipal}
 	NoFieldAccess      = AccessPrincipal{NoAccess, fieldAccessPrincipal}

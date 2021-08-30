@@ -18,12 +18,19 @@ const (
 	DenyChar     = '-' // No access
 )
 
-// A FieldAccessTool is used to validate that a principal that is performing an action against the fields of a
-// particular struct has permissions that grant it to do whatever it's trying to do. For example, an application may
-// define three AccessPrincipal types: 'admin', 'user', and 'guest', and each has a different set of fields that
-// they can read or write to. An 'admin' may be able to read and write any field, whereas a 'guest' may not be able
-// to write to any fields and can read only a subset of attributes. A 'user' may be able to read and write a set of
-// values, but may still not have permissions to modify certain field values.
+var (
+	DefaultAccessTool = NewAccessTool(structs.StructTagDirectiveProvider{"access"})
+
+	accessRegexp = regexp.MustCompile("(r|-)(w|c|u|p|-)")
+	accessGroups = []string{"", "read", "write"}
+)
+
+// NewAccessTool provides a tool is used to validate that a principal performing an action against the fields of a
+// struct has permissions that grant it. For example, an application may define three AccessPrincipal types: 'admin',
+// 'user', and 'guest', and each has a different set of fields that they can read or write to. An 'admin' may be able to
+// read and write any field, whereas a 'guest' may not be able to write to any fields and can read only a subset of
+// attributes. A 'user' may be able to read and write a set of values, but may still not have permissions to modify
+// certain field values.
 //
 // Indicating the permissions per principal is done by a Unix filesystem-like 'mode' string (e.g. "rw-r-r-"). While
 // a 'mode' string uses three characters per principal, the FieldAccessTool only uses two. The first indicates whether a
@@ -42,71 +49,11 @@ const (
 // We don't currently see a use case for allowing some principals to treat an attribute as provided and others not to.
 // To keep the door open for this, though, we require that to specify a field is provided, the 'p' must be set in the
 // leftmost permissions group's write location, and the other permission groups set their write permission value to '-'.
-
-var (
-	DefaultAccessFieldTool = NewAccessTool(structs.StructTagDirectiveProvider{"access"})
-
-	accessRegexp = regexp.MustCompile("(r|-)(w|c|u|p|-)")
-	accessGroups = []string{"", "read", "write"}
-)
-
 func NewAccessTool(dp structs.DirectiveProvider) *structs.Tool {
 	return structs.NewTool(accessToolType, accessApplierProvider{}, dp)
 }
 
-type accessApplier struct {
-	fieldName   string
-	permissions principalPermissions
-	provided    bool
-	zeroVal     reflect.Value
-}
-
-func (a accessApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
-	accessAction, ok := tc.Get(accessToolAction).(action)
-	if !ok {
-		return nil // no action specified, return
-	}
-
-	return accessAction.do(fv, a, tc)
-}
-
-const (
-	accessToolType   = "auth.AccessTool"
-	accessToolAction = "$_access_tool_action"
-)
-
-type action interface {
-	do(fieldValue reflect.Value, accessTool accessApplier, toolContext *structs.ToolContext) gomerr.Gomerr
-}
-
-func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...*structs.ToolContext) *structs.ToolContext {
-	// If no access principal, all permissions will be denied
-	accessPrincipal, _ := subject.Principal(fieldAccessPrincipal).(AccessPrincipal)
-	return structs.EnsureContext(tcs...).Put(accessToolAction, remover{accessPrincipal, accessPermission})
-}
-
-type remover struct {
-	principal  AccessPrincipal
-	permission AccessPermissions
-}
-
-func (r remover) do(fv reflect.Value, aa accessApplier, _ structs.ToolContext) (ge gomerr.Gomerr) {
-	defer func() {
-		if r := recover(); r != nil {
-			ge = gomerr.Unprocessable("Unable to remove non-writable field", r)
-		}
-	}()
-
-	if !aa.permissions.grants(r.principal, r.permission) && !(aa.provided && writable(r.permission)) {
-		fv.Set(aa.zeroVal)
-		return nil
-	}
-
-	return nil
-}
-
-type accessApplierProvider struct {
-}
+type accessApplierProvider struct{}
 
 func (ap accessApplierProvider) Applier(_ reflect.Type, sf reflect.StructField, directive string) (structs.Applier, gomerr.Gomerr) {
 	perPrincipalPermissions := make([]map[string]string, 0)
@@ -174,30 +121,78 @@ func (ap accessApplierProvider) Applier(_ reflect.Type, sf reflect.StructField, 
 	}, nil
 }
 
+type accessApplier struct {
+	fieldName   string
+	permissions principalPermissions
+	provided    bool
+	zeroVal     reflect.Value
+}
+
+func (a accessApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+	accessAction, ok := tc.Get(accessToolAction).(action)
+	if !ok {
+		return nil // no action specified, return
+	}
+
+	return accessAction.do(fv, a, tc)
+}
+
+const (
+	accessToolType   = "auth.AccessTool"
+	accessToolAction = "$_access_tool_action"
+)
+
+type action interface {
+	do(fieldValue reflect.Value, accessTool accessApplier, toolContext *structs.ToolContext) gomerr.Gomerr
+}
+
+func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...*structs.ToolContext) *structs.ToolContext {
+	// If no access principal, all permissions will be denied
+	accessPrincipal, _ := subject.Principal(fieldAccessPrincipal).(AccessPrincipal)
+	return structs.EnsureContext(tcs...).Put(accessToolAction, remover{accessPrincipal, accessPermission})
+}
+
+type remover struct {
+	principal  AccessPrincipal
+	permission AccessPermissions
+}
+
+func (r remover) do(fv reflect.Value, aa accessApplier, _ *structs.ToolContext) (ge gomerr.Gomerr) {
+	defer func() {
+		if r := recover(); r != nil {
+			ge = gomerr.Unprocessable("Unable to remove non-writable field", r)
+		}
+	}()
+
+	if !aa.permissions.grants(r.principal, r.permission) && !(aa.provided && writable(r.permission)) {
+		fv.Set(aa.zeroVal)
+	}
+	return nil
+}
+
 func AddCopyProvidedToContext(fromStruct reflect.Value, tcs ...*structs.ToolContext) *structs.ToolContext {
 	return structs.EnsureContext(tcs...).Put(accessToolAction, copyProvided(fromStruct))
 }
 
 type copyProvided reflect.Value
 
-func (cf copyProvided) do(fv reflect.Value, at accessApplier, _ structs.ToolContext) (ge gomerr.Gomerr) {
+func (cf copyProvided) do(fv reflect.Value, aa accessApplier, _ *structs.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
 			ge = gomerr.Unprocessable("Unable to copy field", r)
 		}
 	}()
 
-	if !at.provided {
+	if !aa.provided {
 		return nil
 	}
 
-	fromFv := reflect.Value(cf).FieldByName(at.fieldName)
+	fromFv := reflect.Value(cf).FieldByName(aa.fieldName)
 	if !fromFv.IsValid() || fromFv.IsZero() {
 		return nil
 	}
 
 	fv.Set(fromFv)
-
 	return nil
 }
 

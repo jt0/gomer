@@ -16,7 +16,7 @@ type Base struct {
 
 type One struct {
 	Base
-	Id string `id:"BaseId,~SecretId"`
+	Id string `id:"BaseId,~SecretId"` // implicitly treated as 'Id,BaseId,~SecretId'
 }
 
 type Two struct {
@@ -47,8 +47,8 @@ func TestCopyFromAnonymous(t *testing.T) {
 
 func TestTwoIdFieldsFail(t *testing.T) {
 	type TwoIdsTest struct {
-		Id1 string `id:""`
-		Id2 string `id:""`
+		Id1 string `id:"+"`
+		Id2 string `id:"+"`
 	}
 
 	ge := structs.ApplyTools(TwoIdsTest{"a", "b"}, nil, resource.DefaultIdFieldTool)

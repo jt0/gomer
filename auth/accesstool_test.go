@@ -38,25 +38,25 @@ func TestAccessTool(t *testing.T) {
 
 	copiedTo := &AccessTest{}
 	structs_test.RunTests(t, []structs_test.TestCase{
-		{"Remove non-readable as 'one'", auth.DefaultAccessFieldTool, clear(sOne, auth.ReadPermission), all(), allExpected()},
-		{"Remove non-readable as 'two'", auth.DefaultAccessFieldTool, clear(sTwo, auth.ReadPermission), all(), partial("ABCDI")},
-		{"Remove non-creatable as 'one'", auth.DefaultAccessFieldTool, clear(sOne, auth.CreatePermission), all(), allExpected()},
-		{"Remove non-creatable as 'two'", auth.DefaultAccessFieldTool, clear(sTwo, auth.CreatePermission), all(), partial("ABEFIJ")},
-		{"Remove non-updatable as 'one'", auth.DefaultAccessFieldTool, clear(sOne, auth.UpdatePermission), all(), allExpected()},
-		{"Remove non-updatable as 'two'", auth.DefaultAccessFieldTool, clear(sTwo, auth.UpdatePermission), all(), partial("ACEGIJ")},
-		{"Copy provided", auth.DefaultAccessFieldTool, auth.AddCopyProvidedToContext(reflect.ValueOf(all()).Elem(), nil), copiedTo, partial("IJ")},
+		{"Remove non-readable as 'one'", auth.DefaultAccessTool, clear(sOne, auth.ReadPermission), all(), allExpected()},
+		{"Remove non-readable as 'two'", auth.DefaultAccessTool, clear(sTwo, auth.ReadPermission), all(), partial("ABCDI")},
+		{"Remove non-creatable as 'one'", auth.DefaultAccessTool, clear(sOne, auth.CreatePermission), all(), allExpected()},
+		{"Remove non-creatable as 'two'", auth.DefaultAccessTool, clear(sTwo, auth.CreatePermission), all(), partial("ABEFIJ")},
+		{"Remove non-updatable as 'one'", auth.DefaultAccessTool, clear(sOne, auth.UpdatePermission), all(), allExpected()},
+		{"Remove non-updatable as 'two'", auth.DefaultAccessTool, clear(sTwo, auth.UpdatePermission), all(), partial("ACEGIJ")},
+		{"Copy provided", auth.DefaultAccessTool, auth.AddCopyProvidedToContext(reflect.ValueOf(all()).Elem(), nil), copiedTo, partial("IJ")},
 	})
 }
 
 func TestPermissionsWithProvidedVerifiesForwardsCompatibility(t *testing.T) {
+	auth.RegisterFieldAccessPrincipals(one, two)
+
 	type test struct {
-		permissions string
+		Permissions string
 		error       gomerr.Gomerr
 	}
 
 	var configurationError *gomerr.ConfigurationError
-	tdp := testDirectivesProvider{}
-	authTool := auth.NewAccessTool(tdp)
 
 	tests := []test{
 		{"rpr-", nil},
@@ -65,8 +65,8 @@ func TestPermissionsWithProvidedVerifiesForwardsCompatibility(t *testing.T) {
 		{"rprp", configurationError}, // if 'p', other principals cannot specify 'p'
 	}
 	for _, tt := range tests {
-		t.Run(tt.permissions, func(t *testing.T) {
-			tdp.directive = tt.permissions
+		t.Run(tt.Permissions, func(t *testing.T) {
+			authTool := auth.NewAccessTool(testDirectivesProvider{tt.Permissions}) // New authTool each time
 			ge := structs.ApplyTools(test{}, nil, authTool)
 			if tt.error == nil {
 				assert.Success(t, ge)
