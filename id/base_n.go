@@ -79,8 +79,8 @@ func NewBaseNIdGenerator(idLength int, lengthUnit LengthUnit, encodingCharacters
 		}
 	}
 
-	charsPerId := charsPerId[lengthUnit](idLength, uint16(base))
-	if charsPerId > math.MaxUint8+1 {
+	numChars := charsPerId[lengthUnit](idLength, uint16(base))
+	if numChars > math.MaxUint8+1 {
 		panic("maximum number of characters in an id is 256")
 	}
 
@@ -88,7 +88,7 @@ func NewBaseNIdGenerator(idLength int, lengthUnit LengthUnit, encodingCharacters
 
 	return &baseNIdGenerator{
 		base:           base,
-		charsPerId:     uint8(charsPerId),
+		charsPerId:     uint8(numChars),
 		charsPerUint64: uint8(math.Floor(float64(_64) / math.Log2(float64(base)))), // max is 64 when base is 2, min is 8 when base is 256
 		random:         rand.New(rand.NewSource(seed)),
 		encoding:       encodingCharacters,

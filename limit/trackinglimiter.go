@@ -2,8 +2,7 @@ package limit
 
 import (
 	"reflect"
-
-	"github.com/jt0/gomer/util"
+	"strings"
 )
 
 type TrackingLimiter struct {
@@ -19,7 +18,7 @@ func (l *TrackingLimiter) Current(limited Limited) Amount {
 		return limited.LimitAmount().Zero()
 	}
 
-	current, ok := l.Currents[util.UnqualifiedTypeName(reflect.TypeOf(limited))]
+	current, ok := l.Currents[unqualifiedTypeName(reflect.TypeOf(limited))]
 	if !ok {
 		return limited.LimitAmount().Zero()
 	}
@@ -31,7 +30,7 @@ func (l *TrackingLimiter) SetCurrent(limited Limited, current Amount) {
 	if l.Currents == nil {
 		l.Currents = make(map[string]amount)
 	}
-	l.Currents[util.UnqualifiedTypeName(reflect.TypeOf(limited))] = current.amount()
+	l.Currents[unqualifiedTypeName(reflect.TypeOf(limited))] = current.amount()
 
 	l.dirty = true
 }
@@ -41,7 +40,7 @@ func (l *TrackingLimiter) Override(limited Limited) Amount {
 		return nil
 	}
 
-	override, ok := l.Overrides[util.UnqualifiedTypeName(reflect.TypeOf(limited))]
+	override, ok := l.Overrides[unqualifiedTypeName(reflect.TypeOf(limited))]
 	if !ok {
 		return nil
 	}
@@ -54,9 +53,9 @@ func (l *TrackingLimiter) SetOverride(limited Limited, override Amount) {
 		if l.Overrides == nil {
 			l.Overrides = make(map[string]amount)
 		}
-		l.Overrides[util.UnqualifiedTypeName(reflect.TypeOf(limited))] = override.amount()
+		l.Overrides[unqualifiedTypeName(reflect.TypeOf(limited))] = override.amount()
 	} else {
-		delete(l.Overrides, util.UnqualifiedTypeName(reflect.TypeOf(limited)))
+		delete(l.Overrides, unqualifiedTypeName(reflect.TypeOf(limited)))
 	}
 
 	l.dirty = true
@@ -79,4 +78,9 @@ func (l *TrackingLimiter) IsDirty() bool {
 
 func (l *TrackingLimiter) ClearDirty() {
 	l.dirty = false
+}
+
+func unqualifiedTypeName(t reflect.Type) string {
+	s := t.String()
+	return s[strings.Index(s, ".")+1:]
 }
