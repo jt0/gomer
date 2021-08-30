@@ -1,18 +1,17 @@
-package fields_test
+package structs_test
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/jt0/gomer/_test/assert"
-	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/structs"
 )
 
 type TestCase struct {
 	Name     string
-	Tool     fields.FieldTool
-	Context  fields.ToolContext
+	Tool     *structs.Tool
+	Context  *structs.ToolContext
 	Input    interface{}
 	Expected interface{} // can be the same type as output or a gomerr.Gomerr
 }
@@ -20,11 +19,7 @@ type TestCase struct {
 func RunTests(t *testing.T, tests []TestCase) {
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			targetType := reflect.TypeOf(tt.Input).Elem()
-			fs, ge := fields.Get(targetType)
-			assert.Success(t, ge)
-
-			ge = fs.ApplyTools(reflect.ValueOf(tt.Input).Elem(), fields.Application{tt.Tool.Name(), tt.Context})
+			ge := structs.ApplyTools(tt.Input, tt.Context, tt.Tool)
 			if expectedError, ok := tt.Expected.(gomerr.Gomerr); !ok {
 				assert.Success(t, ge)
 				assert.Equals(t, tt.Expected, tt.Input)

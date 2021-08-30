@@ -5,7 +5,6 @@ import (
 
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/id"
 )
 
 type Instance interface {
@@ -52,7 +51,7 @@ func (i *BaseInstance) NewQueryable() data.Queryable {
 }
 
 func (i *BaseInstance) Id() string {
-	instanceId, ge := id.Id(reflect.ValueOf(i.self).Elem())
+	instanceId, ge := Id(reflect.ValueOf(i.self).Elem())
 	if ge != nil {
 		println("Unable to get id value for instance:\n", ge.Error())
 	}

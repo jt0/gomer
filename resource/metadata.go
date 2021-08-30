@@ -2,11 +2,10 @@ package resource
 
 import (
 	"reflect"
+	"strings"
 
 	"github.com/jt0/gomer/data"
-	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/util"
 )
 
 type Metadata interface {
@@ -26,31 +25,29 @@ func Register(instance Instance, collection Collection, actions map[interface{}]
 	if md != nil {
 		return md, nil
 	}
-	_, ge = fields.Get(it.Elem())
-	if ge != nil {
-		return nil, ge
-	}
 
 	if actions == nil {
 		return nil, gomerr.Configuration("Must register with a non-nil Actions")
 	}
 
+	unqualifiedInstanceName := it.String()
+	unqualifiedInstanceName = unqualifiedInstanceName[strings.Index(unqualifiedInstanceName, ".")+1:]
+
 	var ct reflect.Type
+	var unqualifiedCollectionName string
 	if collection != nil {
 		ct = reflect.TypeOf(collection)
-		_, ge = fields.Get(ct.Elem())
-		if ge != nil {
-			return nil, ge
-		}
+		unqualifiedCollectionName = it.String()
+		unqualifiedCollectionName = unqualifiedCollectionName[strings.Index(unqualifiedCollectionName, ".")+1:]
 	}
 
 	nilSafeParentMetadata, _ := parentMetadata.(*metadata)
 
 	md = &metadata{
 		instanceType:   it,
-		instanceName:   util.UnqualifiedTypeName(it),
+		instanceName:   unqualifiedInstanceName,
 		collectionType: ct,
-		collectionName: util.UnqualifiedTypeName(ct),
+		collectionName: unqualifiedCollectionName,
 		actions:        actions,
 		dataStore:      dataStore,
 		parent:         nilSafeParentMetadata,

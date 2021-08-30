@@ -4,7 +4,6 @@ import (
 	"reflect"
 
 	"github.com/jt0/gomer/auth"
-	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
 )
 
@@ -12,7 +11,6 @@ type Resource interface {
 	Metadata() Metadata
 	Subject() auth.Subject
 	DoAction(Action) (Resource, gomerr.Gomerr)
-	ApplyTools(tools ...fields.Application) gomerr.Gomerr
 
 	setSelf(Resource)
 	metadata() *metadata
@@ -75,16 +73,6 @@ func (b *BaseResource) DoAction(action Action) (Resource, gomerr.Gomerr) {
 	}
 
 	return action.OnDoSuccess(b.self)
-}
-
-func (b *BaseResource) ApplyTools(tools ...fields.Application) gomerr.Gomerr {
-	selfValue := reflect.ValueOf(b.self).Elem()
-	fs, ge := fields.Get(selfValue.Type())
-	if ge != nil {
-		return ge
-	}
-
-	return fs.ApplyTools(selfValue, tools...)
 }
 
 func (b *BaseResource) metadata() *metadata {

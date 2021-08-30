@@ -6,20 +6,23 @@ import (
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data/dataerr"
-	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/id"
 	"github.com/jt0/gomer/limit"
+	"github.com/jt0/gomer/structs"
 )
+
+// IdTool contains the configured tool to copy ids. It's initialized to id.DefaultIdFieldTool, but can be replaced
+// if preferred.
+var IdTool = NewIdTool(structs.StructTagDirectiveProvider{"id"})
 
 func init() {
 	// This sets up default aliases for each of the Actions defined here. An application can add other alias values or
 	// can clear any out by calling ScopeAlias with the undesired alias and an empty string scope value.
-	fields.ScopeAlias("create", CreateAction().Name())
-	fields.ScopeAlias("read", ReadAction().Name())
-	fields.ScopeAlias("update", UpdateAction().Name())
-	fields.ScopeAlias("delete", DeleteAction().Name())
-	fields.ScopeAlias("list", ListAction().Name())
+	structs.ScopeAlias("create", CreateAction().Name())
+	structs.ScopeAlias("read", ReadAction().Name())
+	structs.ScopeAlias("update", UpdateAction().Name())
+	structs.ScopeAlias("delete", DeleteAction().Name())
+	structs.ScopeAlias("list", ListAction().Name())
 }
 
 type Creatable interface {
@@ -178,8 +181,8 @@ func (a *updateAction) Pre(update Resource) gomerr.Gomerr {
 	}
 
 	// Get the id fields from the update
-	application := fields.Application{id.CopyIdsFieldTool().Name(), fields.EnsureContext().Add(id.SourceValue, reflect.ValueOf(update).Elem())}
-	if ge = current.ApplyTools(application); ge != nil {
+	tc := structs.EnsureContext().Put(SourceValue, reflect.ValueOf(update).Elem())
+	if ge = structs.ApplyTools(current, tc, IdTool); ge != nil {
 		return ge
 	}
 

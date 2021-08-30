@@ -3,15 +3,15 @@ package constraint
 import (
 	"reflect"
 
+	"github.com/jt0/gomer/bind"
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/structs"
-	"github.com/jt0/gomer/structs/bind"
 )
 
 var DefaultValidationTool = NewValidationTool(structs.StructTagDirectiveProvider{"validate"})
 
-func Validate(v interface{}, validationTool *structs.Tool, optional ...structs.ToolContext) gomerr.Gomerr {
+func Validate(v interface{}, validationTool *structs.Tool, optional ...*structs.ToolContext) gomerr.Gomerr {
 	return structs.ApplyTools(v, structs.EnsureContext(optional...), validationTool)
 }
 
@@ -73,7 +73,7 @@ type validationApplier struct {
 	constraint Constraint
 }
 
-func (t validationApplier) Apply(sv reflect.Value, fv reflect.Value, _ structs.ToolContext) gomerr.Gomerr {
+func (t validationApplier) Apply(sv reflect.Value, fv reflect.Value, _ *structs.ToolContext) gomerr.Gomerr {
 	if dc, ok := t.constraint.(*dynamicConstraint); ok {
 		for source, dv := range dc.dynamicValues {
 			if value, ge := structs.ValueFromStruct(sv, fv, source); ge != nil {

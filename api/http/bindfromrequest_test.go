@@ -23,7 +23,7 @@ var (
 
 //goland:noinspection GoSnakeCaseUsage
 type Greeting struct {
-	resource.BaseInstance `fields:"ignore"`
+	resource.BaseInstance `structs:"ignore"`
 
 	Style_path       string `in:"path.0"`
 	Recipient_path   string `in:"path.1"`

@@ -34,7 +34,7 @@ func Struct(validationTool *structs.Tool) Constraint {
 
 		// TODO:p1 support scope
 		// TODO:p1 should need to have validationTool?
-		if ge := structs.ApplyTools(toTest, structs.ToolContext{}, validationTool); ge != nil {
+		if ge := structs.ApplyTools(toTest, structs.EnsureContext(), validationTool); ge != nil {
 			return ge
 		}
 

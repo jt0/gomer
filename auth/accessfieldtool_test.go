@@ -67,7 +67,7 @@ func TestPermissionsWithProvidedVerifiesForwardsCompatibility(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.permissions, func(t *testing.T) {
 			tdp.directive = tt.permissions
-			_, ge := structs.PrepareTools(reflect.TypeOf(test{}), authTool)
+			ge := structs.ApplyTools(test{}, nil, authTool)
 			if tt.error == nil {
 				assert.Success(t, ge)
 			} else {
@@ -77,8 +77,8 @@ func TestPermissionsWithProvidedVerifiesForwardsCompatibility(t *testing.T) {
 	}
 }
 
-func clear(subject auth.Subject, permission auth.AccessPermissions) structs.ToolContext {
-	return auth.AddClearIfDeniedToContext(subject, permission, nil)
+func clear(subject auth.Subject, permission auth.AccessPermissions) *structs.ToolContext {
+	return auth.AddClearIfDeniedToContext(subject, permission)
 }
 
 func all() *AccessTest {

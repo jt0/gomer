@@ -112,11 +112,11 @@ func handler(resourceType reflect.Type, actionFunc func() resource.Action, succe
 	return func(c *gin.Context) {
 		action := actionFunc()
 		if r, ge := BindFromRequest(c.Request, resourceType, Subject(c), action.Name()); ge != nil {
-			c.Error(ge)
+			_ = c.Error(ge)
 		} else if r, ge = r.DoAction(action); ge != nil {
-			c.Error(ge)
+			_ = c.Error(ge)
 		} else if ge = renderResult(reflect.ValueOf(r).Elem(), c, action.Name(), successStatus); ge != nil {
-			c.Error(ge)
+			_ = c.Error(ge)
 		}
 	}
 }

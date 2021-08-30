@@ -61,8 +61,8 @@ type accessApplier struct {
 	zeroVal     reflect.Value
 }
 
-func (a accessApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
-	accessAction, ok := tc[accessToolAction].(action)
+func (a accessApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+	accessAction, ok := tc.Get(accessToolAction).(action)
 	if !ok {
 		return nil // no action specified, return
 	}
@@ -76,10 +76,10 @@ const (
 )
 
 type action interface {
-	do(fieldValue reflect.Value, accessTool accessApplier, toolContext structs.ToolContext) gomerr.Gomerr
+	do(fieldValue reflect.Value, accessTool accessApplier, toolContext *structs.ToolContext) gomerr.Gomerr
 }
 
-func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...structs.ToolContext) structs.ToolContext {
+func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...*structs.ToolContext) *structs.ToolContext {
 	// If no access principal, all permissions will be denied
 	accessPrincipal, _ := subject.Principal(fieldAccessPrincipal).(AccessPrincipal)
 	return structs.EnsureContext(tcs...).Put(accessToolAction, remover{accessPrincipal, accessPermission})
@@ -174,7 +174,7 @@ func (ap accessApplierProvider) Applier(_ reflect.Type, sf reflect.StructField, 
 	}, nil
 }
 
-func AddCopyProvidedToContext(fromStruct reflect.Value, tcs ...structs.ToolContext) structs.ToolContext {
+func AddCopyProvidedToContext(fromStruct reflect.Value, tcs ...*structs.ToolContext) *structs.ToolContext {
 	return structs.EnsureContext(tcs...).Put(accessToolAction, copyProvided(fromStruct))
 }
 

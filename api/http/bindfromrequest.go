@@ -11,18 +11,18 @@ import (
 	"strings"
 
 	"github.com/jt0/gomer/auth"
+	bind2 "github.com/jt0/gomer/bind"
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/resource"
 	"github.com/jt0/gomer/structs"
-	"github.com/jt0/gomer/structs/bind"
 )
 
 // BindFromRequestConfiguration
 // TODO: add config option mechanism...
 type BindFromRequestConfiguration struct {
-	BindConfiguration bind.Configuration
+	BindConfiguration bind2.Configuration
 	BindDirectiveConfiguration
 
 	defaultContentType               string
@@ -36,7 +36,7 @@ type Unmarshal func(toUnmarshal []byte, ptrToTarget interface{}) error
 
 func NewBindFromRequestConfiguration() BindFromRequestConfiguration {
 	return BindFromRequestConfiguration{
-		BindConfiguration:                bind.NewConfiguration(),
+		BindConfiguration:                bind2.NewConfiguration(),
 		BindDirectiveConfiguration:       NewBindDirectiveConfiguration(),
 		defaultContentType:               DefaultContentType,
 		perContentTypeUnmarshalFunctions: make(map[string]Unmarshal),
@@ -45,22 +45,22 @@ func NewBindFromRequestConfiguration() BindFromRequestConfiguration {
 }
 
 var (
-	requestTool   *structs.Tool
-	requestConfig BindFromRequestConfiguration
+	DefaultBindFromRequestTool *structs.Tool
+	requestConfig              BindFromRequestConfiguration
 )
 
 func init() {
 	rc := NewBindFromRequestConfiguration()
-	requestTool = SetBindFromRequestConfiguration(rc)
+	DefaultBindFromRequestTool = SetBindFromRequestConfiguration(rc)
 }
 
 func SetBindFromRequestConfiguration(requestConfiguration BindFromRequestConfiguration) *structs.Tool {
-	if requestTool == nil || !reflect.DeepEqual(requestConfig, requestConfiguration) {
+	if DefaultBindFromRequestTool == nil || !reflect.DeepEqual(requestConfig, requestConfiguration) {
 		requestConfig = requestConfiguration
-		requestConfig.BindConfiguration = bind.CopyConfigurationWithOptions(requestConfig.BindConfiguration, bind.ExtendsWith(requestExtension{}))
-		requestTool = bind.NewInTool(requestConfig.BindConfiguration, structs.StructTagDirectiveProvider{"in"})
+		requestConfig.BindConfiguration = bind2.CopyConfigurationWithOptions(requestConfig.BindConfiguration, bind2.ExtendsWith(requestExtension{}))
+		DefaultBindFromRequestTool = bind2.NewInTool(requestConfig.BindConfiguration, structs.StructTagDirectiveProvider{"in"})
 	}
-	return requestTool
+	return DefaultBindFromRequestTool
 }
 
 func BindFromRequest(request *http.Request, resourceType reflect.Type, subject auth.Subject, scope string) (resource.Resource, gomerr.Gomerr) {
@@ -102,10 +102,10 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 			}
 		}
 
-		tc.Put(bind.InKey, unmarshaled)
+		tc.Put(bind2.InKey, unmarshaled)
 	}
 
-	return r, structs.ApplyTools(r, tc, requestTool, constraint.DefaultValidationTool)
+	return r, structs.ApplyTools(r, tc, DefaultBindFromRequestTool, constraint.DefaultValidationTool)
 }
 
 // requestExtension
@@ -158,13 +158,13 @@ type bindPathApplier struct {
 	index int
 }
 
-func (b bindPathApplier) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext structs.ToolContext) gomerr.Gomerr {
-	pathParts := toolContext.Get(pathPartsKey).([]string)
+func (b bindPathApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+	pathParts := tc.Get(pathPartsKey).([]string)
 	if b.index >= len(pathParts) {
 		return nil
 	}
 
-	if ge := flect.SetValue(fieldValue, pathParts[b.index]); ge != nil {
+	if ge := flect.SetValue(fv, pathParts[b.index]); ge != nil {
 		return ge.AddAttributes("PathIndex", b.index)
 	}
 
@@ -175,14 +175,14 @@ type bindQueryParamApplier struct {
 	name string
 }
 
-func (b bindQueryParamApplier) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext structs.ToolContext) gomerr.Gomerr {
+func (b bindQueryParamApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
 	// TODO:p3 support case-insensitive (or canonical) param names
-	values, hasValues := toolContext.Get(queryParamsKey).(url.Values)[b.name]
+	values, hasValues := tc.Get(queryParamsKey).(url.Values)[b.name]
 	if !hasValues {
 		return nil
 	}
 
-	if ge := flect.SetValue(fieldValue, values[0]); ge != nil {
+	if ge := flect.SetValue(fv, values[0]); ge != nil {
 		return ge.AddAttributes("Parameter", b.name)
 	}
 
@@ -193,13 +193,13 @@ type bindRequestHeaderApplier struct {
 	name string
 }
 
-func (b bindRequestHeaderApplier) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext structs.ToolContext) gomerr.Gomerr {
-	values, hasValues := toolContext.Get(headersKey).(http.Header)[textproto.CanonicalMIMEHeaderKey(b.name)]
+func (b bindRequestHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+	values, hasValues := tc.Get(headersKey).(http.Header)[textproto.CanonicalMIMEHeaderKey(b.name)]
 	if !hasValues {
 		return nil
 	}
 
-	if ge := flect.SetValue(fieldValue, values[0]); ge != nil {
+	if ge := flect.SetValue(fv, values[0]); ge != nil {
 		return ge.AddAttributes("Header", b.name)
 	}
 
@@ -208,8 +208,8 @@ func (b bindRequestHeaderApplier) Apply(_ reflect.Value, fieldValue reflect.Valu
 
 type bodyInApplier struct{}
 
-func (bodyInApplier) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext structs.ToolContext) gomerr.Gomerr {
-	fieldValue.Set(reflect.ValueOf(toolContext.Get(bodyBytesKey)))
+func (bodyInApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+	fv.Set(reflect.ValueOf(tc.Get(bodyBytesKey)))
 	return nil
 }
 

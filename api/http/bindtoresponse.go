@@ -8,15 +8,15 @@ import (
 	"strconv"
 	"strings"
 
+	bind2 "github.com/jt0/gomer/bind"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/structs"
-	"github.com/jt0/gomer/structs/bind"
 )
 
 // BindToResponseConfiguration
 // TODO: add config option mechanism...
 type BindToResponseConfiguration struct {
-	BindConfiguration bind.Configuration
+	BindConfiguration bind2.Configuration
 	BindDirectiveConfiguration
 
 	defaultContentType             string
@@ -29,7 +29,7 @@ type Marshal func(toMarshal interface{}) ([]byte, error)
 
 func NewBindToResponseConfiguration() BindToResponseConfiguration {
 	return BindToResponseConfiguration{
-		BindConfiguration:              bind.NewConfiguration(),
+		BindConfiguration:              bind2.NewConfiguration(),
 		BindDirectiveConfiguration:     NewBindDirectiveConfiguration(),
 		defaultContentType:             DefaultContentType,
 		perContentTypeMarshalFunctions: make(map[string]Marshal),
@@ -38,22 +38,22 @@ func NewBindToResponseConfiguration() BindToResponseConfiguration {
 }
 
 var (
-	responseTool   *structs.Tool
-	responseConfig BindToResponseConfiguration
+	DefaultBindToResponseTool *structs.Tool
+	responseConfig            BindToResponseConfiguration
 )
 
 func init() {
 	rc := NewBindToResponseConfiguration()
-	responseTool = SetBindToResponseConfiguration(rc)
+	DefaultBindToResponseTool = SetBindToResponseConfiguration(rc)
 }
 
 func SetBindToResponseConfiguration(responseConfiguration BindToResponseConfiguration) *structs.Tool {
-	if responseTool == nil || !reflect.DeepEqual(requestConfig, responseConfiguration) {
+	if DefaultBindToResponseTool == nil || !reflect.DeepEqual(requestConfig, responseConfiguration) {
 		responseConfig = responseConfiguration
-		responseConfig.BindConfiguration = bind.CopyConfigurationWithOptions(responseConfig.BindConfiguration, bind.ExtendsWith(bindToResponseExtension{}))
-		responseTool = bind.NewOutTool(responseConfig.BindConfiguration, structs.StructTagDirectiveProvider{"out"})
+		responseConfig.BindConfiguration = bind2.CopyConfigurationWithOptions(responseConfig.BindConfiguration, bind2.ExtendsWith(bindToResponseExtension{}))
+		DefaultBindToResponseTool = bind2.NewOutTool(responseConfig.BindConfiguration, structs.StructTagDirectiveProvider{"out"})
 	}
-	return responseTool
+	return DefaultBindToResponseTool
 }
 
 // BindToResponse
@@ -63,10 +63,10 @@ func BindToResponse(result reflect.Value, header http.Header, scope string, acce
 
 	outBodyBinding := hasOutBodyBinding[result.Type().String()]
 	if !outBodyBinding {
-		tc.Put(bind.OutKey, make(map[string]interface{}))
+		tc.Put(bind2.OutKey, make(map[string]interface{}))
 	}
 
-	if ge = structs.ApplyTools(result, tc, responseTool); ge != nil {
+	if ge = structs.ApplyTools(result, tc, DefaultBindToResponseTool); ge != nil {
 		return nil, ge
 	}
 
@@ -86,7 +86,7 @@ func BindToResponse(result reflect.Value, header http.Header, scope string, acce
 			contentType = DefaultContentType
 		}
 
-		outMap := tc.Get(bind.OutKey).(map[string]interface{})
+		outMap := tc.Get(bind2.OutKey).(map[string]interface{})
 		if len(outMap) == 0 && responseConfig.EmptyValueHandlingDefault == OmitEmpty {
 			return nil, ge
 		}
@@ -141,19 +141,19 @@ type Marshaler interface {
 	Marshal() ([]byte, error)
 }
 
-func (b bindResponseHeaderApplier) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext structs.ToolContext) gomerr.Gomerr {
-	if fieldValue.IsZero() {
+func (b bindResponseHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+	if fv.IsZero() {
 		return nil // Cannot apply an empty value to a header so returning nil
 	}
 
-	fvt := fieldValue.Type()
+	fvt := fv.Type()
 	if fvt.Kind() == reflect.Ptr {
-		fieldValue = fieldValue.Elem()
-		fvt = fieldValue.Type()
+		fv = fv.Elem()
+		fvt = fv.Type()
 	}
 
 	var headerVal string
-	switch val := fieldValue.Interface().(type) {
+	switch val := fv.Interface().(type) {
 	case string:
 		headerVal = val
 	case int:
@@ -187,7 +187,7 @@ func (b bindResponseHeaderApplier) Apply(_ reflect.Value, fieldValue reflect.Val
 		if marshaler, ok := val.(Marshaler); ok {
 			marshaled, err := marshaler.Marshal()
 			if err != nil {
-				return gomerr.Marshal("FieldValue", fieldValue).Wrap(err)
+				return gomerr.Marshal("FieldValue", fv).Wrap(err)
 			}
 			headerVal = string(marshaled)
 		} else if stringer, ok := val.(fmt.Stringer); ok {
@@ -197,15 +197,15 @@ func (b bindResponseHeaderApplier) Apply(_ reflect.Value, fieldValue reflect.Val
 		}
 	}
 
-	toolContext.Get(headersKey).(http.Header).Add(b.name, headerVal)
+	tc.Get(headersKey).(http.Header).Add(b.name, headerVal)
 
 	return nil
 }
 
 type bodyOutApplier struct{}
 
-func (bodyOutApplier) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext structs.ToolContext) gomerr.Gomerr {
-	toolContext.Put(bodyBytesKey, fieldValue.Interface())
+func (bodyOutApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+	tc.Put(bodyBytesKey, fv.Interface())
 	return nil
 }
 
