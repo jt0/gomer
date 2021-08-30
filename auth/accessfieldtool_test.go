@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"github.com/jt0/gomer/_test/assert"
-	"github.com/jt0/gomer/_test/helpers/fields_test"
+	"github.com/jt0/gomer/_test/helpers/structs_test"
 	"github.com/jt0/gomer/auth"
-	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/structs"
 )
 
 type AccessTest struct {
@@ -33,22 +33,18 @@ var (
 	sTwo = auth.NewSubject(two)
 )
 
-func init() {
-	fields.FieldToolConfigProvider = fields.StructTagConfigProvider{}.WithKey("access", auth.AccessFieldTool())
-
-	auth.RegisterFieldAccessPrincipals(one, two)
-}
-
 func TestAccessTool(t *testing.T) {
+	auth.RegisterFieldAccessPrincipals(one, two)
+
 	copiedTo := &AccessTest{}
-	fields_test.RunTests(t, []fields_test.TestCase{
-		{"Remove non-readable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.ReadPermission), all(), allExpected()},
-		{"Remove non-readable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.ReadPermission), all(), partial("ABCDI")},
-		{"Remove non-creatable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.CreatePermission), all(), allExpected()},
-		{"Remove non-creatable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.CreatePermission), all(), partial("ABEFIJ")},
-		{"Remove non-updatable as 'one'", auth.AccessFieldTool(), clear(sOne, auth.UpdatePermission), all(), allExpected()},
-		{"Remove non-updatable as 'two'", auth.AccessFieldTool(), clear(sTwo, auth.UpdatePermission), all(), partial("ACEGIJ")},
-		{"Copy provided", auth.AccessFieldTool(), auth.AddCopyProvidedToContext(reflect.ValueOf(all()).Elem(), nil), copiedTo, partial("IJ")},
+	structs_test.RunTests(t, []structs_test.TestCase{
+		{"Remove non-readable as 'one'", auth.DefaultAccessFieldTool, clear(sOne, auth.ReadPermission), all(), allExpected()},
+		{"Remove non-readable as 'two'", auth.DefaultAccessFieldTool, clear(sTwo, auth.ReadPermission), all(), partial("ABCDI")},
+		{"Remove non-creatable as 'one'", auth.DefaultAccessFieldTool, clear(sOne, auth.CreatePermission), all(), allExpected()},
+		{"Remove non-creatable as 'two'", auth.DefaultAccessFieldTool, clear(sTwo, auth.CreatePermission), all(), partial("ABEFIJ")},
+		{"Remove non-updatable as 'one'", auth.DefaultAccessFieldTool, clear(sOne, auth.UpdatePermission), all(), allExpected()},
+		{"Remove non-updatable as 'two'", auth.DefaultAccessFieldTool, clear(sTwo, auth.UpdatePermission), all(), partial("ACEGIJ")},
+		{"Copy provided", auth.DefaultAccessFieldTool, auth.AddCopyProvidedToContext(reflect.ValueOf(all()).Elem(), nil), copiedTo, partial("IJ")},
 	})
 }
 
@@ -58,10 +54,9 @@ func TestPermissionsWithProvidedVerifiesForwardsCompatibility(t *testing.T) {
 		error       gomerr.Gomerr
 	}
 
-	structType := reflect.TypeOf(test{})
-	structField, _ := structType.FieldByName("permissions")
-
 	var configurationError *gomerr.ConfigurationError
+	tdp := testDirectivesProvider{}
+	authTool := auth.NewAccessTool(tdp)
 
 	tests := []test{
 		{"rpr-", nil},
@@ -71,7 +66,8 @@ func TestPermissionsWithProvidedVerifiesForwardsCompatibility(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.permissions, func(t *testing.T) {
-			_, ge := auth.AccessFieldTool().Applier(structType, structField, tt.permissions)
+			tdp.directive = tt.permissions
+			_, ge := structs.PrepareTools(reflect.TypeOf(test{}), authTool)
 			if tt.error == nil {
 				assert.Success(t, ge)
 			} else {
@@ -81,7 +77,7 @@ func TestPermissionsWithProvidedVerifiesForwardsCompatibility(t *testing.T) {
 	}
 }
 
-func clear(subject auth.Subject, permission auth.AccessPermissions) fields.ToolContext {
+func clear(subject auth.Subject, permission auth.AccessPermissions) structs.ToolContext {
 	return auth.AddClearIfDeniedToContext(subject, permission, nil)
 }
 
@@ -101,4 +97,12 @@ func partial(assigned string) *AccessTest {
 		av.FieldByName(s).SetString(s)
 	}
 	return a
+}
+
+type testDirectivesProvider struct {
+	directive string
+}
+
+func (t testDirectivesProvider) Get(reflect.Type, reflect.StructField) string {
+	return t.directive
 }

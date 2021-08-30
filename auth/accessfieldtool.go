@@ -3,9 +3,10 @@ package auth
 import (
 	"reflect"
 	"regexp"
+	"strings"
 
-	"github.com/jt0/gomer/fields"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/structs"
 )
 
 const (
@@ -42,45 +43,93 @@ const (
 // To keep the door open for this, though, we require that to specify a field is provided, the 'p' must be set in the
 // leftmost permissions group's write location, and the other permission groups set their write permission value to '-'.
 
-func AccessFieldTool() fields.FieldTool {
-	if toolInstance == nil {
-		toolInstance = &fields.RegexpWrapper{
-			Regexp:       regexp.MustCompile("(r|-)(w|c|u|p|-)"),
-			RegexpGroups: []string{"", "read", "write"},
-			FieldTool:    accessFieldTool{},
-		}
-	}
-	return toolInstance
+var (
+	DefaultAccessFieldTool = NewAccessTool(structs.StructTagDirectiveProvider{"access"})
+
+	accessRegexp = regexp.MustCompile("(r|-)(w|c|u|p|-)")
+	accessGroups = []string{"", "read", "write"}
+)
+
+func NewAccessTool(dp structs.DirectiveProvider) *structs.Tool {
+	return structs.NewTool(accessToolType, accessApplierProvider{}, dp)
 }
 
-var toolInstance fields.FieldTool
-
-type accessFieldTool struct {
+type accessApplier struct {
 	fieldName   string
 	permissions principalPermissions
 	provided    bool
 	zeroVal     reflect.Value
 }
 
-func (t accessFieldTool) Name() string {
-	return "auth.AccessFieldTool"
+func (a accessApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
+	accessAction, ok := tc[accessToolAction].(action)
+	if !ok {
+		return nil // no action specified, return
+	}
+
+	return accessAction.do(fv, a, tc)
 }
 
-func (t accessFieldTool) MustUse() bool {
-	return true
+const (
+	accessToolType   = "auth.AccessTool"
+	accessToolAction = "$_access_tool_action"
+)
+
+type action interface {
+	do(fieldValue reflect.Value, accessTool accessApplier, toolContext structs.ToolContext) gomerr.Gomerr
 }
 
-func (t accessFieldTool) Applier(_ reflect.Type, structField reflect.StructField, input interface{}) (fields.Applier, gomerr.Gomerr) {
-	perPrincipalPermissions := input.([]map[string]string)
+func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...structs.ToolContext) structs.ToolContext {
+	// If no access principal, all permissions will be denied
+	accessPrincipal, _ := subject.Principal(fieldAccessPrincipal).(AccessPrincipal)
+	return structs.EnsureContext(tcs...).Put(accessToolAction, remover{accessPrincipal, accessPermission})
+}
+
+type remover struct {
+	principal  AccessPrincipal
+	permission AccessPermissions
+}
+
+func (r remover) do(fv reflect.Value, aa accessApplier, _ structs.ToolContext) (ge gomerr.Gomerr) {
+	defer func() {
+		if r := recover(); r != nil {
+			ge = gomerr.Unprocessable("Unable to remove non-writable field", r)
+		}
+	}()
+
+	if !aa.permissions.grants(r.principal, r.permission) && !(aa.provided && writable(r.permission)) {
+		fv.Set(aa.zeroVal)
+		return nil
+	}
+
+	return nil
+}
+
+type accessApplierProvider struct {
+}
+
+func (ap accessApplierProvider) Applier(_ reflect.Type, sf reflect.StructField, directive string) (structs.Applier, gomerr.Gomerr) {
+	perPrincipalPermissions := make([]map[string]string, 0)
+	for _, match := range accessRegexp.FindAllStringSubmatch(directive, -1) {
+		values := make(map[string]string)
+		for i, value := range match {
+			key := accessGroups[i]
+			if key == "" {
+				continue
+			}
+			values[key] = strings.TrimSpace(value)
+		}
+
+		perPrincipalPermissions = append(perPrincipalPermissions, values)
+	}
 	ppPermissionsCount := len(perPrincipalPermissions)
 
 	// If a field has defined no access permissions (by it being absent or via the empty string), we bypass the error
 	// and the resulting (empty) fieldPermissions will deny access to all registered principals.
 	if ppPermissionsCount > 0 && ppPermissionsCount != len(fieldAccessPrincipalIndexes) {
-		return nil, gomerr.Configuration("Incorrect number of 'access' AccessPermissions").AddAttributes(
-			"Expected", len(fieldAccessPrincipalIndexes),
-			"Actual", len(perPrincipalPermissions),
-		)
+		return nil, gomerr.Configuration("Incorrect number of 'access' AccessPermissions").
+			AddAttribute("Expected", len(fieldAccessPrincipalIndexes)).
+			AddAttribute("Actual", len(perPrincipalPermissions))
 	}
 
 	var fieldPermissions principalPermissions
@@ -117,72 +166,21 @@ func (t accessFieldTool) Applier(_ reflect.Type, structField reflect.StructField
 		fieldPermissions = (fieldPermissions << permissionsPerPrincipal) | principalPermissions(principalAccess)
 	}
 
-	return accessFieldTool{
-		fieldName:   structField.Name,
+	return accessApplier{
+		fieldName:   sf.Name,
 		permissions: fieldPermissions,
 		provided:    provided,
-		zeroVal:     reflect.Zero(structField.Type),
+		zeroVal:     reflect.Zero(sf.Type),
 	}, nil
 }
 
-func (t accessFieldTool) Apply(_ reflect.Value, fieldValue reflect.Value, toolContext fields.ToolContext) gomerr.Gomerr {
-	accessAction, ok := toolContext[accessToolAction].(action)
-	if !ok {
-		return nil // no action specified, return
-	}
-
-	return accessAction.do(fieldValue, t, toolContext)
-}
-
-const (
-	accessToolAction = "$_access_tool_action"
-
-	// TODO: clear these at the end of all Apply() calls somehow...
-	NotClearedCount = "$_not_cleared_count"
-	ClearedCount    = "$_cleared_count"
-	CopiedCount     = "$_copied_count"
-)
-
-type action interface {
-	do(fieldValue reflect.Value, accessTool accessFieldTool, toolContext fields.ToolContext) gomerr.Gomerr
-}
-
-func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...fields.ToolContext) fields.ToolContext {
-	// If no access principal, all permissions will be denied
-	accessPrincipal, _ := subject.Principal(fieldAccessPrincipal).(AccessPrincipal)
-	return fields.EnsureContext(tcs...).Add(accessToolAction, remover{accessPrincipal, accessPermission})
-}
-
-type remover struct {
-	principal  AccessPrincipal
-	permission AccessPermissions
-}
-
-func (r remover) do(fv reflect.Value, at accessFieldTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
-	defer func() {
-		if r := recover(); r != nil {
-			ge = gomerr.Unprocessable("Unable to remove non-writable field", r)
-		}
-	}()
-
-	if at.permissions.grants(r.principal, r.permission) || at.provided && writable(r.permission) {
-		tc.IncrementInt(NotClearedCount, 1)
-		return nil
-	}
-
-	fv.Set(at.zeroVal)
-	tc.IncrementInt(ClearedCount, 1)
-
-	return nil
-}
-
-func AddCopyProvidedToContext(fromStruct reflect.Value, tcs ...fields.ToolContext) fields.ToolContext {
-	return fields.EnsureContext(tcs...).Add(accessToolAction, copyProvided(fromStruct))
+func AddCopyProvidedToContext(fromStruct reflect.Value, tcs ...structs.ToolContext) structs.ToolContext {
+	return structs.EnsureContext(tcs...).Put(accessToolAction, copyProvided(fromStruct))
 }
 
 type copyProvided reflect.Value
 
-func (cf copyProvided) do(fv reflect.Value, at accessFieldTool, tc fields.ToolContext) (ge gomerr.Gomerr) {
+func (cf copyProvided) do(fv reflect.Value, at accessApplier, _ structs.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
 			ge = gomerr.Unprocessable("Unable to copy field", r)
@@ -199,7 +197,6 @@ func (cf copyProvided) do(fv reflect.Value, at accessFieldTool, tc fields.ToolCo
 	}
 
 	fv.Set(fromFv)
-	tc.IncrementInt(CopiedCount, 1)
 
 	return nil
 }
