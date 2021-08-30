@@ -34,7 +34,7 @@ func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
 		} else if typedValue != nil {
 			value = typedValue
 		}
-	}
+	} // Feature:p2 handle []byte input and perform conversion?
 
 	valueValue, ok := value.(reflect.Value)
 	if !ok {
@@ -48,9 +48,9 @@ func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
 		vvtPtr = true
 	}
 
-	ivvtIsiitvt := indirectValueValueType == indirectTargetValueType
+	indirectTypesMatch := indirectValueValueType == indirectTargetValueType
 	var vvConvertibleToTv bool
-	if !ivvtIsiitvt {
+	if !indirectTypesMatch {
 		vvConvertibleToTv = indirectValueValueType.ConvertibleTo(indirectTargetValueType)
 		if !vvConvertibleToTv && !indirectValueValueType.AssignableTo(indirectTargetValueType) {
 			return gomerr.Unprocessable("Unable to set value with type '"+valueValue.Type().String()+"' to '"+targetValue.Type().String()+"'", value)
@@ -87,7 +87,7 @@ func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
 		// nothing to do
 	}
 
-	if !ivvtIsiitvt && vvConvertibleToTv {
+	if !indirectTypesMatch && vvConvertibleToTv {
 		valueValue = valueValue.Convert(indirectTargetValueType)
 	}
 
@@ -186,6 +186,10 @@ func StringToType(valueString string, targetType reflect.Type) (interface{}, gom
 			}
 			value, err = time.Parse(time.RFC3339Nano, valueString)
 		}
+	case reflect.Slice:
+		if targetType == byteSliceType {
+			value = []byte(valueString) // NB: To decode the bytes, use (or define) a field function (e.g. $base64Decode)
+		} // Feature:p2 splitting comma separated values
 	}
 
 	if err != nil {
@@ -195,4 +199,7 @@ func StringToType(valueString string, targetType reflect.Type) (interface{}, gom
 	return value, nil
 }
 
-var timeType = reflect.TypeOf((*time.Time)(nil)).Elem()
+var (
+	timeType      = reflect.TypeOf((*time.Time)(nil)).Elem()
+	byteSliceType = reflect.TypeOf((*[]uint8)(nil)).Elem()
+)
