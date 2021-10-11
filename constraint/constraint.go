@@ -65,7 +65,7 @@ func (c *constraint) updateTarget(validationTarget string, ge gomerr.Gomerr) gom
 	nse, isNse := ge.(*NotSatisfiedError)
 	if isNse {
 		target = nse.Target
-	} else if ta, ok := ge.Attribute("Target"); ok {
+	} else if ta, ok := ge.AttributeLookup("Target"); ok {
 		target = ta.(string)
 	} // else target == ""
 

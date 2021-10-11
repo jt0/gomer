@@ -36,7 +36,7 @@ func RegexpMatch(regexp *regexp.Regexp) Constraint {
 
 var IsRegexp = stringTest("IsRegexp", nil, func(s string) bool {
 	_, err := regexp.Compile(s)
-	return err != nil
+	return err == nil
 })
 
 func stringTest(name string, parameters interface{}, test func(s string) bool) Constraint {

@@ -42,8 +42,8 @@ func RegisterUnstashFieldFunction(name, destinationKey string, include Inclusion
 			stashValueType := stashValue.Type()
 			switch stashValueType.Kind() {
 			case reflect.Struct:
-				destination, ok = destination.Descend(key, createIntermediates)
-				if !ok {
+				itemDestination, itemOk := destination.Descend(key, createIntermediates)
+				if !itemOk {
 					return nil, nil
 				}
 				for i := 0; i < stashValueType.NumField(); i++ {
@@ -52,7 +52,7 @@ func RegisterUnstashFieldFunction(name, destinationKey string, include Inclusion
 					if include(tf.Name, vf, stashValue) {
 						// m := make(map[string]interface{})
 						// for
-						destination.Put(tf.Name, vf.Interface())
+						itemDestination.Put(tf.Name, vf.Interface())
 					}
 				}
 			case reflect.Map:

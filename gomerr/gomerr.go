@@ -19,7 +19,8 @@ type Gomerr interface {
 	AddAttributes(keysAndValues ...interface{}) Gomerr
 	WithAttributes(attributes map[string]interface{}) Gomerr
 
-	Attribute(key string) (value interface{}, ok bool)
+	Attribute(key string) (value interface{})
+	AttributeLookup(key string) (value interface{}, ok bool)
 	Attributes() map[string]interface{}
 	String() string
 	ToMap() map[string]interface{}
@@ -135,7 +136,11 @@ func (g *gomerr) Wrap(err error) Gomerr {
 	return g.self
 }
 
-func (g *gomerr) Attribute(key string) (value interface{}, ok bool) {
+func (g *gomerr) Attribute(key string) interface{} {
+	return g.attributes[key]
+}
+
+func (g *gomerr) AttributeLookup(key string) (value interface{}, ok bool) {
 	value, ok = g.attributes[key]
 	return
 }
@@ -241,7 +246,7 @@ func (g *gomerr) ToMap() map[string]interface{} {
 	for i := 0; i < gte.NumField(); i++ {
 		ft := gte.Field(i)
 		fv := gve.Field(i)
-		if ft.Anonymous || unicode.IsLower([]rune(ft.Name)[0]) || !fv.IsValid() || fv.IsZero() {
+		if ft.Anonymous || unicode.IsLower([]rune(ft.Name)[0]) || !fv.IsValid() {
 			continue
 		}
 
@@ -249,7 +254,7 @@ func (g *gomerr) ToMap() map[string]interface{} {
 		fi := fv.Interface()
 		if tag := ft.Tag.Get("gomerr"); tag != "" {
 			if tag == "include_type" {
-				fieldKey += " (" + reflect.TypeOf(fi).String() + ")"
+				fieldKey += " (" + fv.Type().String() + ")"
 			}
 		}
 		if s, ok := fi.(fmt.Stringer); ok {

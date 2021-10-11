@@ -17,9 +17,18 @@ func Length(values ...*uint64) Constraint {
 	case 1:
 		return length("LengthEquals", *values[0], values[0], values[0])
 	case 2:
-		return length("LengthBetween", []interface{}{*values[0], *values[1]}, values[0], values[1])
+		if values[0] != nil {
+			if values[1] != nil {
+				return length("LengthBetween", []interface{}{*values[0], *values[1]}, values[0], values[1])
+			} else {
+				return MinLength(values[0])
+			}
+		} else if values[1] != nil {
+			return MaxLength(values[1])
+		}
+		fallthrough
 	default:
-		return ConfigurationError(fmt.Sprintf("'Length' constraint requires 1 or 2 input values, received %d", len(values)))
+		return ConfigurationError(fmt.Sprintf("'Length' constraint requires 1 or 2 non-nil input values, received %d", len(values)))
 	}
 }
 
