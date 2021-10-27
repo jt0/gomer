@@ -82,7 +82,7 @@ func (c *constraint) updateTarget(validationTarget string, ge gomerr.Gomerr) gom
 	}
 
 	if !isNse {
-		return ge.AddAttribute("Target", target)
+		return ge.ReplaceAttribute("Target", target)
 	}
 
 	nse.Target = target

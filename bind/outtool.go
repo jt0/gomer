@@ -187,7 +187,12 @@ func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolCon
 		tc.Put(OutKey, outData)
 	case reflect.Ptr, reflect.Interface:
 		if !fv.IsNil() {
-			return a.Apply(reflect.Value{}, fv.Elem(), tc)
+			elemApplier := outApplier{
+				toName:    a.toName,
+				omitempty: false, // the ptr is not empty and we don't want to potentially omit the underlying value
+				tool:      a.tool,
+			}
+			return elemApplier.Apply(reflect.Value{}, fv.Elem(), tc)
 		} else if a.omitempty {
 			return nil
 		}

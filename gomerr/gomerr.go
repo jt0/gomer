@@ -16,6 +16,7 @@ type Gomerr interface {
 
 	Wrap(err error) Gomerr
 	AddAttribute(key string, value interface{}) Gomerr
+	ReplaceAttribute(key string, value interface{}) Gomerr
 	AddAttributes(keysAndValues ...interface{}) Gomerr
 	WithAttributes(attributes map[string]interface{}) Gomerr
 
@@ -146,29 +147,18 @@ func (g *gomerr) AttributeLookup(key string) (value interface{}, ok bool) {
 }
 
 func (g *gomerr) AddAttribute(key string, value interface{}) Gomerr {
-	// gw := newGomerr(2, g.self) // wrap first to get line/file info
-	//
-	// // If the notes are being added in the same place g is introduced, use g instead of the new one
-	// if g.Stack[0].Line == gw.Stack[0].Line && g.Stack[0].File == gw.Stack[0].File {
-	// 	gw = g
-	// }
+	g.addAttribute(key, value, add)
+	return g.self
+}
 
-	if g.attributes == nil {
-		g.attributes = make(map[string]interface{})
-	}
-
-	addAttribute(key, value, &g.attributes)
-
+func (g *gomerr) ReplaceAttribute(key string, value interface{}) Gomerr {
+	g.addAttribute(key, value, replace)
 	return g.self
 }
 
 func (g *gomerr) AddAttributes(keysAndValues ...interface{}) Gomerr {
 	if len(keysAndValues)%2 != 0 {
 		return Configuration("AddAttributes() requires an even number of arguments for keysAndValues").AddAttributes("Input", keysAndValues, "TargetedError", g)
-	}
-
-	if g.attributes == nil {
-		g.attributes = make(map[string]interface{})
 	}
 
 	for i := 0; i < len(keysAndValues); i += 2 {
@@ -181,7 +171,7 @@ func (g *gomerr) AddAttributes(keysAndValues ...interface{}) Gomerr {
 			key = keyStringer.String()
 		}
 
-		addAttribute(key, keysAndValues[i+1], &g.attributes)
+		g.addAttribute(key, keysAndValues[i+1], add)
 	}
 
 	return g.self
@@ -196,14 +186,32 @@ func (g *gomerr) WithAttributes(attributes map[string]interface{}) Gomerr {
 
 	// Add each individually to handle potential name conflict
 	for k, v := range attributes {
-		addAttribute(k, v, &g.attributes)
+		g.addAttribute(k, v, replace)
 	}
 
 	return g.self
 }
 
-func addAttribute(key string, value interface{}, m *map[string]interface{}) {
-	if existing, exists := (*m)[key]; exists {
+type addType uint8
+
+const (
+	add addType = iota + 1
+	replace
+)
+
+func (g *gomerr) addAttribute(key string, value interface{}, addType addType) {
+	// gw := newGomerr(2, g.self) // wrap first to get line/file info
+	//
+	// // If the notes are being added in the same place g is introduced, use g instead of the new one
+	// if g.Stack[0].Line == gw.Stack[0].Line && g.Stack[0].File == gw.Stack[0].File {
+	// 	gw = g
+	// }
+
+	if g.attributes == nil {
+		g.attributes = make(map[string]interface{})
+	}
+
+	if existing, exists := g.attributes[key]; exists && addType == add {
 		valueSlice, ok := value.([]interface{})
 		if !ok {
 			valueSlice = []interface{}{existing, value}
@@ -211,9 +219,9 @@ func addAttribute(key string, value interface{}, m *map[string]interface{}) {
 			valueSlice = append(valueSlice, value)
 		}
 
-		(*m)[key] = valueSlice
+		g.attributes[key] = valueSlice
 	} else {
-		(*m)[key] = value
+		g.attributes[key] = value
 	}
 }
 

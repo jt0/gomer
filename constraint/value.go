@@ -27,14 +27,14 @@ func nilConstraint(name string, errorIfNil bool) Constraint {
 }
 
 func Nil(value *interface{}) Constraint {
-	return New("Nil", value, func(toTest interface{}) gomerr.Gomerr {
-		return IsNil.Test(*value)
+	return New("Nil", value, func(interface{}) gomerr.Gomerr {
+		return IsNil.Test(value)
 	})
 }
 
 func NotNil(value *interface{}) Constraint {
-	return New("NotNil", value, func(toTest interface{}) gomerr.Gomerr {
-		return IsNotNil.Test(*value)
+	return New("NotNil", value, func(interface{}) gomerr.Gomerr {
+		return IsNotNil.Test(value)
 	})
 }
 
@@ -53,13 +53,13 @@ func zeroConstraint(name string, errorIfZero bool) Constraint {
 }
 
 func Zero(value *interface{}) Constraint {
-	return New("Zero", value, func(toTest interface{}) gomerr.Gomerr {
+	return New("Zero", value, func(interface{}) gomerr.Gomerr {
 		return IsZero.Test(*value)
 	})
 }
 
 func NotZero(value *interface{}) Constraint {
-	return New("NotZero", value, func(toTest interface{}) gomerr.Gomerr {
+	return New("NotZero", value, func(interface{}) gomerr.Gomerr {
 		return IsNotZero.Test(*value)
 	})
 }
