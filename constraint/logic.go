@@ -44,7 +44,7 @@ func And(constraints ...Constraint) Constraint {
 					}
 				} else {
 					if _, ok = ge.AttributeLookup("Constraint"); !ok {
-						ge.AddAttribute("Constraint", operand)
+						ge = ge.AddAttribute("Constraint", operand)
 					}
 				}
 				return ge
@@ -74,9 +74,15 @@ func Or(constraints ...Constraint) Constraint {
 				if nse.Constraint == nil {
 					nse.Constraint = operand
 				}
+				// "Or(nil,...)" is a pattern to bypass the remainder of the constraints if the field is optional. If
+				// toTest is not nil, we don't need to include this "failed" constraint in subsequent error(s) we might
+				// return.
+				if nse.Constraint.Type() == "IsNil" {
+					continue
+				}
 			} else {
 				if _, ok = ge.AttributeLookup("Constraint"); !ok {
-					ge.AddAttribute("Constraint", operand)
+					ge = ge.AddAttribute("Constraint", operand)
 				}
 			}
 

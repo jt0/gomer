@@ -77,9 +77,9 @@ func (t validationApplier) Apply(sv reflect.Value, fv reflect.Value, _ *structs.
 	if dc, ok := t.constraint.(*dynamicConstraint); ok {
 		for source, dv := range dc.dynamicValues {
 			if value, ge := structs.ValueFromStruct(sv, fv, source); ge != nil {
-				return gomerr.Configuration("Unable to validate").AddAttributes("Field", t.target, "Source", source, "Value", value).Wrap(ge)
+				return gomerr.Configuration("Unable to validate").AddAttributes("Source", source, "Value", value).Wrap(ge)
 			} else if ge = flect.SetValue(dv.Elem(), value); ge != nil {
-				return gomerr.Configuration("Unable to validate").AddAttributes("Field", t.target, "Source", source, "Value", value).Wrap(ge)
+				return gomerr.Configuration("Unable to validate").AddAttributes("Source", source, "Value", value).Wrap(ge)
 			}
 		}
 	}

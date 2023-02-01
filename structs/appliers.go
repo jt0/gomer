@@ -12,37 +12,18 @@ type Applier interface {
 	Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext *ToolContext) gomerr.Gomerr
 }
 
-type FunctionApplier struct {
-	FieldName string
-	Function  ToolFunction
-}
-
-func (a FunctionApplier) Apply(sv reflect.Value, fv reflect.Value, tc *ToolContext) gomerr.Gomerr {
-	value, ge := a.Function(sv, fv, tc)
-	if ge != nil {
-		return ge.AddAttributes("Field", a.FieldName)
-	}
-
-	if ge = flect.SetValue(fv, value); ge != nil {
-		return gomerr.Configuration("Unable to set field to function result").AddAttributes("Field", a.FieldName, "FunctionResult", value).Wrap(ge)
-	}
-
-	return nil
-}
-
 type StructApplier struct {
-	FieldName string
-	Source    string
+	Source string
 }
 
 func (a StructApplier) Apply(sv reflect.Value, fv reflect.Value, _ *ToolContext) gomerr.Gomerr {
 	value, ge := ValueFromStruct(sv, fv, a.Source)
 	if ge != nil {
-		return ge.AddAttribute("Field", a.FieldName)
+		return ge
 	}
 
 	if ge = flect.SetValue(fv, value); ge != nil {
-		return gomerr.Configuration("Unable to set value").AddAttributes("Field", a.FieldName, "Source", a.Source, "Value", value).Wrap(ge)
+		return gomerr.Configuration("Unable to set value").AddAttributes("Source", a.Source, "Value", value).Wrap(ge)
 	}
 
 	return nil
@@ -85,7 +66,6 @@ func ValueFromStruct(sv reflect.Value, fv reflect.Value, source string) (interfa
 }
 
 type ValueApplier struct {
-	FieldName   string
 	StaticValue string
 }
 
@@ -106,8 +86,14 @@ func (a ValueApplier) Apply(_ reflect.Value, fv reflect.Value, _ *ToolContext) g
 		staticValue = a.StaticValue
 	}
 	if ge := flect.SetValue(fv, staticValue); ge != nil {
-		return gomerr.Configuration("Unable to set field to value").AddAttributes("Field", a.FieldName, "Value", a.StaticValue).Wrap(ge)
+		return gomerr.Configuration("Unable to set field to value").AddAttribute("Value", a.StaticValue).Wrap(ge)
 	}
 
+	return nil
+}
+
+type NoApplier struct{}
+
+func (NoApplier) Apply(reflect.Value, reflect.Value, *ToolContext) gomerr.Gomerr {
 	return nil
 }

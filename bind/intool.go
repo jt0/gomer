@@ -51,7 +51,7 @@ func (ap inApplierProvider) Applier(st reflect.Type, sf reflect.StructField, dir
 	if directive == includeField || directive == "" { // b.emptyDirective must be 'includeField' otherwise would have returned above
 		return inApplier{(*ap.toCase)(sf.Name), ap.tool}, nil
 	} else if firstChar := directive[0]; firstChar == '=' {
-		return structs.ValueApplier{sf.Name, directive[1:]}, nil // don't include the '='
+		return structs.ValueApplier{directive[1:]}, nil // don't include the '='
 	} else if firstChar == '$' {
 		return structs.ExpressionApplierProvider(st, sf, directive)
 	}
@@ -84,7 +84,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc *structs.ToolCon
 
 	imv := reflect.ValueOf(inData)
 	if imv.Kind() != reflect.Map {
-		return gomerr.Unprocessable("Expected data map", imv.Type().String())
+		return gomerr.Unprocessable("Expected data map", inData).AddAttribute("Source", a.source)
 	}
 
 	mv := imv.MapIndex(reflect.ValueOf(a.source))
@@ -93,58 +93,65 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc *structs.ToolCon
 	}
 	value := mv.Interface()
 
-	switch fv.Kind() {
+	switch fvt := fv.Type(); fv.Kind() {
 	case reflect.Struct:
+		vt := reflect.TypeOf(value)
+
 		// Time structs are a special case
-		fvt := fv.Type()
-		if fvt == timeType {
-			if stringValue, ok := value.(string); ok {
-				t, err := time.Parse(time.RFC3339Nano, stringValue)
-				if err != nil {
-					return gomerr.BadValue(gomerr.GenericBadValueType, a.source, stringValue).AddAttribute("Expected", "RFC3339-formatted string")
-				}
-				fv.Set(reflect.ValueOf(t)) // TODO: use flect.SetValue instead?
-				return nil
+		if stringValue, ok := value.(string); ok && fvt == timeType {
+			t, err := time.Parse(time.RFC3339Nano, stringValue)
+			if err != nil {
+				return gomerr.BadValue(gomerr.GenericBadValueType, a.source, stringValue).AddAttribute("Expected", "RFC3339-formatted string")
 			}
-		} else if fvt == reflect.TypeOf(value) {
+			fv.Set(reflect.ValueOf(t)) // TODO: use flect.SetValue instead?
+			return nil
+		} else if fvt == vt {
 			return flect.SetValue(fv, value)
 		}
 
-		tc.Put(InKey, value)
-		if ge := structs.ApplyTools(fv, tc, a.tool); ge != nil {
-			return ge
+		if vt.Kind() != reflect.Map {
+			return gomerr.Unprocessable("Expected data map", value).AddAttribute("Source", a.source)
 		}
-		tc.Put(InKey, inData)
+
+		tc.Put(InKey, value)
+		defer tc.Put(InKey, inData)
+		if ge := structs.ApplyTools(fv, tc, a.tool); ge != nil {
+			return ge.AddAttribute("Source", a.source)
+		}
 	case reflect.Slice:
 		// []byte types are a special case
 		// TODO: should treat other primitive types this way?
-		if fv.Type() == byteSliceType {
+		if fvt == byteSliceType {
 			if _, ok := value.(string); ok {
 				if ge := flect.SetValue(fv, value); ge != nil {
-					return ge.AddAttributes(InKey, a.source)
+					return ge.AddAttributes("Source", a.source)
 				}
 				return nil
 			} // TODO:p2 treat the rest as raw input data - but may have already been exploded depending on how the rest of the data has been handled
 		}
 
-		sliceData := value.([]interface{})
+		sliceData, ok := value.([]interface{})
+		if !ok {
+
+		}
+
 		sliceLen := len(sliceData)
-		fv.Set(reflect.MakeSlice(reflect.SliceOf(fv.Type().Elem()), sliceLen, sliceLen))
+		fv.Set(reflect.MakeSlice(reflect.SliceOf(fvt.Elem()), sliceLen, sliceLen))
 
 		// Putting each element of the slice into a map so the a.Apply() call can fetch the data back out. Allows us
 		// to easily support complex slice elem types.
+		defer tc.Put(InKey, inData)
 		for i := 0; i < sliceLen; i++ {
 			tc.Put(InKey, map[string]interface{}{a.source: sliceData[i]})
 			if ge := a.Apply(sv, fv.Index(i), tc); ge != nil {
 				return ge.AddAttribute("Index", i)
 			}
 		}
-		tc.Put(InKey, inData)
 	case reflect.Map:
-		fvt := fv.Type()
 		fv.Set(reflect.MakeMap(fvt))
 
 		iter := reflect.ValueOf(value).MapRange() // Unsure why this needs to be reflected again...
+		defer tc.Put(InKey, inData)
 		for iter.Next() {
 			tc.Put(InKey, map[string]interface{}{a.source: iter.Value().Interface()})
 			mapElem := reflect.New(fvt.Elem()).Elem()
@@ -155,7 +162,6 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc *structs.ToolCon
 		}
 		tc.Put(InKey, inData)
 	case reflect.Ptr:
-		fvt := fv.Type()
 		elemKind := fvt.Elem().Kind()
 		if elemKind == reflect.Struct || elemKind == reflect.Slice || elemKind == reflect.Map || elemKind == reflect.Ptr {
 			if fv.IsNil() {
@@ -167,7 +173,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc *structs.ToolCon
 		fallthrough
 	default:
 		if ge := flect.SetValue(fv, value); ge != nil {
-			return ge.AddAttributes(InKey, a.source)
+			return ge.AddAttributes("Source", a.source)
 		}
 	}
 

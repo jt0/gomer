@@ -225,6 +225,11 @@ func (ps *preparedStruct) applyTools(sv reflect.Value, tc *ToolContext, tools ..
 			}
 			fv := sv.FieldByName(f.name) // fv should always be valid
 			if ge := applier.Apply(sv, fv, tc); ge != nil {
+				if fieldAttr, exists := ge.AttributeLookup("Field"); exists {
+					ge.ReplaceAttribute("Field", f.name+"."+fieldAttr.(string))
+				} else {
+					ge.AddAttribute("Field", f.name)
+				}
 				errors = append(errors, ge)
 			}
 		}

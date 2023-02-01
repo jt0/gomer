@@ -21,13 +21,13 @@ func ExpressionApplierProvider(_ reflect.Type, sf reflect.StructField, directive
 	// }
 
 	if directive[1] == '.' {
-		return StructApplier{sf.Name, directive}, nil
+		return StructApplier{directive}, nil
 	} else {
-		fn := GetToolFunction(directive) // include the '$'
-		if fn == nil {
+		tf := GetToolFunction(directive) // include the '$'
+		if tf == nil {
 			return nil, gomerr.Configuration("Field function not found: " + directive)
 		}
-		return FunctionApplier{sf.Name, fn}, nil
+		return tf, nil
 	}
 }
 
@@ -90,6 +90,8 @@ func applyScopes(ap ApplierProvider, structType reflect.Type, structField reflec
 			return nil, ge.AddAttribute("Scope", scope)
 		} else if applier != nil {
 			appliers[scope] = applier
+		} else if scope != anyScope {
+			appliers[scope] = NoApplier{}
 		} // else skip
 	}
 
@@ -129,6 +131,8 @@ func (s scopeSelect) Apply(sv reflect.Value, fv reflect.Value, tc *ToolContext) 
 func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructField) (Applier, gomerr.Gomerr) {
 	if strings.HasPrefix(directive, "if(") && directive[len(directive)-1] == ')' {
 		// TODO:p1
+		// Format: if({test},{do}<,{else}>)
+		// Example: if($.Enabled,+,-) or if($IsAdmin,+,=*****)
 	}
 
 	tIndex := strings.IndexAny(directive, "?&")
@@ -172,6 +176,16 @@ func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructF
 // 	return nil, nil
 // }
 
+type ifThenElseApplier struct {
+	name   string
+	test   func(value reflect.Value) bool
+	then   Applier
+	orElse Applier
+}
+
+//func (a ifThenElseApplier) Apply(sv reflect.Value, fv reflect.Value, tc *ToolContext) gomerr.Gomerr {
+//}
+
 type leftTestRightApplier struct {
 	name  string
 	left  Applier
@@ -191,13 +205,14 @@ func (a leftTestRightApplier) Apply(sv reflect.Value, fv reflect.Value, tc *Tool
 	}
 
 	if a.right == nil {
-		return leftGe.AddAttributes("Field", a.name)
+		return leftGe
 	}
 
 	ge := a.right.Apply(sv, fv, tc)
 	if ge != nil {
-		return gomerr.Batch(ge, leftGe).AddAttributes("Field", a.name) // Okay if leftGe is nil
+		return gomerr.Batch(ge, leftGe) // Okay if leftGe is nil
 	} else if leftGe != nil {
+		// TODO: replace w/ debug-level log statement
 		fmt.Println("Left-side applier failed, but right side succeeded. Left error:\n", leftGe.String())
 	}
 

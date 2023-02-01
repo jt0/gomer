@@ -11,8 +11,19 @@ import (
 
 func RegisterStashFieldFunction(name, sourceKey string, include InclusionPredicate) {
 	_ = structs.RegisterToolFunction("$_stash."+name, func(sv reflect.Value, _ reflect.Value, tc *structs.ToolContext) (interface{}, gomerr.Gomerr) {
+		stashData := tc.Get(sourceKey)
+		if stashData == nil {
+			return nil, nil
+		}
+
+		sdv := reflect.ValueOf(stashData)
+		// TODO:p3 sources other than maps, such as a struct or slice.
+		if sdv.Kind() != reflect.Map {
+			return nil, gomerr.Unprocessable("Expected data map", sdv.Type().String())
+		}
+
 		out := make(map[string]interface{})
-		iter := reflect.ValueOf(tc.Get(sourceKey)).MapRange()
+		iter := sdv.MapRange()
 		for iter.Next() { // TODO:p1 should only be from tc or can be from struct?
 			key := iter.Key().String()
 			if include(key, iter.Value(), sv) {
@@ -37,6 +48,8 @@ func RegisterUnstashFieldFunction(name, destinationKey string, include Inclusion
 		// TODO:p3 destinations to types other than maps, such as a struct or slice.
 		iter := fv.MapRange()
 		for iter.Next() {
+			// TODO:p1 We need a way to encode names that have a '.' in them, since that's the delimiter we use for
+			//         describing a path and location.
 			key := iter.Key().String()
 			stashValue := iter.Value()
 			stashValueType := stashValue.Type()
@@ -44,7 +57,7 @@ func RegisterUnstashFieldFunction(name, destinationKey string, include Inclusion
 			case reflect.Struct:
 				itemDestination, itemOk := destination.Descend(key, createIntermediates)
 				if !itemOk {
-					return nil, nil
+					continue
 				}
 				for i := 0; i < stashValueType.NumField(); i++ {
 					tf := stashValueType.Field(i)

@@ -18,6 +18,7 @@ type index struct {
 	pk                  *keyAttribute
 	sk                  *keyAttribute
 	canReadConsistently bool
+	queryWildcardChar   byte
 	// projects bool
 }
 
@@ -173,8 +174,15 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 			continue
 		}
 
-		if fv := qv.FieldByName(kf.name); !fv.IsValid() || fv.IsZero() {
+		fv := qv.FieldByName(kf.name)
+		if !fv.IsValid() || fv.IsZero() {
 			return nil
+		}
+
+		if i.queryWildcardChar != 0 {
+			if s, ok := fv.Interface().(string); ok && s != "" && s[len(s)-1] == i.queryWildcardChar {
+				return nil
+			}
 		}
 	}
 

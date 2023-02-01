@@ -5,10 +5,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 )
 
 type ToolFunction func(structValue reflect.Value, fieldValue reflect.Value, toolContext *ToolContext) (output interface{}, ge gomerr.Gomerr)
+
+func (f ToolFunction) Apply(sv reflect.Value, fv reflect.Value, tc *ToolContext) gomerr.Gomerr {
+	value, ge := f(sv, fv, tc)
+	if ge != nil {
+		return ge
+	}
+
+	if ge = flect.SetValue(fv, value); ge != nil {
+		return gomerr.Configuration("Unable to set field to function result").AddAttribute("FunctionResult", value).Wrap(ge)
+	}
+
+	return nil
+}
 
 func init() {
 	SetNowToolFunctionPrecision(time.Millisecond)

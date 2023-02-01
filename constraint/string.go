@@ -10,18 +10,24 @@ import (
 
 func StartsWith(prefix *string) Constraint {
 	return stringTest("StartsWith", prefix, func(s string) bool {
-		return prefix != nil && strings.HasPrefix(s, *prefix)
+		return prefix == nil || strings.HasPrefix(s, *prefix)
 	})
 }
 
 func EndsWith(suffix *string) Constraint {
 	return stringTest("EndsWith", suffix, func(s string) bool {
-		return suffix != nil && strings.HasSuffix(s, *suffix)
+		return suffix == nil || strings.HasSuffix(s, *suffix)
 	})
 }
 
 func Regexp(r string) Constraint {
-	return RegexpMatch(regexp.MustCompile(r))
+	return stringTest("Regexp", r, func(s string) bool {
+		re, err := regexp.Compile(r)
+		if err != nil {
+			return false
+		}
+		return re.MatchString(s)
+	})
 }
 
 func RegexpMatch(regexp *regexp.Regexp) Constraint {

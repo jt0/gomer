@@ -16,26 +16,3 @@ type Persistable interface {
 	TypeName() string
 	NewQueryable() Queryable
 }
-
-type Queryable interface {
-	TypeNames() []string
-	TypeOf(interface{}) string
-	Items() []interface{}
-	SetItems([]interface{})
-	NextPageToken() *string
-	SetNextPageToken(*string)
-	MaximumPageSize() int
-}
-
-type QueryTypes uint16
-
-const (
-	EQ QueryTypes = iota + 1
-	// NEQ
-	// GTE
-	// GT
-	// LTE
-	// LT
-	// BETWEEN
-	// CONTAINS
-)

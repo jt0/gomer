@@ -21,7 +21,6 @@ import (
 
 type table struct {
 	index
-
 	tableName              *string
 	ddb                    dynamodbiface.DynamoDBAPI
 	defaultLimit           *int64
@@ -30,7 +29,6 @@ type table struct {
 	indexes                map[string]*index
 	persistableTypes       map[string]*persistableType
 	valueSeparatorChar     byte
-	queryWildcardChar      byte
 	nextTokenizer          nextTokenizer
 	failDeleteIfNotPresent bool
 }
@@ -146,6 +144,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 		lsi := &index{
 			name:                lsid.IndexName,
 			canReadConsistently: true,
+			queryWildcardChar:   t.queryWildcardChar,
 		}
 
 		if ge := lsi.processKeySchema(lsid.KeySchema, attributeTypes); ge != nil {
@@ -161,6 +160,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 		gsi := &index{
 			name:                gsid.IndexName,
 			canReadConsistently: false,
+			queryWildcardChar:   t.queryWildcardChar,
 		}
 
 		if ge := gsi.processKeySchema(gsid.KeySchema, attributeTypes); ge != nil {

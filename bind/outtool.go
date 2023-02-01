@@ -74,16 +74,16 @@ func (ap outApplierProvider) Applier(st reflect.Type, sf reflect.StructField, di
 	if directive == includeField || directive == "" { // b.emptyDirectiveHandling must be 'includeField' otherwise would have returned above
 		return outApplier{(*ap.toCase)(sf.Name), omitIfEmpty, ap.tool}, nil
 	} else if firstChar := directive[0]; firstChar == '=' {
-		return structs.ValueApplier{sf.Name, directive[1:]}, nil // don't include the '='
+		return structs.ValueApplier{directive[1:]}, nil // don't include the '='
 	} else if firstChar == '$' {
 		if directive[1] == '.' {
-			return structs.StructApplier{sf.Name, directive}, nil
+			return structs.StructApplier{directive}, nil
 		} else {
-			fn := structs.GetToolFunction(directive) // include the '$'
-			if fn == nil {
+			tf := structs.GetToolFunction(directive) // include the '$'
+			if tf == nil {
 				return nil, gomerr.Configuration("Function not found: " + directive)
 			}
-			return structs.FunctionApplier{sf.Name, fn}, nil
+			return tf, nil
 		}
 	}
 
