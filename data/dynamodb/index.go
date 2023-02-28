@@ -2,10 +2,9 @@ package dynamodb
 
 import (
 	"fmt"
+	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"reflect"
 	"sort"
-
-	"github.com/aws/aws-sdk-go/service/dynamodb"
 
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
@@ -90,8 +89,8 @@ func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
 // will be excluded from consideration. On success, the function returns the matching index (if one), and a boolean
 // to include as the 'consistent' value for the ddb query. Possible errors:
 //
-//  gomerr.Missing:
-//      if there is no matching index for the query
+//	gomerr.Missing:
+//	    if there is no matching index for the query
 func indexFor(t *table, q data.Queryable) (index *index, ascending bool, consistent *bool, ge gomerr.Gomerr) {
 	var consistencyType ConsistencyType
 	if c, ok := q.(ConsistencyTyper); ok {
@@ -199,7 +198,9 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 			}
 
 			fv := qv.FieldByName(kf.name)
-			if !fv.IsValid() || fv.IsZero() {
+			if !fv.IsValid() {
+				return nil
+			} else if fv.IsZero() {
 				c.skMissing++
 			} else if c.skMissing > 0 { // Cannot have gaps in the middle of the sort key
 				return nil
@@ -219,7 +220,7 @@ func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p dat
 	pElem := reflect.ValueOf(p).Elem()
 
 	if _, present := avm[i.pk.name]; !present {
-		if av = i.pk.attributeValue(pElem, p.TypeName(), valueSeparator); av != nil {
+		if av = i.pk.attributeValue(pElem, p.TypeName(), valueSeparator, 0); av != nil {
 			avm[i.pk.name] = av
 		} else if mustBeSet {
 			return dataerr.KeyValueNotFound(i.pk.name, keyFieldNames(i.pk.keyFieldsByPersistable[p.TypeName()]), p)
@@ -228,7 +229,7 @@ func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p dat
 
 	if i.sk != nil {
 		if _, present := avm[i.sk.name]; !present {
-			if av = i.sk.attributeValue(pElem, p.TypeName(), valueSeparator); av != nil {
+			if av = i.sk.attributeValue(pElem, p.TypeName(), valueSeparator, 0); av != nil {
 				avm[i.sk.name] = av
 			} else if mustBeSet {
 				return dataerr.KeyValueNotFound(i.sk.name, keyFieldNames(i.sk.keyFieldsByPersistable[p.TypeName()]), p)
@@ -255,19 +256,19 @@ func (i *index) keyAttributes() []*keyAttribute {
 	}
 }
 
-func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeName string, valueSeparator byte) *dynamodb.AttributeValue {
-	value := k.buildKeyValue(elemValue, persistableTypeName, valueSeparator)
+func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeName string, valueSeparator, queryWildcardChar byte) *dynamodb.AttributeValue {
+	value := k.buildKeyValue(elemValue, persistableTypeName, valueSeparator, queryWildcardChar)
 	if value == "" {
 		return nil
 	}
 
 	switch k.attributeType {
 	case dynamodb.ScalarAttributeTypeS:
-		s := fmt.Sprint(value) // TODO:p1 replace with a better conversion mechanism (e.g. handle times)
-		return &dynamodb.AttributeValue{S: &s}
-	case dynamodb.ScalarAttributeTypeN:
-		n := fmt.Sprint(value)
-		return &dynamodb.AttributeValue{N: &n}
+		return &dynamodb.AttributeValue{S: &value}
+	//TODO:p3 add support for numeric values
+	//case dynamodb.ScalarAttributeTypeN:
+	//	n := fmt.Sprint(value)
+	//	return &dynamodb.AttributeValue{N: &n}
 	default:
 		// Log that safeAttributeType() missed something. received type: k.AttributeType
 	}
@@ -275,13 +276,23 @@ func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeNa
 	return nil
 }
 
-func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeName string, valueSeparator byte) string {
+func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeName string, valueSeparator, queryWildcardChar byte) string {
 	// sv := reflect.ValueOf(s).Elem()
 	keyFields := k.keyFieldsByPersistable[persistableTypeName]
 	keyValue := fieldValue(keyFields[0].name, elemValue) // will always have at least one keyField
-	for i := 1; i < len(keyFields); i++ {
-		keyValue += string(valueSeparator)
-		keyValue += fieldValue(keyFields[i].name, elemValue)
+	if len(keyFields) > 1 {                              // 3
+		separator := string(valueSeparator)
+		lastFieldIndex := 0
+		for i, separators := 1, separator; i < len(keyFields); i, separators = i+1, separators+separator {
+			if nextField := fieldValue(keyFields[i].name, elemValue); nextField != "" {
+				keyValue += separators // add collected separators when a fieldValue is not ""
+				keyValue += nextField
+				lastFieldIndex, separators = i, ""
+			}
+		}
+		if lastFieldIndex < len(keyFields)-1 && len(keyValue) > 0 && keyValue[len(keyValue)-1] != queryWildcardChar && queryWildcardChar != 0 {
+			keyValue += separator
+		}
 	}
 	return keyValue
 }

@@ -32,11 +32,11 @@ type BaseInstance struct {
 	// persistedValues map[string]interface{}
 }
 
-func (i *BaseInstance) TypeName() string {
+func (i BaseInstance) TypeName() string {
 	return i.md.instanceName
 }
 
-func (i *BaseInstance) NewQueryable() data.Queryable {
+func (i BaseInstance) NewQueryable() data.Queryable {
 	ct := i.metadata().collectionType
 	if ct == nil {
 		return nil
@@ -50,7 +50,7 @@ func (i *BaseInstance) NewQueryable() data.Queryable {
 	return collection
 }
 
-func (i *BaseInstance) Id() string {
+func (i BaseInstance) Id() string {
 	instanceId, ge := Id(reflect.ValueOf(i.self).Elem())
 	if ge != nil {
 		println("Unable to get id value for instance:\n", ge.Error())
@@ -59,34 +59,34 @@ func (i *BaseInstance) Id() string {
 	return instanceId
 }
 
-func (*BaseInstance) PreCreate() gomerr.Gomerr {
+func (BaseInstance) PreCreate() gomerr.Gomerr {
 	return nil
 }
 
-func (*BaseInstance) PostCreate() gomerr.Gomerr {
+func (BaseInstance) PostCreate() gomerr.Gomerr {
 	return nil
 }
 
-func (*BaseInstance) PreRead() gomerr.Gomerr {
+func (BaseInstance) PreRead() gomerr.Gomerr {
 	return nil
 }
 
-func (*BaseInstance) PostRead() gomerr.Gomerr {
+func (BaseInstance) PostRead() gomerr.Gomerr {
 	return nil
 }
 
-func (*BaseInstance) PreUpdate(Resource) gomerr.Gomerr {
+func (BaseInstance) PreUpdate(Resource) gomerr.Gomerr {
 	return nil
 }
 
-func (*BaseInstance) PostUpdate(Resource) gomerr.Gomerr {
+func (BaseInstance) PostUpdate(Resource) gomerr.Gomerr {
 	return nil
 }
 
-func (*BaseInstance) PreDelete() gomerr.Gomerr {
+func (BaseInstance) PreDelete() gomerr.Gomerr {
 	return nil
 }
 
-func (*BaseInstance) PostDelete() gomerr.Gomerr {
+func (BaseInstance) PostDelete() gomerr.Gomerr {
 	return nil
 }

@@ -73,12 +73,13 @@ func Or(constraints ...Constraint) Constraint {
 			if nse, ok := ge.(*NotSatisfiedError); ok {
 				if nse.Constraint == nil {
 					nse.Constraint = operand
-				}
-				// "Or(nil,...)" is a pattern to bypass the remainder of the constraints if the field is optional. If
-				// toTest is not nil, we don't need to include this "failed" constraint in subsequent error(s) we might
-				// return.
-				if nse.Constraint.Type() == "IsNil" {
+				} else if nse.Constraint.Type() == "IsNil" || nse.Constraint.Type() == "IsZero" {
+					// "or(nil,...)" or "or(zero,...)" is a pattern to bypass the remainder of the constraints if the
+					// field is optional. If toTest is not nil, we don't need to include this "failed" constraint in
+					// error(s) we might return.
 					continue
+				} else if _, isDynamicConstraint := operand.(*dynamicConstraint); isDynamicConstraint {
+					nse.Constraint = operand
 				}
 			} else {
 				if _, ok = ge.AttributeLookup("Constraint"); !ok {

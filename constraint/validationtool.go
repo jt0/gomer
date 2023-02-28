@@ -84,5 +84,9 @@ func (t validationApplier) Apply(sv reflect.Value, fv reflect.Value, _ *structs.
 		}
 	}
 
+	if t.target == "_" {
+		return t.constraint.Validate(sv.Type().Name(), sv.Interface())
+	}
+
 	return t.constraint.Validate(t.target, fv.Interface())
 }

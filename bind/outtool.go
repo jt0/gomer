@@ -93,7 +93,7 @@ func (ap outApplierProvider) Applier(st reflect.Type, sf reflect.StructField, di
 		}
 	}
 
-	return outApplier{directive, omitIfEmpty, ap.tool}, nil
+	return outApplier{(*ap.toCase)(directive), omitIfEmpty, ap.tool}, nil
 }
 
 type outApplier struct {

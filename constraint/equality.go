@@ -1,6 +1,8 @@
 package constraint
 
 import (
+	"reflect"
+
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 )
@@ -24,10 +26,20 @@ func NotEquals(value interface{}) Constraint {
 }
 
 func OneOf(values ...interface{}) Constraint {
+	if len(values) == 0 {
+		panic(gomerr.Configuration("OneOf constraint defined without values"))
+	}
+	valuesType := reflect.TypeOf(values[0])
+
 	return New("OneOf", values, func(toTest interface{}) gomerr.Gomerr {
-		if tt, ok := flect.IndirectInterface(toTest); ok {
+		if ttv, ok := flect.ReadableIndirectValue(toTest); !ok {
+			return NotSatisfied(toTest)
+		} else if !ttv.CanConvert(valuesType) {
+			return NotSatisfied(toTest)
+		} else {
+			tti := ttv.Convert(valuesType).Interface()
 			for _, value := range values {
-				if tt == value {
+				if tti == value {
 					return nil
 				}
 			}

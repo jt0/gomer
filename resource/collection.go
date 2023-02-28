@@ -14,22 +14,22 @@ type BaseCollection struct {
 	BaseResource
 }
 
-func (c *BaseCollection) TypeNames() []string {
+func (c BaseCollection) TypeNames() []string {
 	return []string{c.md.instanceName}
 }
 
-func (c *BaseCollection) TypeOf(interface{}) string {
+func (c BaseCollection) TypeOf(interface{}) string {
 	return c.md.instanceName
 }
 
-func (*BaseCollection) MaximumPageSize() int {
+func (BaseCollection) MaximumPageSize() int {
 	return 0
 }
 
-func (*BaseCollection) PreList() gomerr.Gomerr {
+func (BaseCollection) PreList() gomerr.Gomerr {
 	return nil
 }
 
-func (*BaseCollection) PostList() gomerr.Gomerr {
+func (BaseCollection) PostList() gomerr.Gomerr {
 	return nil
 }

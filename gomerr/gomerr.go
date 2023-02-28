@@ -103,10 +103,6 @@ func fillStack(stackSkip int) []string {
 	frames := runtime.CallersFrames(callers)
 	for i := 0; i < depth; i++ {
 		frame, _ := frames.Next()
-		if strings.HasPrefix(frame.Function, "runtime.") {
-			stack = stack[:i]
-			break
-		}
 		function := frame.Function[strings.LastIndexByte(frame.Function, '/')+1:]
 		stack[i] = fmt.Sprintf("%s -- %s:%d", function, frame.File, frame.Line)
 	}

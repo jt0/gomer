@@ -168,6 +168,7 @@ func process(st reflect.Type, tools ...*Tool) (*preparedStruct, []gomerr.Gomerr)
 			} else if applier != nil {
 				appliers[tool.Id()] = applier
 			}
+			ps.applied[tool.Id()] = true
 		}
 		ps.addAppliers(sf.Name, appliers)
 	}
@@ -196,7 +197,6 @@ func (ps *preparedStruct) addAppliers(fieldName string, appliersToAdd map[string
 			for toolId, toAdd := range appliersToAdd {
 				if _, hasApplier := f.appliers[toolId]; !hasApplier {
 					f.appliers[toolId] = toAdd
-					ps.applied[toolId] = true
 				}
 			}
 			return

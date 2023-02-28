@@ -15,6 +15,7 @@ import (
 	"github.com/jt0/gomer/crypto"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/data/dataerr"
+	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
 )
@@ -543,12 +544,12 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 	qElem := reflect.ValueOf(q).Elem()
 
 	keyConditionExpression := safeName(idx.pk.name, expressionAttributeNames) + "=:pk"
-	expressionAttributeValues[":pk"] = idx.pk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar) // Non-null because indexFor succeeded
+	expressionAttributeValues[":pk"] = idx.pk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar, 0) // Non-null because indexFor succeeded
 
 	// TODO: customers should opt-in to wildcard matches on a field-by-field basis
 	// TODO: need to provide a way to sanitize, both when saving and querying data, the delimiter char
 	if idx.sk != nil {
-		if eav := idx.sk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar); eav != nil {
+		if eav := idx.sk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar, t.queryWildcardChar); eav != nil {
 			if eav.S != nil && len(*eav.S) > 0 && ((*eav.S)[len(*eav.S)-1] == t.queryWildcardChar || (*eav.S)[len(*eav.S)-1] == t.valueSeparatorChar) {
 				*eav.S = (*eav.S)[:len(*eav.S)-1] // remove the last char
 				keyConditionExpression += " AND begins_with(" + safeName(idx.sk.name, expressionAttributeNames) + ",:sk)"
@@ -557,6 +558,13 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 			}
 			expressionAttributeValues[":sk"] = eav
 		}
+	}
+
+	var filterExpression *string
+	if fe, ge := t.filterExpression(q, idx, persistableTypeName, expressionAttributeNames, expressionAttributeValues); ge != nil {
+		return nil, ge
+	} else if fe != "" {
+		filterExpression = &fe
 	}
 
 	// for _, attribute := range q.ResponseFields() {
@@ -586,7 +594,7 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 		ExpressionAttributeNames:  expressionAttributeNames,
 		ExpressionAttributeValues: expressionAttributeValues,
 		KeyConditionExpression:    &keyConditionExpression,
-		FilterExpression:          nil,
+		FilterExpression:          filterExpression,
 		ExclusiveStartKey:         exclusiveStartKey,
 		Limit:                     t.limit(q.MaximumPageSize()),
 		// ProjectionExpression:      projectionExpressionPtr,
@@ -594,6 +602,55 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 	}
 
 	return input, nil
+}
+
+func (t *table) filterExpression(q data.Queryable, idx *index, persistableTypeName string, expressionAttributeNames map[string]*string, expressionAttributeValues map[string]*dynamodb.AttributeValue) (string, gomerr.Gomerr) {
+	qv, ge := flect.IndirectValue(q, false)
+	if ge != nil {
+		return "", ge
+	}
+
+	keyFields := map[string]bool{}
+	for _, ka := range idx.keyAttributes() {
+		for _, kf := range ka.keyFieldsByPersistable[persistableTypeName] {
+			keyFields[kf.name] = true
+		}
+	}
+
+	var exp string
+	qt := qv.Type()
+	for i := 0; i < qt.NumField(); i++ {
+		var qfv reflect.Value
+		var sf reflect.StructField
+		if sf = qt.Field(i); keyFields[sf.Name] {
+			continue
+		} else if qfv = qv.Field(i); qfv.IsZero() {
+			continue
+		}
+		if qfv.Kind() == reflect.Ptr {
+			qfv = qfv.Elem()
+		}
+		if qfv.Kind() == reflect.Struct {
+			continue
+		}
+		s := fmt.Sprint(qfv.Interface())
+		if len(s) == 0 {
+			continue
+		}
+		if len(exp) > 0 {
+			exp += " AND "
+		}
+		filterAlias := ":f" + strconv.Itoa(i)
+		if s[len(s)-1] == t.queryWildcardChar {
+			s = s[:len(s)-1]
+			exp += "begins_with(" + safeName(sf.Name, expressionAttributeNames) + "," + filterAlias + ")"
+		} else {
+			exp += safeName(sf.Name, expressionAttributeNames) + "=" + filterAlias
+		}
+		expressionAttributeValues[filterAlias] = &dynamodb.AttributeValue{S: &s}
+	}
+
+	return exp, nil
 }
 
 func (t *table) runQuery(input *dynamodb.QueryInput) (*dynamodb.QueryOutput, gomerr.Gomerr) {
@@ -642,13 +699,11 @@ func (t *table) limit(maximumPageSize int) *int64 {
 
 func safeName(attributeName string, expressionAttributeNames map[string]*string) string {
 	// TODO: calculate once and store in persistableType
-	if _, reserved := reservedWords[strings.ToUpper(attributeName)]; reserved || strings.ContainsAny(attributeName, ". ") || attributeName[0] >= '0' || attributeName[0] <= '9' {
+	if reservedWords[strings.ToUpper(attributeName)] || strings.ContainsAny(attributeName, ". ") || attributeName[0] >= '0' || attributeName[0] <= '9' {
 		replacement := "#a" + strconv.Itoa(len(expressionAttributeNames))
 		expressionAttributeNames[replacement] = &attributeName
-
 		return replacement
 	}
-
 	return attributeName
 }
 

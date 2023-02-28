@@ -60,7 +60,9 @@ func IntCompare(comparisonType ComparisonType, compareTo *int64) Constraint {
 // IntBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func IntBetween(lower, upper *int64) Constraint {
-	return And(IntCompare(GTE, lower), IntCompare(LTE, upper))
+	c := And(IntCompare(GTE, lower), IntCompare(LTE, upper))
+	c.(*constraint).type_ = "IntBetween"
+	return c
 }
 
 var intComparators = map[ComparisonType]func(int64, int64) bool{
@@ -109,7 +111,9 @@ func UintCompare(comparisonType ComparisonType, compareTo *uint64) Constraint {
 // UintBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func UintBetween(lower, upper *uint64) Constraint {
-	return And(UintCompare(GTE, lower), UintCompare(LTE, upper))
+	c := And(UintCompare(GTE, lower), UintCompare(LTE, upper))
+	c.(*constraint).type_ = "UintBetween"
+	return c
 }
 
 var uintComparators = map[ComparisonType]func(uint64, uint64) bool{
@@ -125,8 +129,8 @@ var uintComparators = map[ComparisonType]func(uint64, uint64) bool{
 // float32/float64. If the value is not a float type, the constraint will fail.
 func FloatCompare(comparisonType ComparisonType, compareTo *float64) Constraint {
 	comparisonType = strings.ToUpper(comparisonType)
-	comparator, ok := floatComparators[comparisonType]
-	if !ok {
+	comparator, exists := floatComparators[comparisonType]
+	if !exists {
 		panic("Unrecognized comparison type: " + comparisonType)
 	}
 
@@ -157,7 +161,9 @@ func FloatCompare(comparisonType ComparisonType, compareTo *float64) Constraint 
 // FloatBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func FloatBetween(lower, upper *float64) Constraint {
-	return And(FloatCompare(GTE, lower), FloatCompare(LTE, upper))
+	c := And(FloatCompare(GTE, lower), FloatCompare(LTE, upper))
+	c.(*constraint).type_ = "FloatBetween"
+	return c
 }
 
 var floatComparators = map[ComparisonType]func(float64, float64) bool{
@@ -204,7 +210,9 @@ func TimeCompare(comparisonType ComparisonType, compareTo *time.Time) Constraint
 // TimeBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func TimeBetween(lower, upper *time.Time) Constraint {
-	return And(TimeCompare(GTE, lower), TimeCompare(LTE, upper))
+	c := And(TimeCompare(GTE, lower), TimeCompare(LTE, upper))
+	c.(*constraint).type_ = "TimeBetween"
+	return c
 }
 
 var timeComparators = map[ComparisonType]func(time.Time, time.Time) bool{

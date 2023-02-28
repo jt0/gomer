@@ -62,7 +62,7 @@ func (ap inApplierProvider) Applier(st reflect.Type, sf reflect.StructField, dir
 		}
 	}
 
-	return inApplier{directive, ap.tool}, nil
+	return inApplier{(*ap.toCase)(directive), ap.tool}, nil
 }
 
 type inApplier struct {
