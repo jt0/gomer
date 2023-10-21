@@ -2,6 +2,7 @@ package gomerr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -17,6 +18,7 @@ type Gomerr interface {
 	Wrap(err error) Gomerr
 	AddAttribute(key string, value interface{}) Gomerr
 	ReplaceAttribute(key string, value interface{}) Gomerr
+	DeleteAttribute(key string) Gomerr
 	AddAttributes(keysAndValues ...interface{}) Gomerr
 	WithAttributes(attributes map[string]interface{}) Gomerr
 
@@ -28,6 +30,11 @@ type Gomerr interface {
 
 	// Ensures that Gomerrs behave as expected
 	isFromBuildFunc() bool
+}
+
+func ErrorAs[E error](err error) (e E) {
+	errors.As(err, &e)
+	return
 }
 
 var gomerrType = reflect.TypeOf((*Gomerr)(nil)).Elem()
@@ -152,6 +159,11 @@ func (g *gomerr) ReplaceAttribute(key string, value interface{}) Gomerr {
 	return g.self
 }
 
+func (g *gomerr) DeleteAttribute(key string) Gomerr {
+	delete(g.attributes, key)
+	return g.self
+}
+
 func (g *gomerr) AddAttributes(keysAndValues ...interface{}) Gomerr {
 	if len(keysAndValues)%2 != 0 {
 		return Configuration("AddAttributes() requires an even number of arguments for keysAndValues").AddAttributes("Input", keysAndValues, "TargetedError", g)
@@ -195,7 +207,7 @@ const (
 	replace
 )
 
-func (g *gomerr) addAttribute(key string, value interface{}, addType addType) {
+func (g *gomerr) addAttribute(key string, toAdd interface{}, addType addType) {
 	// gw := newGomerr(2, g.self) // wrap first to get line/file info
 	//
 	// // If the notes are being added in the same place g is introduced, use g instead of the new one
@@ -207,17 +219,14 @@ func (g *gomerr) addAttribute(key string, value interface{}, addType addType) {
 		g.attributes = make(map[string]interface{})
 	}
 
-	if existing, exists := g.attributes[key]; exists && addType == add {
-		valueSlice, ok := value.([]interface{})
-		if !ok {
-			valueSlice = []interface{}{existing, value}
+	if value, exists := g.attributes[key]; exists && addType == add {
+		if valueSlice, ok := value.([]interface{}); !ok {
+			g.attributes[key] = []interface{}{value, toAdd}
 		} else {
-			valueSlice = append(valueSlice, value)
+			g.attributes[key] = append(valueSlice, toAdd)
 		}
-
-		g.attributes[key] = valueSlice
 	} else {
-		g.attributes[key] = value
+		g.attributes[key] = toAdd
 	}
 }
 

@@ -41,7 +41,7 @@ func (c *constraint) Validate(target string, toTest interface{}) gomerr.Gomerr {
 		return nil
 	}
 
-	if be, ok := ge.(*gomerr.BatchError); ok {
+	if be := gomerr.ErrorAs[*gomerr.BatchError](ge); be != nil {
 		return c.batchUpdateTarget(target, be)
 	}
 
@@ -51,7 +51,7 @@ func (c *constraint) Validate(target string, toTest interface{}) gomerr.Gomerr {
 func (c *constraint) batchUpdateTarget(target string, be *gomerr.BatchError) *gomerr.BatchError {
 	errors := be.Errors()
 	for i, ge := range errors {
-		if ibe, ok := ge.(*gomerr.BatchError); ok {
+		if ibe := gomerr.ErrorAs[*gomerr.BatchError](ge); ibe != nil {
 			errors[i] = c.batchUpdateTarget(target, ibe)
 		} else {
 			errors[i] = c.updateTarget(target, ge)
@@ -62,8 +62,8 @@ func (c *constraint) batchUpdateTarget(target string, be *gomerr.BatchError) *go
 
 func (c *constraint) updateTarget(validationTarget string, ge gomerr.Gomerr) gomerr.Gomerr {
 	var target string
-	nse, isNse := ge.(*NotSatisfiedError)
-	if isNse {
+	nse := gomerr.ErrorAs[*NotSatisfiedError](ge)
+	if nse != nil {
 		target = nse.Target
 	} else if ta, ok := ge.AttributeLookup("Target"); ok {
 		target = ta.(string)
@@ -81,7 +81,7 @@ func (c *constraint) updateTarget(validationTarget string, ge gomerr.Gomerr) gom
 		target = validationTarget + "." + target
 	}
 
-	if !isNse {
+	if nse == nil {
 		return ge.ReplaceAttribute("Target", target)
 	}
 
@@ -92,10 +92,8 @@ func (c *constraint) updateTarget(validationTarget string, ge gomerr.Gomerr) gom
 
 func (c *constraint) Test(toTest interface{}) gomerr.Gomerr {
 	ge := c.testFn(toTest)
-	if nse, ok := ge.(*NotSatisfiedError); ok {
-		if nse.Constraint == nil { // keep the most specific constraint error
-			nse.Constraint = c
-		}
+	if nse := gomerr.ErrorAs[*NotSatisfiedError](ge); nse != nil && nse.Constraint == nil {
+		nse.Constraint = c // set only if nil to keep the most specific constraint error
 	}
 	return ge
 }
