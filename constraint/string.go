@@ -21,22 +21,22 @@ func EndsWith(suffix *string) Constraint {
 }
 
 func Regexp(r string) Constraint {
+	re, err := regexp.Compile(r)
+	if err != nil {
+		panic(gomerr.Configuration("'" + r + "' is not a valid regexp pattern: " + err.Error()))
+	}
 	return stringTest("Regexp", r, func(s string) bool {
-		re, err := regexp.Compile(r)
-		if err != nil {
-			return false
-		}
 		return re.MatchString(s)
 	})
 }
 
-func RegexpMatch(regexp *regexp.Regexp) Constraint {
-	if regexp == nil {
+func RegexpMatch(re *regexp.Regexp) Constraint {
+	if re == nil {
 		return ConfigurationError("regexp is nil")
 	}
 
-	return stringTest("Regexp", regexp.String(), func(s string) bool {
-		return regexp.MatchString(s)
+	return stringTest("Regexp", re.String(), func(s string) bool {
+		return re.MatchString(s)
 	})
 }
 
