@@ -68,7 +68,8 @@ var (
 // one can use the wildcard scope (e.g. "*:this_colon_:_does_not_indicate_a_scope").
 //
 // NB: scopes can't be reused within the input. If a scope repeats, the last one wins. This is true for wildcards
-//     (implicit, explicit, or both) as well.
+//
+//	(implicit, explicit, or both) as well.
 func applyScopes(ap ApplierProvider, structType reflect.Type, structField reflect.StructField, directive string) (Applier, gomerr.Gomerr) {
 	appliers := make(map[string]Applier)
 	for _, match := range scopeRegexp.FindAllStringSubmatch(directive, -1) {
@@ -78,6 +79,10 @@ func applyScopes(ap ApplierProvider, structType reflect.Type, structField reflec
 		} else if actualScope, ok := scopeAliases[scope]; ok {
 			scope = actualScope
 		} // else equals the matched value
+
+		if _, ok := appliers[scope]; ok {
+			return nil, gomerr.Configuration("multiple sections define for scope '" + scope + "'")
+		}
 
 		scopedDirective := match[2]
 		// TODO: integrate this w/ expressions logic rather than include here...
@@ -124,9 +129,9 @@ func (s scopeSelect) Apply(sv reflect.Value, fv reflect.Value, tc *ToolContext) 
 	return scopedApplier.Apply(sv, fv, tc)
 }
 
-// Composite checks for a composition directive (either '?' or '&') and if found will create a composed Applier from
-// those based on the specified semantic. If there isn't a composition directive, this returns nil for both Applier and
-// gomerr.Gomerr.
+// Composite checks for a composition directive (one of '?', '&' or '!') and if found creates a composed Applier from
+// the directive on either side based on the specified semantic. If there isn't a composition directive, this returns
+// nil for both Applier and gomerr.Gomerr.
 // TODO:p2 this should perhaps be a default intermediary similar to how the scope applier can be
 func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructField) (Applier, gomerr.Gomerr) {
 	if strings.HasPrefix(directive, "if(") && directive[len(directive)-1] == ')' {
@@ -135,7 +140,7 @@ func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructF
 		// Example: if($.Enabled,+,-) or if($IsAdmin,+,=*****)
 	}
 
-	tIndex := strings.IndexAny(directive, "?&")
+	tIndex := strings.IndexAny(directive, "?&!")
 	if tIndex == -1 {
 		return nil, nil
 	}
@@ -162,11 +167,14 @@ func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructF
 
 	// TODO:p0 special case "$_b64[encode_type]&[output location]"
 
-	var testFn func(reflect.Value) bool
-	if directive[tIndex] == '?' {
-		testFn = func(value reflect.Value) bool { return !value.IsZero() }
-	} else { // '&'
-		testFn = func(reflect.Value) bool { return false }
+	var testFn func(fv reflect.Value, ge gomerr.Gomerr) (skipRightSide bool)
+	switch directive[tIndex] {
+	case '?':
+		testFn = func(value reflect.Value, _ gomerr.Gomerr) bool { return !value.IsZero() }
+	case '&':
+		testFn = func(reflect.Value, gomerr.Gomerr) bool { return false }
+	case '!':
+		testFn = func(_ reflect.Value, ge gomerr.Gomerr) bool { return ge != nil }
 	}
 
 	return leftTestRightApplier{sf.Name, left, testFn, right}, nil
@@ -178,7 +186,7 @@ func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructF
 
 type ifThenElseApplier struct {
 	name   string
-	test   func(value reflect.Value) bool
+	test   func(reflect.Value, gomerr.Gomerr) bool
 	then   Applier
 	orElse Applier
 }
@@ -189,7 +197,7 @@ type ifThenElseApplier struct {
 type leftTestRightApplier struct {
 	name  string
 	left  Applier
-	test  func(value reflect.Value) bool
+	test  func(reflect.Value, gomerr.Gomerr) bool
 	right Applier
 }
 
@@ -200,11 +208,7 @@ func (a leftTestRightApplier) Apply(sv reflect.Value, fv reflect.Value, tc *Tool
 		leftGe = a.left.Apply(sv, fv, tc)
 	}
 
-	if leftGe == nil && a.test(fv) {
-		return nil
-	}
-
-	if a.right == nil {
+	if a.test(fv, leftGe) || a.right == nil {
 		return leftGe
 	}
 

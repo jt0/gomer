@@ -2,13 +2,16 @@ package dynamodb
 
 import (
 	"fmt"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"reflect"
 	"sort"
+	"strings"
+
+	"github.com/aws/aws-sdk-go/service/dynamodb"
 
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/data/dataerr"
+	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 )
 
@@ -17,6 +20,7 @@ type index struct {
 	pk                  *keyAttribute
 	sk                  *keyAttribute
 	canReadConsistently bool
+	valueSeparatorChar  byte
 	queryWildcardChar   byte
 	// projects bool
 }
@@ -30,13 +34,15 @@ type keyAttribute struct {
 type keyField struct {
 	name      string
 	preferred bool
-	ascending bool
+	ascending *bool
+	//filter       string
+	//filterFields []string
 }
 
 type candidate struct {
 	index     *index
 	preferred bool
-	ascending bool
+	ascending *bool
 	skLength  int
 	skMissing int
 }
@@ -85,13 +91,13 @@ func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
 // indexFor attempts to find the best index match for the provided queryable. The definition of "best" is the index
 // that has the greatest number of matching attributes present in the query.
 //
-// If the data.Queryable implements ConsistencyTyper and it states that the query must be strongly consistent, GSIs
+// If the data.Listable implements ConsistencyTyper and it states that the query must be strongly consistent, GSIs
 // will be excluded from consideration. On success, the function returns the matching index (if one), and a boolean
 // to include as the 'consistent' value for the ddb query. Possible errors:
 //
 //	gomerr.Missing:
 //	    if there is no matching index for the query
-func indexFor(t *table, q data.Queryable) (index *index, ascending bool, consistent *bool, ge gomerr.Gomerr) {
+func indexFor(t *table, q data.Listable) (index *index, ascending *bool, consistent *bool, ge gomerr.Gomerr) {
 	var consistencyType ConsistencyType
 	if c, ok := q.(ConsistencyTyper); ok {
 		consistencyType = c.ConsistencyType()
@@ -134,7 +140,7 @@ func indexFor(t *table, q data.Queryable) (index *index, ascending bool, consist
 		for _, idx := range t.indexes {
 			available[idx.friendlyName()] = idx
 		}
-		return nil, false, nil, dataerr.NoIndexMatch(available, q)
+		return nil, nil, nil, dataerr.NoIndexMatch(available, q)
 	case 1:
 		// do nothing. candidates[0] returned below
 	default:
@@ -185,26 +191,59 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 		}
 	}
 
-	c := &candidate{index: i}
+	c := &candidate{index: i, ascending: &trueVal} // default to 'true'
 
 	// Needs more work to handle multi-attribute cases such as "between"
 	if i.sk != nil {
 		for _, kf := range i.sk.keyFieldsByPersistable[ptName] {
 			c.preferred = kf.preferred
-			c.ascending = kf.ascending
+			if c.ascending != nil && *c.ascending { // true only until the first non-'true' value (if any)
+				c.ascending = kf.ascending
+			}
 
 			if kf.name[:1] == "'" {
 				continue
 			}
 
 			fv := qv.FieldByName(kf.name)
-			if !fv.IsValid() {
-				return nil
-			} else if fv.IsZero() {
+			if !fv.IsValid() || fv.IsZero() {
 				c.skMissing++
 			} else if c.skMissing > 0 { // Cannot have gaps in the middle of the sort key
 				return nil
 			}
+
+			//if kf.filter != "" {
+			//	var remaining string
+			//	if kf.filterFields == nil {
+			//		openParenIndex := strings.IndexByte(kf.filter, '(')
+			//		kf.filter, remaining = kf.filter[:openParenIndex], kf.filter[openParenIndex+1:len(kf.filter)-1]
+			//	}
+			//	switch kf.filter {
+			//	case "between":
+			//		var valid bool
+			//		for _, qf := range strings.Split(remaining, ":") {
+			//			kf.filterFields = append(kf.filterFields, qf)
+			//			if qfv := qv.FieldByName(qf); !qfv.IsValid() || qfv.IsZero() {
+			//				valid = true // just need one valid for it to be valid
+			//			}
+			//		}
+			//		if !valid {
+			//			c.skMissing++
+			//		} else if c.skMissing > 0 {
+			//			return nil
+			//		}
+			//	default:
+			//		// TODO: switch println to log statement
+			//		println("unhandled filter:", kf.filter)
+			//	}
+			//} else {
+			//	fv := qv.FieldByName(kf.name)
+			//	if !fv.IsValid() || fv.IsZero() {
+			//		c.skMissing++
+			//	} else if c.skMissing > 0 { // Cannot have gaps in the middle of the sort key
+			//		return nil
+			//	}
+			//}
 		}
 
 		c.skLength = len(i.sk.keyFieldsByPersistable[ptName])
@@ -213,14 +252,14 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 	return c
 }
 
-func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p data.Persistable, valueSeparator byte, mustBeSet bool) gomerr.Gomerr {
+func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p data.Persistable, mustBeSet bool) gomerr.Gomerr {
 	var av *dynamodb.AttributeValue
 
 	// TODO: any reason Elem() would be incorrect?
 	pElem := reflect.ValueOf(p).Elem()
 
 	if _, present := avm[i.pk.name]; !present {
-		if av = i.pk.attributeValue(pElem, p.TypeName(), valueSeparator, 0); av != nil {
+		if av = i.pk.attributeValue(pElem, p.TypeName(), i.valueSeparatorChar, 0); av != nil {
 			avm[i.pk.name] = av
 		} else if mustBeSet {
 			return dataerr.KeyValueNotFound(i.pk.name, keyFieldNames(i.pk.keyFieldsByPersistable[p.TypeName()]), p)
@@ -229,7 +268,7 @@ func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p dat
 
 	if i.sk != nil {
 		if _, present := avm[i.sk.name]; !present {
-			if av = i.sk.attributeValue(pElem, p.TypeName(), valueSeparator, 0); av != nil {
+			if av = i.sk.attributeValue(pElem, p.TypeName(), i.valueSeparatorChar, 0); av != nil {
 				avm[i.sk.name] = av
 			} else if mustBeSet {
 				return dataerr.KeyValueNotFound(i.sk.name, keyFieldNames(i.sk.keyFieldsByPersistable[p.TypeName()]), p)
@@ -257,6 +296,10 @@ func (i *index) keyAttributes() []*keyAttribute {
 }
 
 func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeName string, valueSeparator, queryWildcardChar byte) *dynamodb.AttributeValue {
+	//kv := k.buildKeyValue(elemValue, persistableTypeName, string(valueSeparator), queryWildcardChar)
+	//if kv == nil {
+	//	return nil
+	//}
 	value := k.buildKeyValue(elemValue, persistableTypeName, valueSeparator, queryWildcardChar)
 	if value == "" {
 		return nil
@@ -272,9 +315,52 @@ func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeNa
 	default:
 		// Log that safeAttributeType() missed something. received type: k.AttributeType
 	}
-
 	return nil
 }
+
+//// GA#2023-06-12#us-east-1
+//// GA#2023-09-30#us-east-1
+//// _#_#_: (a, , c) => a##c; (a, b, ) => a#b#; (a, , ) => a##
+//type keyValue struct {
+//	filter string
+//	values []string
+//}
+//
+//func (kv *keyValue) get0() string {
+//	return kv.values[0]
+//}
+//
+//func (kv *keyValue) addToAll(s string) {
+//	for i, _ := range kv.values {
+//		kv.values[i] += s
+//	}
+//}
+//
+//func (kv *keyValue) addNew(s string) {
+//	kv.values = append(kv.values, s)
+//}
+
+//func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeName string, separator string, queryWildcardChar byte) *keyValue {
+//	kv := &keyValue{values: []string{}}
+//	separators := separator
+//	for _, kf := range k.keyFieldsByPersistable[persistableTypeName] {
+//		if kf.filter != "" {
+//			cur := kv.get0()
+//			for _, ff := range kf.filterFields {
+//				kv.addNew(cur + fieldValue(ff, elemValue))
+//			}
+//		} else if fv := fieldValue(kf.name, elemValue); fv != "" {
+//			kv.addToAll(separators + fv) // add collected separators when a fieldValue is not ""
+//			separators = ""
+//		} else {
+//			separators += separator
+//		}
+//	}
+//	if len(keyValue) > 0 && queryWildcardChar != 0 && keyValue[len(keyValue)-1] != queryWildcardChar {
+//		kv.addToAll(separators)
+//	}
+//	return kv
+//}
 
 func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeName string, valueSeparator, queryWildcardChar byte) string {
 	// sv := reflect.ValueOf(s).Elem()
@@ -313,4 +399,42 @@ func fieldValue(fieldName string, sv reflect.Value) string {
 			return ""
 		}
 	}
+}
+
+func (i *index) populateKeyFields(p data.Persistable, avm map[string]*dynamodb.AttributeValue) gomerr.Gomerr {
+	pElem := reflect.ValueOf(p).Elem()
+
+	keyFields := i.pk.keyFieldsByPersistable[p.TypeName()]
+	keyParts := strings.Split(avm[i.pk.name].String(), string([]byte{i.valueSeparatorChar}))
+	if ge := fillKeyFields(pElem, keyFields, keyParts); ge != nil {
+		return ge.AddAttribute("PK", i.pk.name)
+	}
+
+	if i.sk != nil {
+		keyFields = i.sk.keyFieldsByPersistable[p.TypeName()]
+		keyParts = strings.Split(avm[i.sk.name].String(), string([]byte{i.valueSeparatorChar}))
+		if len(keyFields) >= len(keyParts) {
+			// log.info - only possible for SK
+		}
+		if ge := fillKeyFields(pElem, keyFields, keyParts); ge != nil {
+			return ge.AddAttribute("SK", i.sk.name)
+		}
+	}
+
+	return nil
+}
+
+func fillKeyFields(sv reflect.Value, keyFields []*keyField, keyParts []string) gomerr.Gomerr {
+	for i, kf := range keyFields {
+		pf := sv.FieldByName(kf.name)
+		if !pf.IsZero() {
+			continue
+		}
+
+		if ge := flect.SetValue(pf, keyParts[i]); ge != nil {
+			return ge.AddAttributes("KeyField", kf.name)
+		}
+	}
+
+	return nil
 }

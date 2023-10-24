@@ -1,6 +1,6 @@
 package data
 
-type Queryable interface {
+type Listable interface {
 	TypeNames() []string
 	TypeOf(interface{}) string
 	Items() []interface{}
@@ -8,19 +8,24 @@ type Queryable interface {
 	NextPageToken() *string
 	SetNextPageToken(*string)
 	MaximumPageSize() int
+	Ascending() *bool
 }
 
-type QueryTypes uint16
+type QueryTyper interface {
+	QueryType() QueryType
+}
+
+type QueryType uint16
 
 const (
-	EQ QueryTypes = iota + 1
-	// NEQ
-	// GTE
-	// GT
-	// LTE
-	// LT
-	// BETWEEN
-	// CONTAINS
+	EQ QueryType = iota + 1
+	//NEQ
+	GTE
+	GT
+	LTE
+	LT
+	//BETWEEN
+	//CONTAINS
 )
 
 var MaxResultsDefault = 100
@@ -52,4 +57,8 @@ func (b *BaseQueryable) MaximumPageSize() int {
 		return MaxResultsDefault
 	}
 	return *b.maxResults
+}
+
+func (b *BaseQueryable) Ascending() *bool {
+	return nil
 }

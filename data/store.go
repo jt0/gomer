@@ -9,10 +9,10 @@ type Store interface {
 	Read(p Persistable) gomerr.Gomerr
 	Update(p Persistable, update Persistable) gomerr.Gomerr
 	Delete(p Persistable) gomerr.Gomerr
-	Query(q Queryable) gomerr.Gomerr
+	List(q Listable) gomerr.Gomerr
 }
 
 type Persistable interface {
 	TypeName() string
-	NewQueryable() Queryable
+	NewListable() Listable
 }

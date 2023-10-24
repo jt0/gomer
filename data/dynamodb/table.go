@@ -66,7 +66,7 @@ type ConsistencyTyper interface {
 	SetConsistencyType(consistencyType ConsistencyType)
 }
 
-type ItemResolver func(interface{}) (interface{}, gomerr.Gomerr)
+type ItemResolver func(*index, any) (any, gomerr.Gomerr)
 
 func Store(tableName string, config *Configuration /* resolver data.ItemResolver,*/, persistables ...data.Persistable) (store data.Store, ge gomerr.Gomerr) {
 	t := &table{
@@ -145,6 +145,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 		lsi := &index{
 			name:                lsid.IndexName,
 			canReadConsistently: true,
+			valueSeparatorChar:  t.valueSeparatorChar,
 			queryWildcardChar:   t.queryWildcardChar,
 		}
 
@@ -161,6 +162,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 		gsi := &index{
 			name:                gsid.IndexName,
 			canReadConsistently: false,
+			valueSeparatorChar:  t.valueSeparatorChar,
 			queryWildcardChar:   t.queryWildcardChar,
 		}
 
@@ -195,7 +197,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 						}
 					}
 				} else {
-					attribute.keyFieldsByPersistable[unqualifiedPersistableName] = []*keyField{{name: pt.dbNameToFieldName(attribute.name), ascending: true}}
+					attribute.keyFieldsByPersistable[unqualifiedPersistableName] = []*keyField{{name: pt.dbNameToFieldName(attribute.name), ascending: &trueVal}}
 				}
 			}
 		}
@@ -305,8 +307,8 @@ func (t *table) put(p data.Persistable, fieldConstraints map[string]constraint.C
 
 	t.persistableTypes[p.TypeName()].convertFieldNamesToDbNames(&av)
 
-	for _, index := range t.indexes {
-		_ = index.populateKeyValues(av, p, t.valueSeparatorChar, false)
+	for _, idx := range t.indexes {
+		_ = idx.populateKeyValues(av, p, false)
 	}
 
 	// TODO: here we could compare the current av map w/ one we stashed into the object somewhere
@@ -327,6 +329,7 @@ func (t *table) put(p data.Persistable, fieldConstraints map[string]constraint.C
 		TableName:           t.tableName,
 		ConditionExpression: uniqueIdConditionExpression,
 	}
+
 	_, err = t.ddb.PutItem(input) // TODO:p3 look at result data to track capacity or other info?
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
@@ -358,7 +361,7 @@ func (t *table) Read(p data.Persistable) (ge gomerr.Gomerr) {
 	}()
 
 	key := make(map[string]*dynamodb.AttributeValue, 2)
-	ge = t.populateKeyValues(key, p, t.valueSeparatorChar, true)
+	ge = t.populateKeyValues(key, p, true)
 	if ge != nil {
 		return ge
 	}
@@ -391,6 +394,11 @@ func (t *table) Read(p data.Persistable) (ge gomerr.Gomerr) {
 		return gomerr.Unmarshal(p.TypeName(), output.Item, p).Wrap(err)
 	}
 
+	ge = t.populateKeyFields(p, output.Item)
+	if ge != nil {
+		return ge
+	}
+
 	return nil
 }
 
@@ -404,7 +412,7 @@ func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
 	// TODO:p2 support a soft-delete option
 
 	key := make(map[string]*dynamodb.AttributeValue, 2)
-	ge = t.populateKeyValues(key, p, t.valueSeparatorChar, true)
+	ge = t.populateKeyValues(key, p, true)
 	if ge != nil {
 		return ge
 	}
@@ -440,15 +448,16 @@ func (t *table) Delete(p data.Persistable) (ge gomerr.Gomerr) {
 	return nil
 }
 
-func (t *table) Query(q data.Queryable) (ge gomerr.Gomerr) {
+func (t *table) List(q data.Listable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = dataerr.Store("Query", q).Wrap(ge)
+			ge = dataerr.Store("List", q).Wrap(ge)
 		}
 	}()
 
+	var idx *index
 	var input *dynamodb.QueryInput
-	input, ge = t.buildQueryInput(q, q.TypeNames()[0]) // TODO:p2 Fix when query supports multiple types
+	idx, input, ge = t.buildQueryInput(q, q.TypeNames()[0]) // TODO:p2 Fix when query supports multiple types
 	if ge != nil {
 		return ge
 	}
@@ -464,9 +473,9 @@ func (t *table) Query(q data.Queryable) (ge gomerr.Gomerr) {
 		return gomerr.Internal("Unable to generate nextToken").Wrap(ge)
 	}
 
-	items := make([]interface{}, len(output.Items))
+	items := make([]any, len(output.Items))
 	for i, item := range output.Items {
-		if items[i], ge = t.persistableTypes[q.TypeOf(item)].resolver(item); ge != nil {
+		if items[i], ge = t.persistableTypes[q.TypeOf(item)].resolver(idx, item); ge != nil {
 			return ge
 		}
 	}
@@ -484,7 +493,7 @@ func (t *table) isFieldTupleUnique(fields []string) func(pi interface{}) gomerr.
 			return gomerr.Unprocessable("Test value is not a data.Persistable", pi)
 		}
 
-		q := p.NewQueryable()
+		q := p.NewListable()
 		if ct, ok := q.(ConsistencyTyper); ok {
 			ct.SetConsistencyType(Preferred)
 		}
@@ -495,7 +504,7 @@ func (t *table) isFieldTupleUnique(fields []string) func(pi interface{}) gomerr.
 			qv.FieldByName(field).Set(pv.FieldByName(field))
 		}
 
-		input, ge := t.buildQueryInput(q, p.TypeName())
+		_, input, ge := t.buildQueryInput(q, p.TypeName())
 		if ge != nil {
 			return ge
 		}
@@ -509,7 +518,7 @@ func (t *table) isFieldTupleUnique(fields []string) func(pi interface{}) gomerr.
 			}
 
 			if len(output.Items) > 0 {
-				newP := reflect.New(pv.Type()).Elem()
+				newP := reflect.New(pv.Type()).Interface()
 				err := dynamodbattribute.UnmarshalMap(output.Items[0], newP)
 				return constraint.NotSatisfied(pi).AddAttribute("Existing", newP).Wrap(err)
 			}
@@ -531,10 +540,10 @@ type UniqueConstraint struct {
 
 // buildQueryInput Builds the DynamoDB QueryInput types based on the provided queryable. See indexFor and
 // nextTokenizer.untokenize for possible error types.
-func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*dynamodb.QueryInput, gomerr.Gomerr) {
+func (t *table) buildQueryInput(q data.Listable, persistableTypeName string) (*index, *dynamodb.QueryInput, gomerr.Gomerr) {
 	idx, ascending, consistent, ge := indexFor(t, q)
 	if ge != nil {
-		return nil, ge
+		return nil, nil, ge
 	}
 
 	expressionAttributeNames := make(map[string]*string, 2)
@@ -554,16 +563,36 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 				*eav.S = (*eav.S)[:len(*eav.S)-1] // remove the last char
 				keyConditionExpression += " AND begins_with(" + safeName(idx.sk.name, expressionAttributeNames) + ",:sk)"
 			} else {
-				keyConditionExpression += " AND " + safeName(idx.sk.name, expressionAttributeNames) + "=:sk"
+				if qt, ok := q.(data.QueryTyper); ok {
+					switch qt.QueryType() {
+					case data.GT:
+						keyConditionExpression += " AND " + safeName(idx.sk.name, expressionAttributeNames) + ">:sk"
+					case data.GTE:
+						keyConditionExpression += " AND " + safeName(idx.sk.name, expressionAttributeNames) + ">=:sk"
+					case data.LT:
+						keyConditionExpression += " AND " + safeName(idx.sk.name, expressionAttributeNames) + "<:sk"
+					case data.LTE:
+						keyConditionExpression += " AND " + safeName(idx.sk.name, expressionAttributeNames) + "<=:sk"
+					case data.EQ:
+						fallthrough
+					default:
+						keyConditionExpression += " AND " + safeName(idx.sk.name, expressionAttributeNames) + "=:sk"
+					}
+				} else {
+					keyConditionExpression += " AND " + safeName(idx.sk.name, expressionAttributeNames) + "=:sk"
+				}
 			}
 			expressionAttributeValues[":sk"] = eav
 		}
 	}
 
+	var fe string
+	if fe, ge = t.filterExpression(q, idx, persistableTypeName, expressionAttributeNames, expressionAttributeValues); ge != nil {
+		return nil, nil, ge
+	}
+
 	var filterExpression *string
-	if fe, ge := t.filterExpression(q, idx, persistableTypeName, expressionAttributeNames, expressionAttributeValues); ge != nil {
-		return nil, ge
-	} else if fe != "" {
+	if fe != "" {
 		filterExpression = &fe
 	}
 
@@ -584,7 +613,11 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 
 	exclusiveStartKey, ge := t.nextTokenizer.untokenize(q)
 	if ge != nil {
-		return nil, ge
+		return nil, nil, ge
+	}
+
+	if q.Ascending() != nil {
+		ascending = q.Ascending()
 	}
 
 	input := &dynamodb.QueryInput{
@@ -597,14 +630,14 @@ func (t *table) buildQueryInput(q data.Queryable, persistableTypeName string) (*
 		FilterExpression:          filterExpression,
 		ExclusiveStartKey:         exclusiveStartKey,
 		Limit:                     t.limit(q.MaximumPageSize()),
+		ScanIndexForward:          ascending,
 		// ProjectionExpression:      projectionExpressionPtr,
-		ScanIndexForward: &ascending,
 	}
 
-	return input, nil
+	return idx, input, nil
 }
 
-func (t *table) filterExpression(q data.Queryable, idx *index, persistableTypeName string, expressionAttributeNames map[string]*string, expressionAttributeValues map[string]*dynamodb.AttributeValue) (string, gomerr.Gomerr) {
+func (t *table) filterExpression(q data.Listable, idx *index, persistableTypeName string, expressionAttributeNames map[string]*string, expressionAttributeValues map[string]*dynamodb.AttributeValue) (string, gomerr.Gomerr) {
 	qv, ge := flect.IndirectValue(q, false)
 	if ge != nil {
 		return "", ge

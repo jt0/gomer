@@ -7,7 +7,7 @@ import (
 
 type Collection interface {
 	Resource
-	data.Queryable
+	data.Listable
 }
 
 type BaseCollection struct {

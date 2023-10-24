@@ -128,7 +128,10 @@ func process(st reflect.Type, tools ...*Tool) (*preparedStruct, []gomerr.Gomerr)
 			fields:   make([]*field, 0, st.NumField()),
 			applied:  make(map[string]bool, len(toolsForStruct)),
 		}
+		preparedStructs[ps.typeName] = ps
 	}
+
+	// TODO: descend into non-exported if tag value provided?
 
 	errors := make([]gomerr.Gomerr, 0)
 	for i := 0; i < st.NumField(); i++ {
@@ -171,10 +174,6 @@ func process(st reflect.Type, tools ...*Tool) (*preparedStruct, []gomerr.Gomerr)
 			ps.applied[tool.Id()] = true
 		}
 		ps.addAppliers(sf.Name, appliers)
-	}
-
-	if len(errors) == 0 {
-		preparedStructs[ps.typeName] = ps
 	}
 
 	return ps, errors
@@ -225,11 +224,22 @@ func (ps *preparedStruct) applyTools(sv reflect.Value, tc *ToolContext, tools ..
 			}
 			fv := sv.FieldByName(f.name) // fv should always be valid
 			if ge := applier.Apply(sv, fv, tc); ge != nil {
-				if fieldAttr, exists := ge.AttributeLookup("Field"); exists {
-					ge.ReplaceAttribute("Field", f.name+"."+fieldAttr.(string))
+				var fieldName string
+				if keyAttr, exists := ge.AttributeLookup("Key"); !exists {
+					fieldName = f.name
+				} else if key := keyAttr.(string); len(key) > 0 {
+					fieldName = f.name + "." + key
+					_ = ge.DeleteAttribute("Key")
 				} else {
-					ge.AddAttribute("Field", f.name)
+					fieldName = f.name
 				}
+
+				if fieldAttr, exists := ge.AttributeLookup("Field"); exists {
+					_ = ge.ReplaceAttribute("Field", fieldName+"."+fieldAttr.(string))
+				} else {
+					_ = ge.AddAttribute("Field", fieldName)
+				}
+
 				errors = append(errors, ge)
 			}
 		}

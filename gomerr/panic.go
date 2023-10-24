@@ -8,3 +8,7 @@ type PanicError struct {
 func Panic(recover interface{}) *PanicError {
 	return Build(new(PanicError), recover).(*PanicError)
 }
+
+//func (pe *PanicError) fillStack(stackSkip int) []string {
+//	stack := debug.Stack()
+//}

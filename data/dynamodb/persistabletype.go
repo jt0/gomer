@@ -38,11 +38,11 @@ func newPersistableType(table *table, persistableName string, pType reflect.Type
 	return pt, nil
 }
 
-func resolver(pt reflect.Type) func(interface{}) (interface{}, gomerr.Gomerr) {
-	return func(i interface{}) (interface{}, gomerr.Gomerr) {
-		m, ok := i.(map[string]*dynamodb.AttributeValue)
+func resolver(pt reflect.Type) func(*index, any) (any, gomerr.Gomerr) {
+	return func(idx *index, item any) (any, gomerr.Gomerr) {
+		m, ok := item.(map[string]*dynamodb.AttributeValue)
 		if !ok {
-			return nil, gomerr.Internal("DynamoDB Item is not a map[string]*dynamodb.AttributeValue").AddAttribute("Actual", i)
+			return nil, gomerr.Internal("item is not a map[string]*dynamodb.AttributeValue").AddAttribute("Actual", item)
 		}
 
 		resolved := reflect.New(pt).Interface().(data.Persistable)
@@ -50,6 +50,11 @@ func resolver(pt reflect.Type) func(interface{}) (interface{}, gomerr.Gomerr) {
 		err := dynamodbattribute.UnmarshalMap(m, resolved)
 		if err != nil {
 			return nil, gomerr.Unmarshal(resolved.TypeName(), m, resolved).Wrap(err)
+		}
+
+		ge := idx.populateKeyFields(resolved, m)
+		if ge != nil {
+			return nil, ge
 		}
 
 		return resolved, nil
@@ -112,7 +117,7 @@ func (pt *persistableType) processConstraintsTag(fieldName string, tag string, t
 	return errors
 }
 
-var ddbKeyStatementRegexp = regexp.MustCompile(`(?:(!)?(\+|-)?([\w-.]+)?:)?(pk|sk)(?:.(\d))?(?:=('\w+')(\+)?)?`)
+var ddbKeyStatementRegexp = regexp.MustCompile(`^(?:(!)?(\+|-|\?)?([\w-.]+)?:)?(pk|sk)(?:.(\d))?(?:=('\w+')|\[(.+)])?$`)
 
 func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes map[string]*index, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	if tag == "" {
@@ -142,13 +147,30 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 			partIndex, _ = strconv.Atoi(groups[5])
 		}
 
-		if groups[6] != "" { // If non-empty, this field has a static value. Replace with that value.
-			fieldName = groups[6]
+		var kfName string
+		if groups[6] == "" {
+			kfName = fieldName
+		} else {
+			// If non-empty, this field has a static value. Replace with that value.
+			kfName = groups[6]
+		}
+
+		if groups[7] != "" {
+			// TODO: validate
 		}
 
 		// TODO: Determine scenarios where skLength/skMissing don't map to desired behavior. May need preferred
 		//       priority levels to compensate
-		kf := keyField{name: fieldName, preferred: groups[1] == "!", ascending: groups[2] != "-"}
+		var asc *bool
+		switch groups[2] {
+		case "-":
+			asc = &falseVal
+		case "?":
+			asc = nil
+		default:
+			asc = &trueVal
+		}
+		kf := keyField{name: kfName, preferred: groups[1] == "!", ascending: asc} // , filter: groups[7]}
 		key.keyFieldsByPersistable[pt.name] = insertAtIndex(key.keyFieldsByPersistable[pt.name], &kf, partIndex)
 	}
 

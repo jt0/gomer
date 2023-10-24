@@ -36,7 +36,7 @@ func (i BaseInstance) TypeName() string {
 	return i.md.instanceName
 }
 
-func (i BaseInstance) NewQueryable() data.Queryable {
+func (i BaseInstance) NewListable() data.Listable {
 	ct := i.metadata().collectionType
 	if ct == nil {
 		return nil

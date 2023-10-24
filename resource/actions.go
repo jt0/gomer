@@ -317,7 +317,7 @@ func (listAction) Pre(r Resource) gomerr.Gomerr {
 }
 
 func (listAction) Do(r Resource) gomerr.Gomerr {
-	if ge := r.metadata().dataStore.Query(r.(Listable)); ge != nil {
+	if ge := r.metadata().dataStore.List(r.(Listable)); ge != nil {
 		return ge
 	}
 

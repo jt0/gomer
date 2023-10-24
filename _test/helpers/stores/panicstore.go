@@ -25,6 +25,6 @@ func (panicStore) Delete(data.Persistable) gomerr.Gomerr {
 	panic("As promised")
 }
 
-func (panicStore) Query(data.Queryable) gomerr.Gomerr {
+func (panicStore) List(data.Listable) gomerr.Gomerr {
 	panic("As promised")
 }

@@ -8,9 +8,9 @@ import (
 type NoIndexMatchError struct {
 	gomerr.Gomerr
 	AvailableIndexes map[string]interface{}
-	Queryable        data.Queryable `gomerr:"include_type"`
+	Listable         data.Listable `gomerr:"include_type"`
 }
 
-func NoIndexMatch(availableIndexes map[string]interface{}, queryable data.Queryable) *NoIndexMatchError {
-	return gomerr.Build(new(NoIndexMatchError), availableIndexes, queryable).(*NoIndexMatchError)
+func NoIndexMatch(availableIndexes map[string]interface{}, listable data.Listable) *NoIndexMatchError {
+	return gomerr.Build(new(NoIndexMatchError), availableIndexes, listable).(*NoIndexMatchError)
 }

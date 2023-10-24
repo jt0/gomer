@@ -44,7 +44,7 @@ var formatVersionExpirations = []time.Time{
 var formatVersion = uint(len(formatVersionExpirations))
 
 // TODO: add queryable details into token
-func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*dynamodb.AttributeValue) (*string, gomerr.Gomerr) {
+func (t *nextTokenizer) tokenize(q data.Listable, lastEvaluatedKey map[string]*dynamodb.AttributeValue) (*string, gomerr.Gomerr) {
 	if lastEvaluatedKey == nil {
 		return nil, nil
 	}
@@ -73,16 +73,16 @@ func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*
 
 // untokenize will pull the NextPageToken from the queryable and (if there is one) decode the value. Possible errors:
 //
-//  gomerr.BadValueError's Type:
-//      Expired:
-//      	If the token was generated more than 24 hours ago (a hard-coded duration)
-//          If the token is using an old format version
-//      Malformed:
-//          If the token is not Base64-encoded
-//          If the token fails decryption
+//	gomerr.BadValueError's Type:
+//	    Expired:
+//	    	If the token was generated more than 24 hours ago (a hard-coded duration)
+//	        If the token is using an old format version
+//	    Malformed:
+//	        If the token is not Base64-encoded
+//	        If the token fails decryption
 //
 // See the crypto.kmsDataKeyDecrypter Decrypt operation for additional errors types.
-func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.AttributeValue, gomerr.Gomerr) {
+func (t *nextTokenizer) untokenize(q data.Listable) (map[string]*dynamodb.AttributeValue, gomerr.Gomerr) {
 	if q.NextPageToken() == nil {
 		return nil, nil
 	}

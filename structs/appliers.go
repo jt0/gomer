@@ -1,6 +1,7 @@
 package structs
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -42,6 +43,12 @@ func ValueFromStruct(sv reflect.Value, fv reflect.Value, source string) (interfa
 	if source[len(source)-1] == ')' {
 		m := sv.MethodByName(source[0:strings.IndexByte(source, '(')])
 		if !m.IsValid() {
+			st := sv.Type()
+			fmt.Printf("%s\n", st.Name())
+			for i := 0; i < st.NumMethod(); i++ {
+				mt := st.Method(i)
+				fmt.Printf("%s: %s\n", mt.Name, mt.PkgPath)
+			}
 			return nil, gomerr.Configuration("Source method not found").AddAttribute("Source", source)
 		}
 
