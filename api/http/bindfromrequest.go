@@ -116,7 +116,7 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 // body          -> Body of the request
 type requestExtension struct{}
 
-func (requestExtension) Applier(structType reflect.Type, structField reflect.StructField, directive string) (structs.Applier, gomerr.Gomerr) {
+func (requestExtension) Applier(structType reflect.Type, structField reflect.StructField, directive string, _ string) (structs.Applier, gomerr.Gomerr) {
 	if strings.HasPrefix(directive, requestConfig.PathBindingPrefix) {
 		index, err := strconv.Atoi(directive[len(requestConfig.PathBindingPrefix):])
 		if err != nil {
