@@ -28,7 +28,7 @@ func NewIdTool(dp structs.DirectiveProvider) *structs.Tool {
 
 type idTool struct{}
 
-func (idTool) Applier(st reflect.Type, sf reflect.StructField, directive string) (structs.Applier, gomerr.Gomerr) {
+func (idTool) Applier(st reflect.Type, sf reflect.StructField, directive string, _ string) (structs.Applier, gomerr.Gomerr) {
 	if directive == "" {
 		return nil, nil
 	}

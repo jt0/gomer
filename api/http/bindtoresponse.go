@@ -107,7 +107,7 @@ func BindToResponse(result reflect.Value, header http.Header, scope string, acce
 // body          -> Body for the response
 type bindToResponseExtension struct{}
 
-func (bindToResponseExtension) Applier(structType reflect.Type, structField reflect.StructField, directive string) (structs.Applier, gomerr.Gomerr) {
+func (bindToResponseExtension) Applier(structType reflect.Type, structField reflect.StructField, directive string, _ string) (structs.Applier, gomerr.Gomerr) {
 	if strings.HasPrefix(directive, responseConfig.HeaderBindingPrefix) {
 		headerName := directive[len(responseConfig.HeaderBindingPrefix):]
 		if headerName == responseConfig.IncludeField {

@@ -39,7 +39,7 @@ type inApplierProvider struct {
 	tool *structs.Tool
 }
 
-func (ap inApplierProvider) Applier(st reflect.Type, sf reflect.StructField, directive string) (structs.Applier, gomerr.Gomerr) {
+func (ap inApplierProvider) Applier(st reflect.Type, sf reflect.StructField, directive string, scope string) (structs.Applier, gomerr.Gomerr) {
 	if directive == skipField || (directive == "" && ap.emptyDirective == skipField) {
 		return nil, nil
 	}
@@ -57,7 +57,7 @@ func (ap inApplierProvider) Applier(st reflect.Type, sf reflect.StructField, dir
 	}
 
 	if ap.extension != nil {
-		if applier, ge := ap.extension.Applier(st, sf, directive); applier != nil || ge != nil {
+		if applier, ge := ap.extension.Applier(st, sf, directive, scope); applier != nil || ge != nil {
 			return applier, ge
 		}
 	}

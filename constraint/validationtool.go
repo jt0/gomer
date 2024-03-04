@@ -33,7 +33,7 @@ type validationApplierProvider struct {
 	targetNamer TargetNamer
 }
 
-func (ap validationApplierProvider) Applier(sv reflect.Type, sf reflect.StructField, directive string) (structs.Applier, gomerr.Gomerr) {
+func (ap validationApplierProvider) Applier(sv reflect.Type, sf reflect.StructField, directive string, _ string) (structs.Applier, gomerr.Gomerr) {
 	if directive == "" {
 		return nil, nil
 	}

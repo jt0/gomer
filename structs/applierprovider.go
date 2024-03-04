@@ -85,7 +85,7 @@ func applyScopes(ap ApplierProvider, structType reflect.Type, structField reflec
 			scopedDirective = strings.ReplaceAll(scopedDirective, "\\:", ":")
 		}
 
-		applier, ge := ap.Applier(structType, structField, scopedDirective)
+		applier, ge := ap.Applier(structType, structField, scopedDirective, scope)
 		if ge != nil {
 			return nil, ge.AddAttribute("Scope", scope)
 		} else if applier != nil {

@@ -67,12 +67,16 @@ func (t *Tool) Type() string {
 	return t.toolType
 }
 
+func (t *Tool) ApplierProvider() ApplierProvider {
+	return t.applierProvider
+}
+
 func (t *Tool) applierFor(st reflect.Type, sf reflect.StructField) (Applier, gomerr.Gomerr) {
 	return applyScopes(t.applierProvider, st, sf, t.directiveProvider.Get(st, sf))
 }
 
 type ApplierProvider interface {
-	Applier(structType reflect.Type, structField reflect.StructField, directive string) (Applier, gomerr.Gomerr)
+	Applier(structType reflect.Type, structField reflect.StructField, directive string, scope string) (Applier, gomerr.Gomerr)
 }
 
 type DirectiveProvider interface {
