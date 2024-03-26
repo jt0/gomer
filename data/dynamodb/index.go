@@ -2,9 +2,10 @@ package dynamodb
 
 import (
 	"fmt"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"reflect"
 	"sort"
+
+	"github.com/aws/aws-sdk-go/service/dynamodb"
 
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
@@ -169,7 +170,7 @@ func compareCandidates(c1 *candidate, c2 *candidate) bool {
 func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 	// TODO: validate index sufficiently projects over request. if not, return nil
 	for _, kf := range i.pk.keyFieldsByPersistable[ptName] {
-		if kf.name[:1] == "'" {
+		if kf.name[0] == '\'' {
 			continue
 		}
 
@@ -197,10 +198,7 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 				continue
 			}
 
-			fv := qv.FieldByName(kf.name)
-			if !fv.IsValid() {
-				return nil
-			} else if fv.IsZero() {
+			if fv := qv.FieldByName(kf.name); !fv.IsValid() || fv.IsZero() {
 				c.skMissing++
 			} else if c.skMissing > 0 { // Cannot have gaps in the middle of the sort key
 				return nil

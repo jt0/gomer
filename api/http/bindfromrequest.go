@@ -182,6 +182,10 @@ func (b bindQueryParamApplier) Apply(_ reflect.Value, fv reflect.Value, tc *stru
 		return nil
 	}
 
+	if fv.Kind() == reflect.Bool && values[0] == "" {
+		values[0] = "t" // conventionally, treat a bare query param as 'true' if it maps to a boolean attribute
+	}
+
 	if ge := flect.SetValue(fv, values[0]); ge != nil {
 		return ge.AddAttributes("Parameter", b.name)
 	}

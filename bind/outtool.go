@@ -27,6 +27,7 @@ func Out(v interface{}, outTool *structs.Tool, optional ...*structs.ToolContext)
 // $<function>         -> Function-derived output value
 // ?<directive>        -> Applied iff field.IsZero(). Supports chaining (e.g. "?$foo?=last")
 // <directive>&<right> -> Will apply the left directive followed by the right (e.g. "=OutValue&header.X-My-Header)
+// <directive>!<right> -> Applies the left directive and, if it succeeds, the right
 // -                   -> Explicitly not included in the output
 //
 // Except for '-', each of the above can be combined with an ",omitempty" or ",includempty" qualifier that acts like
@@ -93,7 +94,7 @@ func (ap outApplierProvider) Applier(st reflect.Type, sf reflect.StructField, di
 		}
 	}
 
-	return outApplier{(*ap.toCase)(directive), omitIfEmpty, ap.tool}, nil
+	return outApplier{directive, omitIfEmpty, ap.tool}, nil
 }
 
 type outApplier struct {

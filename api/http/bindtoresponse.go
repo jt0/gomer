@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	bind2 "github.com/jt0/gomer/bind"
+	"github.com/jt0/gomer/bind"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/structs"
 )
@@ -16,7 +16,7 @@ import (
 // BindToResponseConfiguration
 // TODO: add config option mechanism...
 type BindToResponseConfiguration struct {
-	BindConfiguration bind2.Configuration
+	BindConfiguration bind.Configuration
 	BindDirectiveConfiguration
 
 	defaultContentType             string
@@ -29,7 +29,7 @@ type Marshal func(toMarshal interface{}) ([]byte, error)
 
 func NewBindToResponseConfiguration() BindToResponseConfiguration {
 	return BindToResponseConfiguration{
-		BindConfiguration:              bind2.NewConfiguration(),
+		BindConfiguration:              bind.NewConfiguration(),
 		BindDirectiveConfiguration:     NewBindDirectiveConfiguration(),
 		defaultContentType:             DefaultContentType,
 		perContentTypeMarshalFunctions: make(map[string]Marshal),
@@ -50,8 +50,8 @@ func init() {
 func SetBindToResponseConfiguration(responseConfiguration BindToResponseConfiguration) *structs.Tool {
 	if DefaultBindToResponseTool == nil || !reflect.DeepEqual(requestConfig, responseConfiguration) {
 		responseConfig = responseConfiguration
-		responseConfig.BindConfiguration = bind2.CopyConfigurationWithOptions(responseConfig.BindConfiguration, bind2.ExtendsWith(bindToResponseExtension{}))
-		DefaultBindToResponseTool = bind2.NewOutTool(responseConfig.BindConfiguration, structs.StructTagDirectiveProvider{"out"})
+		responseConfig.BindConfiguration = bind.CopyConfigurationWithOptions(responseConfig.BindConfiguration, bind.ExtendsWith(bindToResponseExtension{}))
+		DefaultBindToResponseTool = bind.NewOutTool(responseConfig.BindConfiguration, structs.StructTagDirectiveProvider{"out"})
 	}
 	return DefaultBindToResponseTool
 }
@@ -63,7 +63,7 @@ func BindToResponse(result reflect.Value, header http.Header, scope string, acce
 
 	outBodyBinding := hasOutBodyBinding[result.Type().String()]
 	if !outBodyBinding {
-		tc.Put(bind2.OutKey, make(map[string]interface{}))
+		tc.Put(bind.OutKey, make(map[string]interface{}))
 	}
 
 	if ge = structs.ApplyTools(result, tc, DefaultBindToResponseTool); ge != nil {
@@ -86,7 +86,7 @@ func BindToResponse(result reflect.Value, header http.Header, scope string, acce
 			contentType = DefaultContentType
 		}
 
-		outMap := tc.Get(bind2.OutKey).(map[string]interface{})
+		outMap := tc.Get(bind.OutKey).(map[string]interface{})
 		if len(outMap) == 0 && responseConfig.EmptyValueHandlingDefault == OmitEmpty {
 			return nil, ge
 		}

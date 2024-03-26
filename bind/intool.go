@@ -2,6 +2,7 @@ package bind
 
 import (
 	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/jt0/gomer/flect"
@@ -22,6 +23,7 @@ func In(data map[string]interface{}, v interface{}, inTool *structs.Tool, option
 // $<function>         -> Application-defined dynamic value
 // ?<directive>        -> Applied iff field.IsZero(). Supports chaining (e.g. "query.aName?header.A-Source?=aDefault")
 // <directive>&<right> -> Applies the left directive followed by the right (e.g. "input&$transform)
+// <directive>!<right> -> Applies the left directive and, if it succeeds, the right
 // -                   -> Explicitly not bound from any input
 func NewInTool(bindConfig Configuration, dp structs.DirectiveProvider) *structs.Tool {
 	var toolName = "bind.InTool"
@@ -62,7 +64,7 @@ func (ap inApplierProvider) Applier(st reflect.Type, sf reflect.StructField, dir
 		}
 	}
 
-	return inApplier{(*ap.toCase)(directive), ap.tool}, nil
+	return inApplier{directive, ap.tool}, nil
 }
 
 type inApplier struct {
@@ -141,10 +143,13 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc *structs.ToolCon
 		// Putting each element of the slice into a map so the a.Apply() call can fetch the data back out. Allows us
 		// to easily support complex slice elem types.
 		defer tc.Put(InKey, inData)
+		sliceSource := a.source
 		for i := 0; i < sliceLen; i++ {
+			index := strconv.Itoa(i)
+			a.source = index
 			tc.Put(InKey, map[string]interface{}{a.source: sliceData[i]})
 			if ge := a.Apply(sv, fv.Index(i), tc); ge != nil {
-				return ge.AddAttribute("Index", i)
+				return ge.AddAttribute("Source", sliceSource).AddAttribute("Key", index)
 			}
 		}
 	case reflect.Map:
@@ -152,11 +157,14 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc *structs.ToolCon
 
 		iter := reflect.ValueOf(value).MapRange() // Unsure why this needs to be reflected again...
 		defer tc.Put(InKey, inData)
+		mapSource := a.source
 		for iter.Next() {
+			key := iter.Key().Interface().(string)
+			a.source = key
 			tc.Put(InKey, map[string]interface{}{a.source: iter.Value().Interface()})
 			mapElem := reflect.New(fvt.Elem()).Elem()
 			if ge := a.Apply(sv, mapElem, tc); ge != nil {
-				return ge.AddAttribute("Key", iter.Key().String())
+				return ge.AddAttribute("Source", mapSource).AddAttribute("Key", key)
 			}
 			fv.SetMapIndex(iter.Key(), mapElem)
 		}
