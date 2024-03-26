@@ -263,10 +263,8 @@ func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeNa
 	switch k.attributeType {
 	case dynamodb.ScalarAttributeTypeS:
 		return &dynamodb.AttributeValue{S: &value}
-	//TODO:p3 add support for numeric values
-	//case dynamodb.ScalarAttributeTypeN:
-	//	n := fmt.Sprint(value)
-	//	return &dynamodb.AttributeValue{N: &n}
+	case dynamodb.ScalarAttributeTypeN:
+		return &dynamodb.AttributeValue{N: &value} //TODO:p3 add better support for numeric values
 	default:
 		// Log that safeAttributeType() missed something. received type: k.AttributeType
 	}
