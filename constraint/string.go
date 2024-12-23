@@ -52,7 +52,7 @@ func stringTest(name string, parameters interface{}, test func(s string) bool) C
 		} else if s, ok := tt.(string); !ok {
 			return gomerr.Unprocessable(name+" requires a string or *string test value", toTest)
 		} else if !test(s) {
-			return NotSatisfied(toTest)
+			return NotSatisfied(s)
 		}
 		return nil
 	})

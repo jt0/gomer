@@ -69,7 +69,7 @@ func length(lengthType string, lengthParams interface{}, min, max *uint64) Const
 
 		ttLen := uint64(ttv.Len())
 		if !(min == nil || ttLen >= *min) || !(max == nil || ttLen <= *max) {
-			return NotSatisfied(toTest)
+			return NotSatisfied(ttv.Len())
 		}
 
 		return nil

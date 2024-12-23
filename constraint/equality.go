@@ -10,7 +10,7 @@ import (
 func Equals(value interface{}) Constraint {
 	return New("Equals", value, func(toTest interface{}) gomerr.Gomerr {
 		if tt, ok := flect.IndirectInterface(toTest); !ok || tt != value {
-			return NotSatisfied(toTest)
+			return NotSatisfied(tt)
 		}
 		return nil
 	})
@@ -19,7 +19,7 @@ func Equals(value interface{}) Constraint {
 func NotEquals(value interface{}) Constraint {
 	return New("NotEquals", value, func(toTest interface{}) gomerr.Gomerr {
 		if tt, ok := flect.IndirectInterface(toTest); !ok || tt == value {
-			return NotSatisfied(toTest)
+			return NotSatisfied(tt)
 		}
 		return nil
 	})
@@ -43,7 +43,7 @@ func OneOf(values ...interface{}) Constraint {
 					return nil
 				}
 			}
+			return NotSatisfied(tti)
 		}
-		return NotSatisfied(toTest)
 	})
 }

@@ -38,8 +38,8 @@ func IntCompare(comparisonType ComparisonType, compareTo *int64) Constraint {
 			return nil
 		}
 
-		ttv, ok := flect.ReadableIndirectValue(toTest)
-		if !ok {
+		ttv, vOk := flect.ReadableIndirectValue(toTest)
+		if !vOk {
 			return nil // should be NotSatisfied?
 		}
 
@@ -50,7 +50,7 @@ func IntCompare(comparisonType ComparisonType, compareTo *int64) Constraint {
 		}()
 
 		if !comparator(ttv.Int(), *compareTo) {
-			return NotSatisfied(toTest)
+			return NotSatisfied(ttv.Int())
 		}
 
 		return nil
@@ -89,8 +89,8 @@ func UintCompare(comparisonType ComparisonType, compareTo *uint64) Constraint {
 			return nil
 		}
 
-		ttv, ok := flect.ReadableIndirectValue(toTest)
-		if !ok {
+		ttv, vOk := flect.ReadableIndirectValue(toTest)
+		if !vOk {
 			return nil // should be NotSatisfied?
 		}
 
@@ -101,7 +101,7 @@ func UintCompare(comparisonType ComparisonType, compareTo *uint64) Constraint {
 		}()
 
 		if !comparator(ttv.Uint(), *compareTo) {
-			return NotSatisfied(toTest)
+			return NotSatisfied(ttv.Uint())
 		}
 
 		return nil
@@ -125,7 +125,7 @@ var uintComparators = map[ComparisonType]func(uint64, uint64) bool{
 	LTE: func(value, compareTo uint64) bool { return value <= compareTo },
 }
 
-// FloatCompare compares a tested value to compareTo. While compareTo is an float64, the tested value can be either
+// FloatCompare compares a tested value to compareTo. While compareTo is a float64, the tested value can be either
 // float32/float64. If the value is not a float type, the constraint will fail.
 func FloatCompare(comparisonType ComparisonType, compareTo *float64) Constraint {
 	comparisonType = strings.ToUpper(comparisonType)
@@ -151,7 +151,7 @@ func FloatCompare(comparisonType ComparisonType, compareTo *float64) Constraint 
 		}()
 
 		if !comparator(ttv.Float(), *compareTo) {
-			return NotSatisfied(toTest)
+			return NotSatisfied(ttv.Float())
 		}
 
 		return nil
@@ -188,8 +188,8 @@ func TimeCompare(comparisonType ComparisonType, compareTo *time.Time) Constraint
 			return nil
 		}
 
-		ttv, ok := flect.ReadableIndirectValue(toTest)
-		if !ok {
+		ttv, vOk := flect.ReadableIndirectValue(toTest)
+		if !vOk {
 			return nil // should be NotSatisfied?
 		}
 
@@ -200,7 +200,7 @@ func TimeCompare(comparisonType ComparisonType, compareTo *time.Time) Constraint
 		}()
 
 		if !comparator(ttv.Interface().(time.Time), *compareTo) {
-			return NotSatisfied(toTest)
+			return NotSatisfied(ttv.Interface().(time.Time))
 		}
 
 		return nil

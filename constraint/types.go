@@ -13,12 +13,12 @@ import (
 // former is consistent w/ the representation emitted by the JsonSchema validation. The latter conforms to the fields
 // directives format. Examples of target values when UseBracketsForContainedTargets is true or false:
 //
-//  type SomeStruct struct {
-//    Foo struct {
-//      S []Bar          // true: Foo.S[3]; false: Foo.S.3
-//      M map[string]Bar // true: Foo.M[cat]; false: Foo.M.cat
-//    }
-//  }
+//	type SomeStruct struct {
+//	  Foo struct {
+//	    S []Bar          // true: Foo.S[3]; false: Foo.S.3
+//	    M map[string]Bar // true: Foo.M[cat]; false: Foo.M.cat
+//	  }
+//	}
 //
 // Note that when UseBracketsForContainedTargets is false, both the key and value will have the same target (e.g.
 // Foo.M.Cat). If the value is true, the key value will be Foo.M.cat and the latter will be Foo.M[cat].
@@ -155,7 +155,7 @@ func TypeOf(value interface{}) Constraint {
 
 	return New("TypeOf", t.String(), func(toTest interface{}) gomerr.Gomerr {
 		if reflect.TypeOf(toTest) != t {
-			return NotSatisfied(toTest)
+			return NotSatisfied(t.String())
 		}
 		return nil
 	})

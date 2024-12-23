@@ -14,10 +14,14 @@ var (
 
 func nilConstraint(name string, errorIfNil bool) Constraint {
 	return New(name, nil, func(toTest interface{}) gomerr.Gomerr {
-		switch vv := reflect.ValueOf(toTest); vv.Kind() {
+		ttv := reflect.ValueOf(toTest)
+		if !ttv.IsValid() && errorIfNil {
+			return NotSatisfied(name[2:])
+		}
+		switch ttv.Kind() {
 		case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
-			if vv.IsNil() == errorIfNil {
-				return NotSatisfied(toTest)
+			if ttv.IsNil() == errorIfNil {
+				return NotSatisfied(name[2:])
 			}
 			return nil
 		default:
@@ -45,8 +49,12 @@ var (
 
 func zeroConstraint(name string, errorIfZero bool) Constraint {
 	return New(name, nil, func(toTest interface{}) gomerr.Gomerr {
-		if reflect.ValueOf(toTest).IsZero() == errorIfZero {
-			return NotSatisfied(toTest)
+		ttv := reflect.ValueOf(toTest)
+		if !ttv.IsValid() && errorIfZero {
+			return NotSatisfied(name[2:])
+		}
+		if ttv.IsZero() == errorIfZero {
+			return NotSatisfied(name[2:])
 		}
 		return nil
 	})
@@ -64,10 +72,46 @@ func NotZero(value *interface{}) Constraint {
 	})
 }
 
-var Required = New("Required", nil, func(toTest interface{}) gomerr.Gomerr {
+var IsRequired = New("IsRequired", nil, func(toTest interface{}) gomerr.Gomerr {
 	ttv, ok := flect.ReadableIndirectValue(toTest)
 	if !ok || ttv.IsZero() {
 		return NotSatisfied(toTest)
 	}
 	return nil
 })
+
+func Required(value *interface{}) Constraint {
+	return New("Required", value, func(interface{}) gomerr.Gomerr {
+		return IsRequired.Test(*value)
+	})
+}
+
+var (
+	IsTrue  = boolConstraint("IsTrue", false)
+	IsFalse = boolConstraint("IsFalse", true)
+)
+
+func boolConstraint(name string, errorIfTrue bool) Constraint {
+	return New(name, nil, func(toTest interface{}) gomerr.Gomerr {
+		if ttv, ok := flect.ReadableIndirectValue(toTest); !ok {
+			return NotSatisfied(name[2:]) // neither true nor false
+		} else if ttv.Kind() != reflect.Bool {
+			return gomerr.Unprocessable("Test value is not a bool", reflect.TypeOf(toTest))
+		} else if ttv.Bool() == errorIfTrue {
+			return NotSatisfied(name[2:])
+		}
+		return nil
+	})
+}
+
+func True(value *interface{}) Constraint {
+	return New("True", value, func(interface{}) gomerr.Gomerr {
+		return IsTrue.Test(*value)
+	})
+}
+
+func False(value *interface{}) Constraint {
+	return New("False", value, func(interface{}) gomerr.Gomerr {
+		return IsFalse.Test(*value)
+	})
+}
