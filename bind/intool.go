@@ -132,13 +132,10 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc *structs.ToolCon
 			} // TODO:p2 treat the rest as raw input data - but may have already been exploded depending on how the rest of the data has been handled
 		}
 
-		sliceData, ok := value.([]interface{})
-		if !ok {
-
-		}
-
+		sliceData := value.([]interface{})
 		sliceLen := len(sliceData)
-		fv.Set(reflect.MakeSlice(reflect.SliceOf(fvt.Elem()), sliceLen, sliceLen))
+		fv.Grow(sliceLen)
+		fv.SetLen(sliceLen)
 
 		// Putting each element of the slice into a map so the a.Apply() call can fetch the data back out. Allows us
 		// to easily support complex slice elem types.
