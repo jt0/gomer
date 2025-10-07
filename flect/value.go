@@ -48,7 +48,8 @@ func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
 		vvtPtr = true
 	}
 
-	indirectTypesMatch := indirectValueValueType == indirectTargetValueType
+	indirectTargetIsAny := indirectTargetValueType.Kind() == reflect.Interface && indirectTargetValueType.Name() == ""
+	indirectTypesMatch := indirectTargetIsAny || indirectValueValueType == indirectTargetValueType
 	var vvConvertibleToTv bool
 	if !indirectTypesMatch {
 		vvConvertibleToTv = indirectValueValueType.ConvertibleTo(indirectTargetValueType)
