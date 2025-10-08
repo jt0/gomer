@@ -8,7 +8,7 @@ import (
 )
 
 func Equals(value interface{}) Constraint {
-	return New("Equals", value, func(toTest interface{}) gomerr.Gomerr {
+	return New("equals", value, func(toTest interface{}) gomerr.Gomerr {
 		if tt, ok := flect.IndirectInterface(toTest); !ok || tt != value {
 			return NotSatisfied(tt)
 		}
@@ -17,7 +17,7 @@ func Equals(value interface{}) Constraint {
 }
 
 func NotEquals(value interface{}) Constraint {
-	return New("NotEquals", value, func(toTest interface{}) gomerr.Gomerr {
+	return New("notEquals", value, func(toTest interface{}) gomerr.Gomerr {
 		if tt, ok := flect.IndirectInterface(toTest); !ok || tt == value {
 			return NotSatisfied(tt)
 		}
@@ -27,11 +27,11 @@ func NotEquals(value interface{}) Constraint {
 
 func OneOf(values ...interface{}) Constraint {
 	if len(values) == 0 {
-		panic(gomerr.Configuration("OneOf constraint defined without values"))
+		panic(gomerr.Configuration("oneOf constraint defined without values"))
 	}
 	valuesType := reflect.TypeOf(values[0])
 
-	return New("OneOf", values, func(toTest interface{}) gomerr.Gomerr {
+	return New("oneOf", values, func(toTest interface{}) gomerr.Gomerr {
 		if ttv, ok := flect.ReadableIndirectValue(toTest); !ok {
 			return NotSatisfied(toTest)
 		} else if !ttv.CanConvert(valuesType) {

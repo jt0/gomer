@@ -9,13 +9,13 @@ import (
 )
 
 func StartsWith(prefix *string) Constraint {
-	return stringTest("StartsWith", prefix, func(s string) bool {
+	return stringTest("startsWith", prefix, func(s string) bool {
 		return prefix == nil || strings.HasPrefix(s, *prefix)
 	})
 }
 
 func EndsWith(suffix *string) Constraint {
-	return stringTest("EndsWith", suffix, func(s string) bool {
+	return stringTest("endsWith", suffix, func(s string) bool {
 		return suffix == nil || strings.HasSuffix(s, *suffix)
 	})
 }
@@ -25,7 +25,7 @@ func Regexp(r string) Constraint {
 	if err != nil {
 		panic(gomerr.Configuration("'" + r + "' is not a valid regexp pattern: " + err.Error()))
 	}
-	return stringTest("Regexp", r, func(s string) bool {
+	return stringTest("regexp", r, func(s string) bool {
 		return re.MatchString(s)
 	})
 }
@@ -35,12 +35,12 @@ func RegexpMatch(re *regexp.Regexp) Constraint {
 		return ConfigurationError("regexp is nil")
 	}
 
-	return stringTest("Regexp", re.String(), func(s string) bool {
+	return stringTest("regexp", re.String(), func(s string) bool {
 		return re.MatchString(s)
 	})
 }
 
-var IsRegexp = stringTest("IsRegexp", nil, func(s string) bool {
+var IsRegexp = stringTest("isRegexp", nil, func(s string) bool {
 	_, err := regexp.Compile(s)
 	return err == nil
 })

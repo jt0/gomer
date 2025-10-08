@@ -15,11 +15,11 @@ import (
 func Length(values ...*uint64) Constraint {
 	switch len(values) {
 	case 1:
-		return length("LengthEquals", *values[0], values[0], values[0])
+		return length("lengthEquals", *values[0], values[0], values[0])
 	case 2:
 		if values[0] != nil {
 			if values[1] != nil {
-				return length("LengthBetween", []interface{}{*values[0], *values[1]}, values[0], values[1])
+				return length("lengthBetween", []interface{}{*values[0], *values[1]}, values[0], values[1])
 			} else {
 				return MinLength(values[0])
 			}
@@ -28,7 +28,7 @@ func Length(values ...*uint64) Constraint {
 		}
 		fallthrough
 	default:
-		return ConfigurationError(fmt.Sprintf("'Length' constraint requires 1 or 2 non-nil input values, received %d", len(values)))
+		return ConfigurationError(fmt.Sprintf("'length' constraint requires 1 or 2 non-nil input values, received %d", len(values)))
 	}
 }
 
@@ -36,22 +36,22 @@ func Length(values ...*uint64) Constraint {
 // Stated explicitly, this tests for min <= len(value). The value's type can be one of Array, Chan,
 // Map, Slice, or String. Any other type will result in a false value from the constraint.
 func MinLength(min *uint64) Constraint {
-	return length("LengthMin", min, min, nil)
+	return length("lengthMin", min, min, nil)
 }
 
 // MaxLength determines whether the value's length is less than or equal to the max value provided.
 // Stated explicitly, this tests for len(value) <= max. The value's type can be one of Array, Chan,
 // Map, Slice, or String. Any other type will result in a false value from the constraint.
 func MaxLength(max *uint64) Constraint {
-	return length("LengthMax", max, nil, max)
+	return length("lengthMax", max, nil, max)
 }
 
 var (
 	uintZero = uint64(0)
 	uintOne  = uint64(1)
 
-	Empty    = length("Empty", nil, nil, &uintZero)
-	NonEmpty = length("NonEmpty", nil, &uintOne, nil)
+	Empty    = length("empty", nil, nil, &uintZero)
+	NonEmpty = length("nonEmpty", nil, &uintOne, nil)
 
 	zeroLength = reflect.ValueOf([]interface{}{})
 )
@@ -64,7 +64,7 @@ func length(lengthType string, lengthParams interface{}, min, max *uint64) Const
 		}
 
 		if !lenable(ttv.Kind()) {
-			return gomerr.Unprocessable("Test value must be one of Array, Chan, Map, Slice, or String (or pointer to one of these)", toTest)
+			return gomerr.Unprocessable("test value must be one of Array, Chan, Map, Slice, or String (or pointer to one of these)", toTest)
 		}
 
 		ttLen := uint64(ttv.Len())

@@ -7,35 +7,21 @@ import (
 type logicOp = string
 
 const (
-	andOp logicOp = "And"
-	orOp  logicOp = "Or"
-	notOp logicOp = "Not"
+	andOp logicOp = "and"
+	orOp  logicOp = "or"
+	notOp logicOp = "not"
 	none  logicOp = ""
-
-	lcAndOp = "and"
-	lcOrOp  = "or"
-	lcNotOp = "not"
 )
-
-type logicParams []Constraint
-
-func (lp logicParams) String() string {
-	var result string
-	for _, operand := range lp { // each logic function has at least one operand
-		result = result + operand.String() + ", "
-	}
-	return result[:len(result)-2] // drop the last two chars
-}
 
 func And(constraints ...Constraint) Constraint {
 	switch len(constraints) {
 	case 0:
-		panic("'And' requires at least one constraint")
+		panic("'and' requires at least one constraint")
 	case 1:
 		return constraints[0]
 	}
 
-	return dynamicIfNeeded(New(andOp, logicParams(constraints), func(toTest interface{}) gomerr.Gomerr {
+	return dynamicIfNeeded(New(andOp, constraints, func(toTest interface{}) gomerr.Gomerr {
 		for _, operand := range constraints {
 			if ge := operand.Test(toTest); ge != nil {
 				if nse, ok := ge.(*NotSatisfiedError); ok {
@@ -57,12 +43,12 @@ func And(constraints ...Constraint) Constraint {
 func Or(constraints ...Constraint) Constraint {
 	switch len(constraints) {
 	case 0:
-		panic("'Or' requires at least one constraint")
+		panic("'or' requires at least one constraint")
 	case 1:
 		return constraints[0]
 	}
 
-	return dynamicIfNeeded(New(orOp, logicParams(constraints), func(toTest interface{}) gomerr.Gomerr {
+	return dynamicIfNeeded(New(orOp, constraints, func(toTest interface{}) gomerr.Gomerr {
 		var errors []gomerr.Gomerr
 		for _, operand := range constraints {
 			ge := operand.Test(toTest)
@@ -73,7 +59,7 @@ func Or(constraints ...Constraint) Constraint {
 			if nse, ok := ge.(*NotSatisfiedError); ok {
 				if nse.Constraint == nil {
 					nse.Constraint = operand
-				} else if nse.Constraint.Type() == "IsNil" || nse.Constraint.Type() == "IsZero" {
+				} else if nse.Constraint.Type() == "isNil" || nse.Constraint.Type() == "isZero" {
 					// "or(nil,...)" or "or(zero,...)" is a pattern to bypass the remainder of the constraints if the
 					// field is optional. If toTest is not nil, we don't need to include this "failed" constraint in
 					// error(s) we might return.

@@ -76,7 +76,7 @@ func RegisterEach(constraintsAndBuilders map[string]interface{}) gomerr.Gomerr {
 
 func Register(name string, constraintOrBuilder interface{}) gomerr.Gomerr {
 	if name[0] != '$' || len(name) < 2 || len(name) > 64 {
-		return gomerr.Configuration("Registered constraint names must start with a '$' symbol and between 2 and 64 characters long")
+		return gomerr.Configuration("registered constraint names must start with a '$' symbol and between 2 and 64 characters long")
 	}
 
 	if c, isConstraint := constraintOrBuilder.(Constraint); isConstraint {
@@ -85,18 +85,26 @@ func Register(name string, constraintOrBuilder interface{}) gomerr.Gomerr {
 		// Check that it looks like a builder
 		bv := reflect.ValueOf(constraintOrBuilder)
 		if !bv.IsValid() || bv.Kind() != reflect.Func {
-			return gomerr.Configuration("Can only register a constraint.Constraint or a constraint.Builder")
-		}
-
-		bvt := bv.Type()
-		if bvt.NumOut() != 1 || !bvt.Out(0).AssignableTo(constraintType) {
-			return gomerr.Configuration("Builder functions must return a single constraint.Constraint value")
+			return gomerr.Configuration("can only register a constraint.Constraint or a constraint.Builder")
+		} else if safeCheckBuilderOutput(bv) {
+			return gomerr.Configuration("builder functions must return a single constraint.Constraint value")
 		}
 
 		builders[strings.ToLower(name)] = constraintOrBuilder
 	}
 
 	return nil
+}
+
+func safeCheckBuilderOutput(bv reflect.Value) (ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			ok = bv.IsValid() && !bv.IsNil() // so long as the value is not nil, assume it's okay
+		}
+	}()
+
+	bvt := bv.Type()
+	return bvt.NumOut() != 1 || !bvt.Out(0).AssignableTo(constraintType)
 }
 
 func constraintFor(validationsString string, op logicOp /* passing field to support e.g. gte(0) */, field reflect.StructField) (Constraint, gomerr.Gomerr) {
@@ -144,7 +152,7 @@ func constraintFor(validationsString string, op logicOp /* passing field to supp
 				constraintName = strings.ToLower(validationsString)
 				if constraintName == validationsString { // Peek-ahead to avoid recursively searching for an unrecognized value
 					if _, ok = built[constraintName]; !ok {
-						return nil, gomerr.Configuration("Unrecognized constraint: " + constraintName)
+						return nil, gomerr.Configuration("unrecognized constraint: " + constraintName)
 					}
 				}
 				validationsString = ""
@@ -160,7 +168,7 @@ func constraintFor(validationsString string, op logicOp /* passing field to supp
 	}
 
 	if len(constraints) == 0 {
-		return nil, gomerr.Configuration("No constraints found")
+		return nil, gomerr.Configuration("no constraints found")
 	}
 
 	switch op {
@@ -179,7 +187,7 @@ func parameterizedConstraint(constraintName string, parenthetical *string, field
 	var accumulator int
 	for parenCounter := 1; parenCounter != 0; {
 		if closeIndex := strings.Index(remainder, ")"); closeIndex < 0 {
-			return nil, gomerr.Configuration("Unable to find a balanced expression: (" + *parenthetical)
+			return nil, gomerr.Configuration("unable to find a balanced expression: (" + *parenthetical)
 		} else if openIndex := strings.Index(remainder, "("); openIndex >= 0 && openIndex < closeIndex {
 			parenCounter++
 			accumulator += openIndex + 1
@@ -195,11 +203,11 @@ func parameterizedConstraint(constraintName string, parenthetical *string, field
 	*parenthetical = remainder
 
 	switch strings.ToLower(constraintName) {
-	case lcAndOp:
+	case andOp:
 		return constraintFor(parametersString, andOp, field)
-	case lcOrOp:
+	case orOp:
 		return constraintFor(parametersString, orOp, field)
-	case lcNotOp:
+	case notOp:
 		return constraintFor(parametersString, notOp, field)
 	default:
 		return buildConstraint(constraintName, parametersString, field)
@@ -209,7 +217,7 @@ func parameterizedConstraint(constraintName string, parenthetical *string, field
 func buildConstraint(constraintName, parametersString string, field reflect.StructField) (Constraint, gomerr.Gomerr) {
 	cf, ok := builders[constraintName]
 	if !ok {
-		return nil, gomerr.Configuration("Unknown validation type: " + constraintName)
+		return nil, gomerr.Configuration("unknown validation type: " + constraintName)
 	}
 
 	cfv := reflect.ValueOf(cf)
@@ -226,10 +234,10 @@ func buildConstraint(constraintName, parametersString string, field reflect.Stru
 	parametersLen := len(parameters)
 	if isVariadic {
 		if parametersLen < numIn {
-			return nil, gomerr.Configuration(fmt.Sprintf("Expecting at least %d parameters, but found %d: %v", numIn, parametersLen, parameters))
+			return nil, gomerr.Configuration(fmt.Sprintf("expecting at least %d parameters, but found %d: %v", numIn, parametersLen, parameters))
 		}
 	} else if parametersLen != numIn {
-		return nil, gomerr.Configuration(fmt.Sprintf("Expecting %d parameters, but found %d: %v", numIn, parametersLen, parameters))
+		return nil, gomerr.Configuration(fmt.Sprintf("expecting %d parameters, but found %d: %v", numIn, parametersLen, parameters))
 	}
 
 	in := make([]reflect.Value, parametersLen)
@@ -239,7 +247,7 @@ func buildConstraint(constraintName, parametersString string, field reflect.Stru
 	for pIndex = 0; pIndex < numIn; pIndex++ {
 		pValue, ge := parameterValue(cft.In(pIndex), strings.ReplaceAll(parameters[pIndex], " ", ","), dynamicValues, field)
 		if ge != nil {
-			return nil, gomerr.Configuration(fmt.Sprintf("Unable to set input parameter %d for '%s' constraint", pIndex, constraintName)).Wrap(ge)
+			return nil, gomerr.Configuration(fmt.Sprintf("unable to set input parameter %d for '%s' constraint", pIndex, constraintName)).Wrap(ge)
 		}
 		in[pIndex] = pValue
 	}
@@ -249,7 +257,7 @@ func buildConstraint(constraintName, parametersString string, field reflect.Stru
 		for ; pIndex < parametersLen; pIndex++ {
 			pValue, ge := parameterValue(pType, strings.ReplaceAll(parameters[pIndex], " ", ","), dynamicValues, field)
 			if ge != nil {
-				return nil, gomerr.Configuration(fmt.Sprintf("Unable to set variadic parameter %d for '%s' constraint", pIndex, constraintName)).Wrap(ge)
+				return nil, gomerr.Configuration(fmt.Sprintf("unable to set variadic parameter %d for '%s' constraint", pIndex, constraintName)).Wrap(ge)
 			}
 			in[pIndex] = pValue
 		}
@@ -275,7 +283,7 @@ func parameterValue(pType reflect.Type, pString string, dynamicValues map[string
 		if pString == "" {
 			return nilConstraintValue, nil
 		}
-		pc, ge := constraintFor(strings.ReplaceAll(pString, ",", "\\,"), none, field) // re-escape commas since will be re-split
+		pc, ge := constraintFor(pString, none, field)
 		if ge != nil {
 			return reflect.Value{}, ge
 		}
@@ -286,7 +294,7 @@ func parameterValue(pType reflect.Type, pString string, dynamicValues map[string
 	// TODO: generalize to add support for functions (e.g. $now)
 	if strings.HasPrefix(pString, "$.") {
 		if pType.Kind() != reflect.Ptr {
-			return reflect.Value{}, gomerr.Configuration(fmt.Sprintf("Dynamic value '%s' requires a pointer (or pointer-safe interface{}) input parameter type, found '%s'", pString, pType))
+			return reflect.Value{}, gomerr.Configuration(fmt.Sprintf("dynamic value '%s' requires a pointer (or pointer-safe interface{}) input parameter type, found '%s'", pString, pType))
 		}
 
 		pv := reflect.New(pType).Elem()

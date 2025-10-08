@@ -102,15 +102,24 @@ func (c *constraint) String() string {
 	if c.params == nil {
 		return c.Type()
 	} else {
-		return fmt.Sprintf("%s(%s)", c.type_, parametersToString(reflect.ValueOf(c.params)))
+		return fmt.Sprintf("%s(%s)", c.type_, parametersToString(c.params))
 	}
 }
 
 var timeType = reflect.TypeOf((*time.Time)(nil)).Elem()
 
-func parametersToString(pv reflect.Value) string {
-	if !pv.IsValid() {
-		return "<invalid>"
+func parametersToString(params any) string {
+	var pv reflect.Value
+	if c, ok := params.(Constraint); ok {
+		return c.String()
+	} else if cs, ok := params.([]Constraint); ok {
+		var ss []string
+		for _, c = range cs {
+			ss = append(ss, c.String())
+		}
+		return strings.Join(ss, ", ")
+	} else if pv, ok = params.(reflect.Value); !ok {
+		pv = reflect.ValueOf(params)
 	}
 
 	switch pv.Kind() {

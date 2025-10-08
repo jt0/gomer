@@ -25,7 +25,7 @@ import (
 var UseBracketsForContainedTargets = false
 
 func Struct(validationTool *structs.Tool) Constraint {
-	return New("Struct", nil, func(toTest interface{}) gomerr.Gomerr {
+	return New("struct", nil, func(toTest interface{}) gomerr.Gomerr {
 		// Do we need to check for 'nil' here?
 		_, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
@@ -51,14 +51,27 @@ func MapValues(valueConstraint Constraint) Constraint {
 }
 
 func Map(keyConstraint Constraint, valueConstraint Constraint) Constraint {
-	return dynamicIfNeeded(New("Map", nil, func(toTest interface{}) gomerr.Gomerr {
+	var kvConstraints []Constraint
+	if keyConstraint != nil {
+		kvConstraints = append(kvConstraints, keyConstraint)
+	}
+	if valueConstraint != nil {
+		kvConstraints = append(kvConstraints, valueConstraint)
+	}
+	var cp any
+	if len(kvConstraints) == 1 {
+		cp = kvConstraints[0]
+	} else {
+		cp = kvConstraints
+	}
+	return dynamicIfNeeded(New("map", cp, func(toTest interface{}) gomerr.Gomerr {
 		ttv, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
 			return nil
 		}
 
 		if ttv.Kind() != reflect.Map {
-			return gomerr.Unprocessable("Test value is not a map", toTest)
+			return gomerr.Unprocessable("test value is not a map", toTest)
 		}
 
 		iter := ttv.MapRange()
@@ -91,14 +104,14 @@ type Entry struct {
 }
 
 func Entries(entryConstraint Constraint) Constraint {
-	return dynamicIfNeeded(New("Entries", nil, func(toTest interface{}) gomerr.Gomerr {
+	return dynamicIfNeeded(New("entries", entryConstraint, func(toTest interface{}) gomerr.Gomerr {
 		ttv, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
 			return nil
 		}
 
 		if ttv.Kind() != reflect.Map {
-			return gomerr.Unprocessable("Test value is not a map", toTest)
+			return gomerr.Unprocessable("test value is not a map", toTest)
 		}
 
 		iter := ttv.MapRange()
@@ -119,15 +132,15 @@ func Entries(entryConstraint Constraint) Constraint {
 	}), entryConstraint)
 }
 
-func Elements(constraint Constraint) Constraint {
-	return dynamicIfNeeded(New("Elements", nil, func(toTest interface{}) gomerr.Gomerr {
+func Elements(elementsConstraint Constraint) Constraint {
+	return dynamicIfNeeded(New("elements", elementsConstraint, func(toTest interface{}) gomerr.Gomerr {
 		ttv, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
 			return nil
 		}
 
 		if ttv.Kind() != reflect.Slice && ttv.Kind() != reflect.Array {
-			return gomerr.Unprocessable("Input is not a slice or array", toTest)
+			return gomerr.Unprocessable("input is not a slice or array", toTest)
 		}
 
 		var errors []gomerr.Gomerr
@@ -138,13 +151,13 @@ func Elements(constraint Constraint) Constraint {
 			} else {
 				target = fmt.Sprintf("%d", i)
 			}
-			if ge := constraint.Validate(target, ttv.Index(i).Interface()); ge != nil {
+			if ge := elementsConstraint.Validate(target, ttv.Index(i).Interface()); ge != nil {
 				errors = append(errors, ge)
 			}
 		}
 
 		return gomerr.Batcher(errors)
-	}), constraint)
+	}), elementsConstraint)
 }
 
 func TypeOf(value interface{}) Constraint {
@@ -153,7 +166,7 @@ func TypeOf(value interface{}) Constraint {
 		t = reflect.TypeOf(value)
 	}
 
-	return New("TypeOf", t.String(), func(toTest interface{}) gomerr.Gomerr {
+	return New("typeOf", t.String(), func(toTest interface{}) gomerr.Gomerr {
 		if reflect.TypeOf(toTest) != t {
 			return NotSatisfied(t.String())
 		}

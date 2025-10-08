@@ -5,7 +5,7 @@ import (
 )
 
 func Success(msg string) Constraint {
-	return New("Success: "+msg, nil, func(interface{}) gomerr.Gomerr {
+	return New("success: "+msg, nil, func(interface{}) gomerr.Gomerr {
 		return nil
 	})
 }
