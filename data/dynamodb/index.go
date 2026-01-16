@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
@@ -49,7 +49,7 @@ func (i *index) friendlyName() string {
 	return *i.name
 }
 
-func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement, attributeTypes map[string]string) (ge gomerr.Gomerr) {
+func (i *index) processKeySchema(keySchemaElements []types.KeySchemaElement, attributeTypes map[string]string) (ge gomerr.Gomerr) {
 	for _, keySchemaElement := range keySchemaElements {
 		key := &keyAttribute{
 			name:                   *keySchemaElement.AttributeName,
@@ -61,10 +61,10 @@ func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement,
 			return ge.AddAttribute("key.name", key.name)
 		}
 
-		switch *keySchemaElement.KeyType {
-		case dynamodb.KeyTypeHash:
+		switch keySchemaElement.KeyType {
+		case types.KeyTypeHash:
 			i.pk = key
-		case dynamodb.KeyTypeRange:
+		case types.KeyTypeRange:
 			i.sk = key
 		}
 	}
@@ -72,7 +72,7 @@ func (i *index) processKeySchema(keySchemaElements []*dynamodb.KeySchemaElement,
 	return nil
 }
 
-var safeTypeConstraint = constraint.OneOf(dynamodb.ScalarAttributeTypeS, dynamodb.ScalarAttributeTypeN)
+var safeTypeConstraint = constraint.OneOf(string(types.ScalarAttributeTypeS), string(types.ScalarAttributeTypeN))
 
 func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
 	ge := safeTypeConstraint.Validate("AttributeType", attributeType)
@@ -211,8 +211,8 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 	return c
 }
 
-func (i *index) populateKeyValues(avm map[string]*dynamodb.AttributeValue, p data.Persistable, valueSeparator byte, mustBeSet bool) gomerr.Gomerr {
-	var av *dynamodb.AttributeValue
+func (i *index) populateKeyValues(avm map[string]types.AttributeValue, p data.Persistable, valueSeparator byte, mustBeSet bool) gomerr.Gomerr {
+	var av types.AttributeValue
 
 	// TODO: any reason Elem() would be incorrect?
 	pElem := reflect.ValueOf(p).Elem()
@@ -254,17 +254,17 @@ func (i *index) keyAttributes() []*keyAttribute {
 	}
 }
 
-func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeName string, valueSeparator, queryWildcardChar byte) *dynamodb.AttributeValue {
+func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeName string, valueSeparator, queryWildcardChar byte) types.AttributeValue {
 	value := k.buildKeyValue(elemValue, persistableTypeName, valueSeparator, queryWildcardChar)
 	if value == "" {
 		return nil
 	}
 
 	switch k.attributeType {
-	case dynamodb.ScalarAttributeTypeS:
-		return &dynamodb.AttributeValue{S: &value}
-	case dynamodb.ScalarAttributeTypeN:
-		return &dynamodb.AttributeValue{N: &value} //TODO:p3 add better support for numeric values
+	case string(types.ScalarAttributeTypeS):
+		return &types.AttributeValueMemberS{Value: value}
+	case string(types.ScalarAttributeTypeN):
+		return &types.AttributeValueMemberN{Value: value} //TODO:p3 add better support for numeric values
 	default:
 		// Log that safeAttributeType() missed something. received type: k.AttributeType
 	}
@@ -274,13 +274,14 @@ func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeNa
 
 func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeName string, valueSeparator, queryWildcardChar byte) string {
 	// sv := reflect.ValueOf(s).Elem()
+	escapeChar := valueSeparator + 1
 	keyFields := k.keyFieldsByPersistable[persistableTypeName]
-	keyValue := fieldValue(keyFields[0].name, elemValue) // will always have at least one keyField
-	if len(keyFields) > 1 {                              // 3
+	keyValue := fieldValue(keyFields[0].name, elemValue, valueSeparator, escapeChar) // will always have at least one keyField
+	if len(keyFields) > 1 {                                                          // 3
 		separator := string(valueSeparator)
 		lastFieldIndex := 0
 		for i, separators := 1, separator; i < len(keyFields); i, separators = i+1, separators+separator {
-			if nextField := fieldValue(keyFields[i].name, elemValue); nextField != "" {
+			if nextField := fieldValue(keyFields[i].name, elemValue, valueSeparator, escapeChar); nextField != "" {
 				keyValue += separators // add collected separators when a fieldValue is not ""
 				keyValue += nextField
 				lastFieldIndex, separators = i, ""
@@ -293,8 +294,83 @@ func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeNam
 	return keyValue
 }
 
-func fieldValue(fieldName string, sv reflect.Value) string {
+// unescapeAndSplit splits a composite key value by separator and unescapes each segment.
+// Handles escaped separators and escape characters correctly.
+func unescapeAndSplit(value string, separator, escape byte) []string {
+	if len(value) == 0 {
+		return []string{}
+	}
+
+	var segments []string
+	var current []byte
+	i := 0
+
+	for i < len(value) {
+		b := value[i]
+
+		if b == escape && i+1 < len(value) {
+			// Escape sequence - next character is literal
+			next := value[i+1]
+			if next == separator || next == escape {
+				current = append(current, next)
+				i += 2 // Skip both escape and escaped character
+				continue
+			}
+		}
+
+		if b == separator {
+			// Unescaped separator - split point
+			segments = append(segments, string(current))
+			current = nil
+		} else {
+			current = append(current, b)
+		}
+
+		i++
+	}
+
+	// Add the last segment
+	segments = append(segments, string(current))
+
+	return segments
+}
+
+// escapeKeyValue escapes separator and escape characters in field values to prevent ambiguity in composite keys.
+// Uses the next ASCII character after separator as the escape character to preserve sort order.
+func escapeKeyValue(value string, separator, escape byte) string {
+	// Fast path: no escaping needed
+	if len(value) == 0 {
+		return value
+	}
+
+	needsEscape := false
+	for i := 0; i < len(value); i++ {
+		if value[i] == separator || value[i] == escape {
+			needsEscape = true
+			break
+		}
+	}
+
+	if !needsEscape {
+		return value
+	}
+
+	// Escape both separator and escape character
+	result := make([]byte, 0, len(value)+4) // Pre-allocate some extra space
+	for i := 0; i < len(value); i++ {
+		b := value[i]
+		if b == separator || b == escape {
+			result = append(result, escape) // Add escape character
+		}
+		result = append(result, b)
+	}
+
+	return string(result)
+}
+
+func fieldValue(fieldName string, sv reflect.Value, separator, escape byte) string {
 	if fieldName[:1] == "'" {
+		// Static value - don't escape (controlled by developer, not user data)
 		return fieldName[1 : len(fieldName)-1]
 	} else {
 		v := sv.FieldByName(fieldName)
@@ -304,7 +380,9 @@ func fieldValue(fieldName string, sv reflect.Value) string {
 			if v.Kind() == reflect.Ptr && !v.IsNil() {
 				v = v.Elem()
 			}
-			return fmt.Sprint(v.Interface())
+			value := fmt.Sprint(v.Interface())
+			// Escape separator and escape characters to preserve sort order and avoid ambiguity
+			return escapeKeyValue(value, separator, escape)
 		} else {
 			return ""
 		}

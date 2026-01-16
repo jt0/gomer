@@ -7,12 +7,11 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"io"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/kms"
-	"github.com/aws/aws-sdk-go/service/kms/kmsiface"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
+	"github.com/aws/aws-sdk-go-v2/service/kms/types"
 
 	"github.com/jt0/gomer/gomerr"
 )
@@ -23,53 +22,68 @@ const (
 )
 
 type kmsDataKeyEncrypter struct {
-	kms   kmsiface.KMSAPI
+	kms   *kms.Client
 	keyId string
 }
 
 // TODO: add support for asymmetric keys
-func KmsDataKeyEncrypter(kmsClient kmsiface.KMSAPI, masterKeyId string) Encrypter {
+func KmsDataKeyEncrypter(kmsClient *kms.Client, masterKeyId string) Encrypter {
 	return kmsDataKeyEncrypter{
 		kms:   kmsClient,
 		keyId: masterKeyId,
 	}
 }
 
-func (k kmsDataKeyEncrypter) Encrypt(plaintext []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
-	return k.EncryptWithContext(context.Background(), plaintext, encryptionContext)
-}
-
 // Decrypt returns the decrypted form of the encrypted content given the optional encryptionContext. If
 //
-//  gomerr.NotFoundError:
-//      The Encrypter keyId isn't found within KMS
-//  gomerr.BadValueError:
-//      The KMS key is in an invalid state
-//  gomerr.InternalError:
-//      A problem with the underlying crypto libraries
-//  gomerr.DependencyError:
-//      An unexpected error occurred calling KMS
+//	gomerr.NotFoundError:
+//	    The Encrypter keyId isn't found within KMS
+//	gomerr.BadValueError:
+//	    The KMS key is in an invalid state
+//	gomerr.InternalError:
+//	    A problem with the underlying crypto libraries
+//	gomerr.DependencyError:
+//	    An unexpected error occurred calling KMS
+//
 // TODO: add support for grant tokens?
-func (k kmsDataKeyEncrypter) EncryptWithContext(context context.Context, plaintext []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
-	input := &kms.GenerateDataKeyInput{
-		KeyId:             &k.keyId,
-		EncryptionContext: encryptionContext,
-		KeySpec:           aws.String(kms.DataKeySpecAes256),
+func (k kmsDataKeyEncrypter) Encrypt(ctx context.Context, plaintext []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
+	// Convert map[string]*string to map[string]string for SDK v2
+	var ec map[string]string
+	if encryptionContext != nil {
+		ec = make(map[string]string, len(encryptionContext))
+		for k, v := range encryptionContext {
+			if v != nil {
+				ec[k] = *v
+			}
+		}
 	}
 
-	dataKey, err := k.kms.GenerateDataKeyWithContext(context, input)
+	input := &kms.GenerateDataKeyInput{
+		KeyId:             &k.keyId,
+		EncryptionContext: ec,
+		KeySpec:           types.DataKeySpecAes256,
+	}
+
+	dataKey, err := k.kms.GenerateDataKey(ctx, input)
 	if err != nil {
-		if awsErr, ok := err.(awserr.Error); ok {
-			switch awsErr.Code() {
-			case kms.ErrCodeNotFoundException:
-				return nil, gomerr.NotFound("kms.KeyId", *input.KeyId).Wrap(err)
-			case kms.ErrCodeDisabledException:
-				return nil, gomerr.InvalidValue("KmsKey."+*input.KeyId+".KeyState", kms.KeyStateDisabled, kms.KeyStateEnabled).Wrap(err)
-			case kms.ErrCodeInvalidStateException:
-				return nil, gomerr.InvalidValue("KmsKey."+*input.KeyId+".KeyState", "<unavailable>", kms.KeyStateEnabled).Wrap(err)
-			case kms.ErrCodeInvalidKeyUsageException:
-				return nil, gomerr.InvalidValue("KmsKey."+*input.KeyId+".KeyUsage", "<unavailable>", kms.KeyUsageTypeEncryptDecrypt).Wrap(err)
-			}
+		var notFoundErr *types.NotFoundException
+		if errors.As(err, &notFoundErr) {
+			return nil, gomerr.NotFound("kms.KeyId", *input.KeyId).Wrap(err)
+		}
+
+		var disabledErr *types.DisabledException
+		if errors.As(err, &disabledErr) {
+			return nil, gomerr.InvalidValue("KmsKey."+*input.KeyId+".KeyState", string(types.KeyStateDisabled), string(types.KeyStateEnabled)).Wrap(err)
+		}
+
+		var invalidStateErr *types.KMSInvalidStateException
+		if errors.As(err, &invalidStateErr) {
+			return nil, gomerr.InvalidValue("KmsKey."+*input.KeyId+".KeyState", "<unavailable>", string(types.KeyStateEnabled)).Wrap(err)
+		}
+
+		var invalidKeyUsageErr *types.InvalidKeyUsageException
+		if errors.As(err, &invalidKeyUsageErr) {
+			return nil, gomerr.InvalidValue("KmsKey."+*input.KeyId+".KeyUsage", "<unavailable>", string(types.KeyUsageTypeEncryptDecrypt)).Wrap(err)
 		}
 
 		return nil, gomerr.Dependency("KMS", input).Wrap(err)
@@ -118,56 +132,71 @@ func encode(ciphertext, nonce, ciphertextBlob []byte) []byte {
 }
 
 type kmsDataKeyDecrypter struct {
-	kms kmsiface.KMSAPI
+	kms *kms.Client
 }
 
-func KmsDataKeyDecrypter(kmsClient kmsiface.KMSAPI) Decrypter {
+func KmsDataKeyDecrypter(kmsClient *kms.Client) Decrypter {
 	return kmsDataKeyDecrypter{
 		kms: kmsClient,
 	}
 }
 
-// Decrypt returns the same data (and errors) as DecryptWithContext using just the Background context.
-func (k kmsDataKeyDecrypter) Decrypt(encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
-	return k.DecryptWithContext(context.Background(), encrypted, encryptionContext)
-}
-
 // TODO: add support for grant tokens?
 // DecryptWithContext returns the decrypted form of the encrypted content given the optional encryptionContext.
 //
-//  gomerr.UnmarshalError:
-//      There is a problem reading the the encoded data
-//  gomerr.BadValueError (type = Invalid):
-//      The encryption context did not match the encrypted data, or the encrypted data is corrupted, or the KMS
-//      key is in an invalid state
-//  gomerr.InternalError:
-//      A problem with the underlying crypto libraries
-//  gomerr.DependencyError:
-//      An unexpected error occurred calling KMS
-func (k kmsDataKeyDecrypter) DecryptWithContext(context context.Context, encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
+//	gomerr.UnmarshalError:
+//	    There is a problem reading the the encoded data
+//	gomerr.BadValueError (type = Invalid):
+//	    The encryption context did not match the encrypted data, or the encrypted data is corrupted, or the KMS
+//	    key is in an invalid state
+//	gomerr.InternalError:
+//	    A problem with the underlying crypto libraries
+//	gomerr.DependencyError:
+//	    An unexpected error occurred calling KMS
+//
+// Decrypt returns the same data (and errors) as DecryptWithContext using just the Background context.
+func (k kmsDataKeyDecrypter) Decrypt(ctx context.Context, encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
 	ciphertext, ciphertextBlob, nonce, ge := k.decode(encrypted)
 	if ge != nil {
 		return nil, ge
 	}
 
-	input := &kms.DecryptInput{
-		CiphertextBlob:    ciphertextBlob,
-		EncryptionContext: encryptionContext,
+	// Convert map[string]*string to map[string]string for SDK v2
+	var ec map[string]string
+	if encryptionContext != nil {
+		ec = make(map[string]string, len(encryptionContext))
+		for k, v := range encryptionContext {
+			if v != nil {
+				ec[k] = *v
+			}
+		}
 	}
 
-	dataKey, err := k.kms.DecryptWithContext(context, input)
+	input := &kms.DecryptInput{
+		CiphertextBlob:    ciphertextBlob,
+		EncryptionContext: ec,
+	}
+
+	dataKey, err := k.kms.Decrypt(ctx, input)
 	if err != nil {
-		if awsErr, ok := err.(awserr.Error); ok {
-			switch awsErr.Code() {
-			case kms.ErrCodeInvalidCiphertextException:
-				return nil, gomerr.InvalidValue("ciphertext", input, nil).Wrap(err)
-			case kms.ErrCodeDisabledException:
-				return nil, gomerr.InvalidValue("KmsKey.KeyState", kms.KeyStateDisabled, kms.KeyStateEnabled).Wrap(err)
-			case kms.ErrCodeInvalidStateException:
-				return nil, gomerr.InvalidValue("KmsKey.KeyState", "<unavailable>", kms.KeyStateEnabled).Wrap(err)
-			case kms.ErrCodeInvalidKeyUsageException:
-				return nil, gomerr.InvalidValue("KmsKey.KeyUsage", "<unavailable>", kms.KeyUsageTypeEncryptDecrypt).Wrap(err)
-			}
+		var invalidCiphertextErr *types.InvalidCiphertextException
+		if errors.As(err, &invalidCiphertextErr) {
+			return nil, gomerr.InvalidValue("ciphertext", input, nil).Wrap(err)
+		}
+
+		var disabledErr *types.DisabledException
+		if errors.As(err, &disabledErr) {
+			return nil, gomerr.InvalidValue("KmsKey.KeyState", string(types.KeyStateDisabled), string(types.KeyStateEnabled)).Wrap(err)
+		}
+
+		var invalidStateErr *types.KMSInvalidStateException
+		if errors.As(err, &invalidStateErr) {
+			return nil, gomerr.InvalidValue("KmsKey.KeyState", "<unavailable>", string(types.KeyStateEnabled)).Wrap(err)
+		}
+
+		var invalidKeyUsageErr *types.InvalidKeyUsageException
+		if errors.As(err, &invalidKeyUsageErr) {
+			return nil, gomerr.InvalidValue("KmsKey.KeyUsage", "<unavailable>", string(types.KeyUsageTypeEncryptDecrypt)).Wrap(err)
 		}
 
 		return nil, gomerr.Dependency("Kms", input).Wrap(err)
@@ -178,8 +207,8 @@ func (k kmsDataKeyDecrypter) DecryptWithContext(context context.Context, encrypt
 
 // decode extracts the previously encoded values for ciphertext, ciphertextBlob, and nonce. Possible errors:
 //
-//  gomerr.Unmarshal:
-//      There is a problem reading the the encoded data
+//	gomerr.Unmarshal:
+//	    There is a problem reading the the encoded data
 func (k kmsDataKeyDecrypter) decode(encoded []byte) (ciphertext []byte, ciphertextBlob []byte, nonce []byte, ge gomerr.Gomerr) {
 	reader := bytes.NewBuffer(encoded)
 
@@ -213,8 +242,8 @@ func (k kmsDataKeyDecrypter) decode(encoded []byte) (ciphertext []byte, cipherte
 // decrypt performs the ciphertext decryption using the provided key and nonce. The response contains the decrypted
 // value or:
 //
-//  gomerr.Internal:
-//      An error wrapping the underlying Go crypto error.
+//	gomerr.Internal:
+//	    An error wrapping the underlying Go crypto error.
 func (k kmsDataKeyDecrypter) decrypt(key []byte, ciphertext []byte, nonce []byte) ([]byte, gomerr.Gomerr) {
 	block, err := aes.NewCipher(key)
 	if err != nil {

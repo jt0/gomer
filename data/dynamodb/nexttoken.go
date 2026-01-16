@@ -1,14 +1,14 @@
 package dynamodb
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"github.com/jt0/gomer/crypto"
 	"github.com/jt0/gomer/data"
@@ -44,7 +44,7 @@ var formatVersionExpirations = []time.Time{
 var formatVersion = uint(len(formatVersionExpirations))
 
 // TODO: add queryable details into token
-func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*dynamodb.AttributeValue) (*string, gomerr.Gomerr) {
+func (t *nextTokenizer) tokenize(ctx context.Context, q data.Queryable, lastEvaluatedKey map[string]types.AttributeValue) (*string, gomerr.Gomerr) {
 	if lastEvaluatedKey == nil {
 		return nil, nil
 	}
@@ -62,7 +62,7 @@ func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*
 	}
 
 	// TODO: provide an encryption context - probably w/ q data
-	encrypted, ge := t.cipher.Encrypt(toEncrypt, nil)
+	encrypted, ge := t.cipher.Encrypt(ctx, toEncrypt, nil)
 	if ge != nil {
 		return nil, ge
 	}
@@ -73,16 +73,16 @@ func (t *nextTokenizer) tokenize(q data.Queryable, lastEvaluatedKey map[string]*
 
 // untokenize will pull the NextPageToken from the queryable and (if there is one) decode the value. Possible errors:
 //
-//  gomerr.BadValueError's Type:
-//      Expired:
-//      	If the token was generated more than 24 hours ago (a hard-coded duration)
-//          If the token is using an old format version
-//      Malformed:
-//          If the token is not Base64-encoded
-//          If the token fails decryption
+//	gomerr.BadValueError's Type:
+//	    Expired:
+//	    	If the token was generated more than 24 hours ago (a hard-coded duration)
+//	        If the token is using an old format version
+//	    Malformed:
+//	        If the token is not Base64-encoded
+//	        If the token fails decryption
 //
 // See the crypto.kmsDataKeyDecrypter Decrypt operation for additional errors types.
-func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.AttributeValue, gomerr.Gomerr) {
+func (t *nextTokenizer) untokenize(ctx context.Context, q data.Queryable) (map[string]types.AttributeValue, gomerr.Gomerr) {
 	if q.NextPageToken() == nil {
 		return nil, nil
 	}
@@ -92,7 +92,7 @@ func (t *nextTokenizer) untokenize(q data.Queryable) (map[string]*dynamodb.Attri
 		return nil, gomerr.MalformedValue(NextPageToken, nil).Wrap(err)
 	}
 
-	toUnmarshal, ge := t.cipher.Decrypt(encrypted, nil)
+	toUnmarshal, ge := t.cipher.Decrypt(ctx, encrypted, nil)
 	if ge != nil {
 		return nil, gomerr.MalformedValue(NextPageToken, nil).Wrap(ge)
 	}
@@ -131,28 +131,33 @@ func (nt *nextToken) formatVersionExpired() bool {
 	return time.Now().UTC().After(formatVersionExpirations[nt.Version])
 }
 
-func encodeLastEvaluatedKey(lastEvaluatedKey map[string]*dynamodb.AttributeValue) map[string]string {
+func encodeLastEvaluatedKey(lastEvaluatedKey map[string]types.AttributeValue) map[string]string {
 	lek := make(map[string]string, len(lastEvaluatedKey))
 
 	for key, value := range lastEvaluatedKey {
-		if value.S != nil {
-			lek[key] = fmt.Sprintf("%s%s", stringPrefix, *value.S)
-		} else if value.N != nil {
-			lek[key] = fmt.Sprintf("%s%s", numberPrefix, *value.N)
+		switch v := value.(type) {
+		case *types.AttributeValueMemberS:
+			lek[key] = fmt.Sprintf("%s%s", stringPrefix, v.Value)
+		case *types.AttributeValueMemberN:
+			lek[key] = fmt.Sprintf("%s%s", numberPrefix, v.Value)
 		}
 	}
 
 	return lek
 }
 
-func decodeLastEvaluatedKey(lek map[string]string) map[string]*dynamodb.AttributeValue {
-	var exclusiveStartKey = make(map[string]*dynamodb.AttributeValue)
+func decodeLastEvaluatedKey(lek map[string]string) map[string]types.AttributeValue {
+	var exclusiveStartKey = make(map[string]types.AttributeValue)
 
 	for key, value := range lek {
 		if strings.HasPrefix(value, numberPrefix) {
-			exclusiveStartKey[key] = &dynamodb.AttributeValue{N: aws.String(strings.TrimPrefix(value, numberPrefix))}
+			exclusiveStartKey[key] = &types.AttributeValueMemberN{
+				Value: strings.TrimPrefix(value, numberPrefix),
+			}
 		} else {
-			exclusiveStartKey[key] = &dynamodb.AttributeValue{S: aws.String(strings.TrimPrefix(value, stringPrefix))}
+			exclusiveStartKey[key] = &types.AttributeValueMemberS{
+				Value: strings.TrimPrefix(value, stringPrefix),
+			}
 		}
 	}
 
