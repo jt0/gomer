@@ -20,6 +20,7 @@ import (
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
+	"github.com/jt0/gomer/structs"
 )
 
 type table struct {
@@ -36,6 +37,7 @@ type table struct {
 	escapeChar                  byte
 	failDeleteIfNotPresent      bool
 	validateKeyFieldConsistency bool
+	constraintTool              *structs.Tool
 }
 
 type Configuration struct {
@@ -107,6 +109,14 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 
 	if ge = t.prepare(persistables); ge != nil {
 		return nil, ge
+	}
+
+	// Initialize constraint tool and preprocess persistable types
+	t.constraintTool = NewConstraintTool(t)
+	for _, p := range persistables {
+		if ge := structs.Preprocess(p, t.constraintTool); ge != nil {
+			return nil, ge.AddAttribute("TypeName", p.TypeName())
+		}
 	}
 
 	tables[tableName] = t
@@ -231,7 +241,8 @@ func (t *table) Create(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 		}
 	}()
 
-	ge = t.put(ctx, p, t.persistableTypes[p.TypeName()].fieldConstraints, true)
+	// Always validate constraints on create
+	ge = t.put(ctx, p, true, true)
 
 	return
 }
@@ -245,7 +256,9 @@ func (t *table) Update(ctx context.Context, p data.Persistable, update data.Pers
 
 	// TODO:p1 support partial update vs put()
 
-	fieldConstraintsToCheck := make(map[string]constraint.Constraint)
+	validateConstraints := false
+	pt := t.persistableTypes[p.TypeName()]
+
 	if update != nil {
 		uv := reflect.ValueOf(update).Elem()
 		pv := reflect.ValueOf(p).Elem()
@@ -259,6 +272,8 @@ func (t *table) Update(ctx context.Context, p data.Persistable, update data.Pers
 			}
 
 			pField := pv.Field(i)
+			fieldName := uv.Type().Field(i).Name
+
 			if reflect.DeepEqual(uField.Interface(), pField.Interface()) {
 				uField.Set(reflect.Zero(uField.Type()))
 			} else if uField.Kind() == reflect.Ptr {
@@ -269,44 +284,34 @@ func (t *table) Update(ctx context.Context, p data.Persistable, update data.Pers
 					uField.Set(reflect.Zero(uField.Type()))
 				} else {
 					pField.Set(uField)
+					// Check if this field participates in any constraint
+					if pt.constraintFields[fieldName] {
+						validateConstraints = true
+					}
 				}
 			} else {
 				if uField.IsZero() {
 					continue
 				}
 				pField.Set(uField)
-			}
-		}
-
-	nextCondition:
-		for fieldName, fieldConstraint := range t.persistableTypes[p.TypeName()].fieldConstraints {
-			// Test if the field with the constraint has been updated. If so, add the constraint and continue.
-			if !uv.FieldByName(fieldName).IsZero() {
-				fieldConstraintsToCheck[fieldName] = fieldConstraint
-				continue nextCondition
-			}
-
-			// See if any of the other fields that are used to determine uniqueness have been updated. If yes, add the
-			// condition to the list and continue to the next condition.
-			for _, otherField := range fieldConstraint.Parameters().([]string) {
-				uField := uv.FieldByName(otherField)
-				if !uField.IsZero() /* TODO: remove rest once structs supported above */ && uField.Interface() != pv.FieldByName(otherField).Interface() {
-					fieldConstraintsToCheck[fieldName] = fieldConstraint
-					continue nextCondition
+				// Check if this field participates in any constraint
+				if pt.constraintFields[fieldName] {
+					validateConstraints = true
 				}
 			}
-
 		}
 	}
 
-	ge = t.put(ctx, p, fieldConstraintsToCheck, false)
+	ge = t.put(ctx, p, validateConstraints, false)
 
 	return
 }
 
-func (t *table) put(ctx context.Context, p data.Persistable, fieldConstraints map[string]constraint.Constraint, ensureUniqueId bool) gomerr.Gomerr {
-	for fieldName, fieldConstraint := range fieldConstraints {
-		if ge := fieldConstraint.Validate(fieldName, p); ge != nil {
+func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints bool, ensureUniqueId bool) gomerr.Gomerr {
+	// Validate constraints using tool framework
+	if validateConstraints {
+		tc := structs.EnsureContext(nil).Put("ctx", ctx)
+		if ge := structs.ApplyTools(p, tc, t.constraintTool); ge != nil {
 			return ge
 		}
 	}
@@ -573,6 +578,65 @@ func (t *table) isFieldTupleUnique(fields []string) func(pi interface{}) gomerr.
 
 		return gomerr.Unprocessable("Too many db checks to verify uniqueness constraint", pi)
 	}
+}
+
+// checkFieldTupleUnique validates that the given field tuple is unique by querying DynamoDB.
+// This is called from the constraint tool during put() operations.
+func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, fields []string) gomerr.Gomerr {
+	// Create queryable from persistable
+	q := p.NewQueryable()
+	if q == nil {
+		return gomerr.Configuration("unable to create queryable for uniqueness check").
+			AddAttribute("Type", p.TypeName())
+	}
+
+	// Set consistency preference
+	if ct, ok := q.(ConsistencyTyper); ok {
+		ct.SetConsistencyType(Preferred)
+	}
+
+	// Copy field values from persistable to queryable
+	qv := reflect.ValueOf(q).Elem()
+	pv := reflect.ValueOf(p).Elem()
+	for _, field := range fields {
+		fv := pv.FieldByName(field)
+		if fv.IsValid() {
+			qv.FieldByName(field).Set(fv)
+		}
+	}
+
+	// Build query
+	input, ge := t.buildQueryInput(ctx, q, p.TypeName())
+	if ge != nil {
+		return ge
+	}
+
+	// Query with progressive limit increases
+	for queryLimit := int32(1); queryLimit <= 300; queryLimit += 100 {
+		input.Limit = &queryLimit
+		output, err := t.runQuery(ctx, input)
+		if err != nil {
+			return err
+		}
+
+		// If any results found, uniqueness violated
+		if len(output.Items) > 0 {
+			existing := reflect.New(pv.Type()).Interface()
+			if unmarshalErr := attributevalue.UnmarshalMap(output.Items[0], existing); unmarshalErr != nil {
+				return gomerr.Configuration("unable to unmarshal existing record").Wrap(unmarshalErr)
+			}
+			return constraint.NotSatisfied(p).AddAttribute("Existing", existing)
+		}
+
+		// No more pages, confirmed unique
+		if output.LastEvaluatedKey == nil {
+			return nil
+		}
+
+		input.ExclusiveStartKey = output.LastEvaluatedKey
+	}
+
+	return gomerr.Unprocessable("too many database checks to verify uniqueness constraint", p)
 }
 
 type UniqueConstraint struct {

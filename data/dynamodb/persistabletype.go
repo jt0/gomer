@@ -11,7 +11,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/data/dataerr"
 	"github.com/jt0/gomer/flect"
@@ -20,9 +19,9 @@ import (
 
 type persistableType struct {
 	name             string
-	dbNames          map[string]string                // field name -> storage name
-	fieldConstraints map[string]constraint.Constraint // Map of field name -> constraint needed to be satisfied
-	keyFields        map[string]bool                  // field names that participate in keys (should not be stored as separate attributes)
+	dbNames          map[string]string // field name -> storage name
+	keyFields        map[string]bool   // field names that participate in keys (should not be stored as separate attributes)
+	constraintFields map[string]bool   // field names that participate in any constraint (used for update optimization)
 	resolver         ItemResolver
 }
 
@@ -30,8 +29,8 @@ func newPersistableType(table *table, persistableName string, pType reflect.Type
 	pt := &persistableType{
 		name:             persistableName,
 		dbNames:          make(map[string]string),
-		fieldConstraints: make(map[string]constraint.Constraint, 1),
 		keyFields:        make(map[string]bool),
+		constraintFields: make(map[string]bool),
 		resolver:         resolver(pType),
 	}
 
@@ -72,7 +71,7 @@ func (pt *persistableType) processFields(structType reflect.Type, fieldPath stri
 		} else {
 			pt.processNameTag(fieldName, field.Tag.Get("db.name"))
 
-			errors = pt.processConstraintsTag(fieldName, field.Tag.Get("db.constraints"), table, errors)
+			errors = pt.processConstraintsTag(fieldName, field.Tag.Get("db.constraints"), errors)
 			errors = pt.processKeysTag(fieldName, field.Tag.Get("db.keys"), table.indexes, errors)
 		}
 	}
@@ -88,28 +87,29 @@ func (pt *persistableType) processNameTag(fieldName string, tag string) {
 	pt.dbNames[fieldName] = tag
 }
 
-var constraintsRegexp = regexp.MustCompile(`(unique)(\(([\w,]+)\))?`)
-
-func (pt *persistableType) processConstraintsTag(fieldName string, tag string, t *table, errors []gomerr.Gomerr) []gomerr.Gomerr {
+func (pt *persistableType) processConstraintsTag(fieldName string, tag string, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	if tag == "" {
 		return errors
 	}
 
 	constraints := constraintsRegexp.FindAllStringSubmatch(tag, -1)
 	if constraints == nil {
-		return append(errors, gomerr.Configuration("Invalid `db.constraints` value: "+tag).AddAttribute("Field", fieldName))
+		return append(errors, gomerr.Configuration("invalid `db.constraints` value: "+tag).AddAttribute("Field", fieldName))
 	}
 
 	for _, c := range constraints {
 		switch c[1] {
 		case "unique":
-			var additionalFields []string
 			fieldTuple := []string{fieldName}
 			if c[3] != "" {
-				additionalFields = strings.Split(strings.ReplaceAll(c[3], " ", ""), ",")
+				additionalFields := strings.Split(strings.ReplaceAll(c[3], " ", ""), ",")
 				fieldTuple = append(fieldTuple, additionalFields...)
 			}
-			pt.fieldConstraints[fieldName] = constraint.New("Unique", additionalFields, t.isFieldTupleUnique(fieldTuple))
+
+			// Mark ALL fields in the tuple as participating in constraints (for update optimization)
+			for _, f := range fieldTuple {
+				pt.constraintFields[f] = true
+			}
 		}
 	}
 

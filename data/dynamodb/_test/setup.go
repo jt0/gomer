@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
@@ -83,15 +86,87 @@ func (t *TableDefinition) Create(ddb *dynamodb.Client) {
 		KeySchema:              t.KeySchema,
 		LocalSecondaryIndexes:  t.LocalSecondaryIndex,
 		GlobalSecondaryIndexes: t.GlobalSecondaryIndex,
-		ProvisionedThroughput: ptr(types.ProvisionedThroughput{
-			ReadCapacityUnits:  ptr(int64(5)),
-			WriteCapacityUnits: ptr(int64(5)),
+		ProvisionedThroughput: Ptr(types.ProvisionedThroughput{
+			ReadCapacityUnits:  Ptr(int64(5)),
+			WriteCapacityUnits: Ptr(int64(5)),
 		}),
 	}); err != nil {
 		panic(fmt.Sprintf("Error creating %s table: %s", t.TableName, err.Error()))
 	}
 }
 
-func ptr[T any](t T) *T {
+func Ptr[T any](t T) *T {
 	return &t
+}
+
+// NewClient creates a DynamoDB client configured for either local or AWS usage.
+// If DDB_LOCAL environment variable is set, uses local DynamoDB:
+//   - Empty string or "true": uses default port 7001
+//   - Specific port number: uses that port (e.g., "8000")
+//
+// If DDB_LOCAL is not set, uses default AWS configuration.
+func NewClient() (*dynamodb.Client, bool, error) {
+	port, useDdbLocal := os.LookupEnv("DDB_LOCAL")
+
+	if !useDdbLocal {
+		// Use AWS configuration
+		cfg, err := config.LoadDefaultConfig(context.Background())
+		if err != nil {
+			return nil, false, err
+		}
+		return dynamodb.NewFromConfig(cfg), false, nil
+	}
+
+	// Use local DynamoDB
+	if port == "" {
+		// TODO: replace with support for launching a process-managed ddblocal instance.
+		port = "7001"
+	}
+
+	cfg, err := config.LoadDefaultConfig(
+		context.Background(),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("dummy", "dummy", "")),
+	)
+	if err != nil {
+		return nil, true, err
+	}
+
+	client := dynamodb.NewFromConfig(cfg, func(o *dynamodb.Options) {
+		o.BaseEndpoint = Ptr("http://127.0.0.1:" + port)
+	})
+
+	return client, true, nil
+}
+
+// DeleteAllTableData deletes all items from a table
+func DeleteAllTableData(ddb *dynamodb.Client, tableName string) error {
+	scanOutput, err := ddb.Scan(context.Background(), &dynamodb.ScanInput{
+		TableName: &tableName,
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, item := range scanOutput.Items {
+		_, err = ddb.DeleteItem(context.Background(), &dynamodb.DeleteItemInput{
+			TableName: &tableName,
+			Key: map[string]types.AttributeValue{
+				"PK": item["PK"],
+				"SK": item["SK"],
+			},
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// DeleteTable deletes the overall table
+func DeleteTable(ddb *dynamodb.Client, tableName string) error {
+	_, err := ddb.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{
+		TableName: &tableName,
+	})
+	return err
 }

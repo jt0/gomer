@@ -49,6 +49,10 @@ func (t *nextTokenizer) tokenize(ctx context.Context, q data.Queryable, lastEval
 		return nil, nil
 	}
 
+	if t.cipher.Encrypter == nil {
+		return nil, gomerr.Configuration("NextTokenCipher.Encrypter not configured")
+	}
+
 	nt := &nextToken{
 		Version:          formatVersion,
 		Filter:           nil, // TODO
@@ -85,6 +89,10 @@ func (t *nextTokenizer) tokenize(ctx context.Context, q data.Queryable, lastEval
 func (t *nextTokenizer) untokenize(ctx context.Context, q data.Queryable) (map[string]types.AttributeValue, gomerr.Gomerr) {
 	if q.NextPageToken() == nil {
 		return nil, nil
+	}
+
+	if t.cipher.Decrypter == nil {
+		return nil, gomerr.Configuration("NextTokenCipher.Decrypter not configured")
 	}
 
 	encrypted, err := base64.RawURLEncoding.DecodeString(*q.NextPageToken())

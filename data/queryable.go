@@ -53,3 +53,7 @@ func (b *BaseQueryable) MaximumPageSize() int {
 	}
 	return *b.maxResults
 }
+
+func (b *BaseQueryable) SetMaximumPageSize(size int) {
+	b.maxResults = &size
+}

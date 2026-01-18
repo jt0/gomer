@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
@@ -147,11 +148,21 @@ func indexFor(t *table, q data.Queryable) (index *index, ascending bool, consist
 				return c1.preferred // sorts based on which of c1 or c2 is preferred over the other
 			}
 
+			// TODO: moving and reordering logic from compareCandidates - consider if it should be applied above, too
+			// 4-2 vs 3-1  a_b_c_d  vs a_b_e_d
+			if c1.skMissing != c2.skMissing {
+				return c1.skMissing < c2.skMissing
+			}
+
+			if c1.skLength != c2.skLength {
+				return c1.skLength > c2.skLength
+			}
+
 			if consistencyType == Preferred && c1.index.canReadConsistently != c2.index.canReadConsistently {
 				return c1.index.canReadConsistently // sorts based on which of c1 or c2 can be read consistently
 			}
 
-			return compareCandidates(c1, c2)
+			return c1.index.name == nil // favor the table's index over others
 		})
 	}
 
@@ -287,7 +298,16 @@ func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeNam
 				lastFieldIndex, separators = i, ""
 			}
 		}
-		if lastFieldIndex < len(keyFields)-1 && len(keyValue) > 0 && keyValue[len(keyValue)-1] != queryWildcardChar && queryWildcardChar != 0 {
+
+		// If no non-empty fields found (all empty), preserve structure with separators
+		if lastFieldIndex == 0 && keyValue == "" {
+			// All fields are empty - return separators to show structure
+			// E.g., 2 fields: "#", 3 fields: "##"
+			for i := 1; i < len(keyFields); i++ {
+				keyValue += separator
+			}
+		} else if lastFieldIndex < len(keyFields)-1 && len(keyValue) > 0 && keyValue[len(keyValue)-1] != queryWildcardChar && queryWildcardChar != 0 {
+			// Add trailing separator for empty fields after last non-empty field
 			keyValue += separator
 		}
 	}
@@ -380,7 +400,15 @@ func fieldValue(fieldName string, sv reflect.Value, separator, escape byte) stri
 			if v.Kind() == reflect.Ptr && !v.IsNil() {
 				v = v.Elem()
 			}
-			value := fmt.Sprint(v.Interface())
+
+			// Special case for time.Time to match framework RFC3339 standard
+			var value string
+			if t, ok := v.Interface().(time.Time); ok {
+				value = t.Format(time.RFC3339)
+			} else {
+				value = fmt.Sprint(v.Interface())
+			}
+
 			// Escape separator and escape characters to preserve sort order and avoid ambiguity
 			return escapeKeyValue(value, separator, escape)
 		} else {
