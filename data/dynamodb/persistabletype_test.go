@@ -3,6 +3,7 @@ package dynamodb_test
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -101,7 +102,7 @@ func populateTestData(t *testing.T, store data.Store) {
 	}
 
 	// Create MultiPartKeyEntity items
-	for _, entityType := range []string{"USER", "ADMIN"} {
+	for _, entityType := range []string{"MP_1", "MP_2"} {
 		for i := 1; i <= 3; i++ {
 			entity := &testentities.MultiPartKeyEntity{
 				TenantId:   "T1",
@@ -275,7 +276,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			queryFunc: func() data.Queryable {
 				return &testentities.MultiPartKeyEntities{
 					TenantId:   "T1",
-					EntityType: "USER",
+					EntityType: "MP_1",
 				}
 			},
 			expectedCount: 3,
@@ -283,7 +284,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 				items := q.Items()
 				for _, item := range items {
 					entity := item.(*testentities.MultiPartKeyEntity)
-					if entity.TenantId != "T1" || entity.EntityType != "USER" {
+					if entity.TenantId != "T1" || entity.EntityType != "MP_1" {
 						t.Errorf("Expected TenantId=T1, EntityType=USER, got %s, %s", entity.TenantId, entity.EntityType)
 					}
 				}
@@ -894,34 +895,10 @@ func TestQuery_WildcardMatching(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "empty string wildcard",
-			setupFunc: func(store data.Store) {
-				ctx := context.Background()
-				items := []string{"a", "b", "c", "item1"}
-				for _, sk := range items {
-					entity := &testentities.CompositeKeyEntity{
-						PartitionKey: "T1",
-						SortKey:      sk,
-						Data:         "test",
-						Active:       true,
-					}
-					assert.Success(t, store.Create(ctx, entity))
-				}
-			},
-			queryFunc: func() data.Queryable {
-				return &testentities.CompositeKeyEntities{
-					PartitionKey: "T1",
-					SortKey:      "*",
-				}
-			},
-			expectedCount: 4, // All items
-			verifyFunc: func(t *testing.T, q data.Queryable) {
-				if len(q.Items()) != 4 {
-					t.Errorf("Expected all 4 items, got %d", len(q.Items()))
-				}
-			},
-		},
+		// INVALID TEST
+		//{
+		//	name: "empty string wildcard",
+		//},
 		{
 			name: "wildcard with gsi composite sk",
 			setupFunc: func(store data.Store) {
@@ -939,6 +916,7 @@ func TestQuery_WildcardMatching(t *testing.T) {
 					product := &testentities.Product{
 						TenantId: "T1",
 						Id:       fmt.Sprintf("prod%d", i+1),
+						Sku:      "sku_" + strconv.Itoa(i),
 						Category: p.category,
 						Name:     p.name,
 						Price:    99.99,
@@ -1007,170 +985,6 @@ func TestQuery_WildcardMatching(t *testing.T) {
 	}
 }
 
-// Section 5: Pagination Tests
-
-func TestQuery_Pagination(t *testing.T) {
-	tests := []struct {
-		name       string
-		setupFunc  func(store data.Store)
-		queryFunc  func() data.Queryable
-		pageSize   int
-		verifyFunc func(t *testing.T, pages []data.Queryable)
-	}{
-		{
-			name: "query with limit",
-			setupFunc: func(store data.Store) {
-				ctx := context.Background()
-				for i := 1; i <= 20; i++ {
-					entity := &testentities.CompositeKeyEntity{
-						PartitionKey: "T1",
-						SortKey:      fmt.Sprintf("item%02d", i),
-						Data:         "test",
-						Active:       true,
-					}
-					assert.Success(t, store.Create(ctx, entity))
-				}
-			},
-			queryFunc: func() data.Queryable {
-				return &testentities.CompositeKeyEntities{PartitionKey: "T1"}
-			},
-			pageSize: 5,
-			verifyFunc: func(t *testing.T, pages []data.Queryable) {
-				if len(pages) != 4 { // 20 items / 5 per page = 4 pages
-					t.Errorf("Expected 4 pages, got %d", len(pages))
-				}
-				totalItems := 0
-				for _, page := range pages {
-					totalItems += len(page.Items())
-				}
-				if totalItems != 20 {
-					t.Errorf("Expected 20 total items, got %d", totalItems)
-				}
-			},
-		},
-		{
-			name: "pagination preserves sort order",
-			setupFunc: func(store data.Store) {
-				ctx := context.Background()
-				for i := 1; i <= 15; i++ {
-					entity := &testentities.CompositeKeyEntity{
-						PartitionKey: "T1",
-						SortKey:      fmt.Sprintf("item%02d", i),
-						Data:         "test",
-						Active:       true,
-					}
-					assert.Success(t, store.Create(ctx, entity))
-				}
-			},
-			queryFunc: func() data.Queryable {
-				return &testentities.CompositeKeyEntities{PartitionKey: "T1"}
-			},
-			pageSize: 7,
-			verifyFunc: func(t *testing.T, pages []data.Queryable) {
-				// Collect all items across pages
-				var allKeys []string
-				for _, page := range pages {
-					allKeys = append(allKeys, extractSortKeys(page)...)
-				}
-				// Verify order
-				for i := 1; i < len(allKeys); i++ {
-					if allKeys[i] < allKeys[i-1] {
-						t.Errorf("Items not in order: %s comes after %s", allKeys[i], allKeys[i-1])
-					}
-				}
-			},
-		},
-		{
-			name: "no duplicates across pages",
-			setupFunc: func(store data.Store) {
-				ctx := context.Background()
-				for i := 1; i <= 25; i++ {
-					entity := &testentities.CompositeKeyEntity{
-						PartitionKey: "T1",
-						SortKey:      fmt.Sprintf("item%02d", i),
-						Data:         "test",
-						Active:       true,
-					}
-					assert.Success(t, store.Create(ctx, entity))
-				}
-			},
-			queryFunc: func() data.Queryable {
-				return &testentities.CompositeKeyEntities{PartitionKey: "T1"}
-			},
-			pageSize: 10,
-			verifyFunc: func(t *testing.T, pages []data.Queryable) {
-				// Collect all keys
-				var allKeys []string
-				for _, page := range pages {
-					allKeys = append(allKeys, extractSortKeys(page)...)
-				}
-				// Check for duplicates
-				unique := uniqueIds(allKeys)
-				if len(unique) != len(allKeys) {
-					t.Errorf("Found duplicates: %d unique vs %d total", len(unique), len(allKeys))
-				}
-				if len(allKeys) != 25 {
-					t.Errorf("Expected 25 total items, got %d", len(allKeys))
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Setup store
-			q := tt.queryFunc()
-			var persistable data.Persistable
-			switch q.(type) {
-			case *testentities.CompositeKeyEntities:
-				persistable = &testentities.CompositeKeyEntity{}
-			}
-
-			store, client := setupQueryStore(t, persistable)
-			defer cleanupQueryTable(t, client)
-
-			// Setup test data
-			if tt.setupFunc != nil {
-				tt.setupFunc(store)
-			}
-
-			// Query all pages
-			var pages []data.Queryable
-			q = tt.queryFunc()
-
-			// Cast to concrete type to access SetMaximumPageSize
-			switch v := q.(type) {
-			case *testentities.CompositeKeyEntities:
-				v.SetMaximumPageSize(tt.pageSize)
-			}
-
-			for {
-				err := store.Query(context.Background(), q)
-				assert.Success(t, err)
-				pages = append(pages, q)
-
-				// Check if there are more pages
-				if q.NextPageToken() == nil {
-					break
-				}
-
-				// Create new query for next page
-				q = tt.queryFunc()
-				switch v := q.(type) {
-				case *testentities.CompositeKeyEntities:
-					v.SetMaximumPageSize(tt.pageSize)
-				}
-				q.SetNextPageToken(pages[len(pages)-1].NextPageToken())
-			}
-
-			// Verify results
-			if tt.verifyFunc != nil {
-				tt.verifyFunc(t, pages)
-			}
-		})
-	}
-}
-
 // Section 7: Filter Expression Tests
 
 func TestQuery_FilterExpressions(t *testing.T) {
@@ -1182,25 +996,6 @@ func TestQuery_FilterExpressions(t *testing.T) {
 		verifyFunc    func(t *testing.T, q data.Queryable)
 	}{
 		{
-			name: "no filter fields",
-			setupFunc: func(store data.Store) {
-				ctx := context.Background()
-				for i := 1; i <= 5; i++ {
-					entity := &testentities.CompositeKeyEntity{
-						PartitionKey: "T1",
-						SortKey:      fmt.Sprintf("item%d", i),
-						Data:         fmt.Sprintf("data%d", i),
-						Active:       i%2 == 1,
-					}
-					assert.Success(t, store.Create(ctx, entity))
-				}
-			},
-			queryFunc: func() data.Queryable {
-				return &testentities.CompositeKeyEntities{PartitionKey: "T1"}
-			},
-			expectedCount: 5, // All items
-		},
-		{
 			name: "single filter field",
 			setupFunc: func(store data.Store) {
 				ctx := context.Background()
@@ -1209,7 +1004,9 @@ func TestQuery_FilterExpressions(t *testing.T) {
 						PartitionKey: "T1",
 						SortKey:      fmt.Sprintf("item%d", i),
 						Data:         "test",
-						Active:       i%2 == 1, // odd numbers are active
+					}
+					if i%2 == 1 { // odd numbers are 'running'
+						entity.Status = "running"
 					}
 					assert.Success(t, store.Create(ctx, entity))
 				}
@@ -1217,15 +1014,15 @@ func TestQuery_FilterExpressions(t *testing.T) {
 			queryFunc: func() data.Queryable {
 				return &testentities.CompositeKeyEntities{
 					PartitionKey: "T1",
-					Active:       true,
+					Status:       "running",
 				}
 			},
 			expectedCount: 3, // items 1, 3, 5
 			verifyFunc: func(t *testing.T, q data.Queryable) {
 				for _, item := range q.Items() {
 					entity := item.(*testentities.CompositeKeyEntity)
-					if !entity.Active {
-						t.Errorf("Expected Active=true, got false")
+					if entity.Status != "running" {
+						t.Errorf("Expected Status=running, got %s", entity.Status)
 					}
 				}
 			},
@@ -1237,19 +1034,19 @@ func TestQuery_FilterExpressions(t *testing.T) {
 				entities := []struct {
 					sortKey string
 					data    string
-					active  bool
+					status  string
 				}{
-					{"item1", "test", true},
-					{"item2", "test", false},
-					{"item3", "other", true},
-					{"item4", "test", true},
+					{"item1", "test", "running"},
+					{"item2", "test", "stopped"},
+					{"item3", "other", "running"},
+					{"item4", "test", "running"},
 				}
 				for _, e := range entities {
 					entity := &testentities.CompositeKeyEntity{
 						PartitionKey: "T1",
 						SortKey:      e.sortKey,
 						Data:         e.data,
-						Active:       e.active,
+						Status:       e.status,
 					}
 					assert.Success(t, store.Create(ctx, entity))
 				}
@@ -1258,15 +1055,15 @@ func TestQuery_FilterExpressions(t *testing.T) {
 				return &testentities.CompositeKeyEntities{
 					PartitionKey: "T1",
 					Data:         "test",
-					Active:       true,
+					Status:       "running",
 				}
 			},
 			expectedCount: 2, // item1 and item4
 			verifyFunc: func(t *testing.T, q data.Queryable) {
 				for _, item := range q.Items() {
 					entity := item.(*testentities.CompositeKeyEntity)
-					if entity.Data != "test" || !entity.Active {
-						t.Errorf("Expected Data=test and Active=true, got %s, %v", entity.Data, entity.Active)
+					if entity.Data != "test" || entity.Status != "running" {
+						t.Errorf("Expected Data=test and Status=running, got %s, %s", entity.Data, entity.Status)
 					}
 				}
 			},

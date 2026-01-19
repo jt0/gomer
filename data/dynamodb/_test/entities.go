@@ -11,6 +11,7 @@ type CompositeKeyEntity struct {
 	PartitionKey string `db.keys:"pk"`
 	SortKey      string `db.keys:"sk"`
 	Data         string
+	Status       string
 	Active       bool
 }
 
@@ -22,7 +23,8 @@ type CompositeKeyEntities struct {
 	PartitionKey string // Can list all entities within a partition
 	SortKey      string
 	Data         string
-	Active       bool
+	Status       string
+	//Active       bool
 }
 
 func (q *CompositeKeyEntities) TypeNames() []string         { return []string{"CompositeKeyEntity"} }

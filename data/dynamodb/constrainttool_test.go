@@ -6,7 +6,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-
 	"github.com/jt0/gomer/_test/assert"
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
@@ -19,44 +18,42 @@ const testTableName = "gomer_constraint_test"
 // Test fixtures
 
 type User struct {
-	Id       string `db.keys:"pk"`
-	Email    string `db.constraints:"unique"`
-	TenantId string
+	TenantId string `db.keys:"pk"`
+	Id       string `db.keys:"sk"`
+	Email    string `db.keys:"gsi_1:pk" db.constraints:"unique"` // atypical, but set this way for testing
 	Name     string
 }
 
 func (u *User) TypeName() string             { return "User" }
-func (u *User) NewQueryable() data.Queryable { return &UserQuery{} }
+func (u *User) NewQueryable() data.Queryable { return &Users{} }
 
-type UserQuery struct {
+type Users struct {
 	data.BaseQueryable
-	Id       string `db.keys:"pk"`
-	Email    string
 	TenantId string
+	Email    string
 }
 
-func (q *UserQuery) TypeNames() []string         { return []string{"User"} }
-func (q *UserQuery) TypeOf(_ interface{}) string { return "User" }
+func (q *Users) TypeNames() []string         { return []string{"User"} }
+func (q *Users) TypeOf(_ interface{}) string { return "User" }
 
 type Account struct {
-	Id       string `db.keys:"pk"`
-	Email    string `db.constraints:"unique(TenantId)"`
-	TenantId string
+	TenantId string `db.keys:"pk"`
+	Id       string `db.keys:"sk"`
+	Email    string `db.keys:"lsi_1:sk" db.constraints:"unique(TenantId)"` // more typical
 	Plan     string
 }
 
 func (a *Account) TypeName() string             { return "Account" }
-func (a *Account) NewQueryable() data.Queryable { return &AccountQuery{} }
+func (a *Account) NewQueryable() data.Queryable { return &Accounts{} }
 
-type AccountQuery struct {
+type Accounts struct {
 	data.BaseQueryable
-	Id       string `db.keys:"pk"`
-	Email    string
 	TenantId string
+	Email    string
 }
 
-func (q *AccountQuery) TypeNames() []string         { return []string{"Account"} }
-func (q *AccountQuery) TypeOf(_ interface{}) string { return "Account" }
+func (q *Accounts) TypeNames() []string         { return []string{"Account"} }
+func (q *Accounts) TypeOf(_ interface{}) string { return "Account" }
 
 // Test setup
 
@@ -73,13 +70,16 @@ func setupStore(t *testing.T, persistables ...data.Persistable) (data.Store, *dy
 	tableDef.WithTableName(testTableName).
 		WithAttributeDefinition("PK", types.ScalarAttributeTypeS).
 		WithAttributeDefinition("SK", types.ScalarAttributeTypeS).
-		WithAttributeDefinition("Email", types.ScalarAttributeTypeS).
-		WithAttributeDefinition("TenantId", types.ScalarAttributeTypeS).
+		WithAttributeDefinition("GSI1PK", types.ScalarAttributeTypeS).
+		WithAttributeDefinition("LSI1SK", types.ScalarAttributeTypeS).
 		WithKeySchema("PK", types.KeyTypeHash).
 		WithKeySchema("SK", types.KeyTypeRange).
+		WithLsi("lsi_1", []types.KeySchemaElement{
+			{AttributeName: ddbtest.Ptr("PK"), KeyType: types.KeyTypeHash},
+			{AttributeName: ddbtest.Ptr("LSI1SK"), KeyType: types.KeyTypeRange},
+		}, types.Projection{ProjectionType: types.ProjectionTypeAll}).
 		WithGsi("gsi_1", []types.KeySchemaElement{
-			{AttributeName: ddbtest.Ptr("Email"), KeyType: types.KeyTypeHash},
-			{AttributeName: ddbtest.Ptr("TenantId"), KeyType: types.KeyTypeRange},
+			{AttributeName: ddbtest.Ptr("GSI1PK"), KeyType: types.KeyTypeHash},
 		}, types.Projection{ProjectionType: types.ProjectionTypeAll})
 
 	tableDef.Create(client)
@@ -117,11 +117,11 @@ func TestConstraintTool_Create(t *testing.T) {
 		{
 			name: "unique email - duplicate fails",
 			setup: func(store data.Store) {
-				user1 := &User{Id: "user1", Email: "duplicate@example.com", TenantId: "tenant1", Name: "First User"}
+				user1 := &User{Id: "user2", Email: "duplicate@example.com", TenantId: "tenant1", Name: "Second User"}
 				ge := store.Create(context.Background(), user1)
 				assert.Success(t, ge)
 			},
-			persistable: &User{Id: "user2", Email: "duplicate@example.com", TenantId: "tenant2", Name: "Second User"},
+			persistable: &User{Id: "user3", Email: "duplicate@example.com", TenantId: "tenant1", Name: "Third User"},
 			expectError: true,
 		},
 	}
@@ -152,53 +152,35 @@ func TestConstraintTool_Update(t *testing.T) {
 	tests := []struct {
 		name        string
 		setup       func(store data.Store)
-		update      func(store data.Store)
+		toUpdate    *User
+		update      *User
 		expectError bool
 	}{
 		{
 			name: "update to unique email succeeds",
 			setup: func(store data.Store) {
-				ctx := context.Background()
 				user1 := &User{Id: "user1", Email: "user1@example.com", TenantId: "tenant1", Name: "User One"}
-				assert.Success(t, store.Create(ctx, user1))
-				user2 := &User{Id: "user2", Email: "user2@example.com", TenantId: "tenant1", Name: "User Two"}
-				assert.Success(t, store.Create(ctx, user2))
+				assert.Success(t, store.Create(context.Background(), user1))
 			},
-			update: func(store data.Store) {
-				ctx := context.Background()
-				user2 := &User{Id: "user2", Email: "newemail@example.com", TenantId: "tenant1", Name: "User Two"}
-				assert.Success(t, store.Update(ctx, user2, nil))
-			},
+			toUpdate:    &User{Id: "user2", Email: "user2@example.com", TenantId: "tenant1", Name: "User Two"},
+			update:      &User{Email: "newemail@example.com"},
 			expectError: false,
 		},
 		{
 			name: "update to duplicate email fails",
 			setup: func(store data.Store) {
-				ctx := context.Background()
 				user1 := &User{Id: "user1", Email: "user1@example.com", TenantId: "tenant1", Name: "User One"}
-				assert.Success(t, store.Create(ctx, user1))
-				user2 := &User{Id: "user2", Email: "user2@example.com", TenantId: "tenant1", Name: "User Two"}
-				assert.Success(t, store.Create(ctx, user2))
+				assert.Success(t, store.Create(context.Background(), user1))
 			},
-			update: func(store data.Store) {
-				ctx := context.Background()
-				user2 := &User{Id: "user2", Email: "user1@example.com", TenantId: "tenant1", Name: "User Two"}
-				store.Update(ctx, user2, nil)
-			},
+			toUpdate:    &User{Id: "user2", Email: "user2@example.com", TenantId: "tenant1", Name: "User Two"},
+			update:      &User{Email: "user1@example.com"},
 			expectError: true,
 		},
 		{
-			name: "update non-constrained field succeeds without validation",
-			setup: func(store data.Store) {
-				ctx := context.Background()
-				user := &User{Id: "user1", Email: "user@example.com", TenantId: "tenant1", Name: "Original Name"}
-				assert.Success(t, store.Create(ctx, user))
-			},
-			update: func(store data.Store) {
-				ctx := context.Background()
-				user := &User{Id: "user1", Email: "user@example.com", TenantId: "tenant1", Name: "Updated Name"}
-				assert.Success(t, store.Update(ctx, user, &User{Name: "Updated Name"}))
-			},
+			name:        "update non-constrained field succeeds without validation",
+			setup:       func(store data.Store) {},
+			toUpdate:    &User{Id: "user1", Email: "user@example.com", TenantId: "tenant1", Name: "Original Name"},
+			update:      &User{Name: "Updated Name"},
 			expectError: false,
 		},
 	}
@@ -207,17 +189,15 @@ func TestConstraintTool_Update(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store, client := setupStore(t, &User{})
 			defer cleanupTable(t, client)
-
 			tt.setup(store)
 
+			assert.Success(t, store.Create(context.Background(), tt.toUpdate))
+			ge := store.Update(context.Background(), tt.toUpdate, tt.update)
+
 			if tt.expectError {
-				// Capture the error from update in a way we can test
-				ctx := context.Background()
-				user2 := &User{Id: "user2", Email: "user1@example.com", TenantId: "tenant1", Name: "User Two"}
-				ge := store.Update(ctx, user2, nil)
 				assert.ErrorType(t, ge, constraint.NotSatisfied(nil))
 			} else {
-				tt.update(store)
+				assert.Success(t, ge)
 			}
 		})
 	}
@@ -270,7 +250,7 @@ func TestConstraintTool_MultiFieldUnique(t *testing.T) {
 			operation: func(store data.Store) error {
 				ctx := context.Background()
 				account2 := &Account{Id: "account2", Email: "different@example.com", TenantId: "tenant1", Plan: "basic"}
-				return store.Update(ctx, account2, nil)
+				return store.Update(ctx, account2, &User{Email: "different@example.com"})
 			},
 			expectError: false,
 		},
@@ -285,8 +265,8 @@ func TestConstraintTool_MultiFieldUnique(t *testing.T) {
 			},
 			operation: func(store data.Store) error {
 				ctx := context.Background()
-				account2 := &Account{Id: "account2", Email: "user1@example.com", TenantId: "tenant1", Plan: "basic"}
-				return store.Update(ctx, account2, nil)
+				account2 := &Account{Id: "account2", Email: "user2@example.com", TenantId: "tenant1", Plan: "basic"}
+				return store.Update(ctx, account2, &User{Email: "user1@example.com"})
 			},
 			expectError: true,
 		},
@@ -296,10 +276,7 @@ func TestConstraintTool_MultiFieldUnique(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store, client := setupStore(t, &Account{})
 			defer cleanupTable(t, client)
-
-			if tt.setup != nil {
-				tt.setup(store)
-			}
+			tt.setup(store)
 
 			ge := tt.operation(store)
 

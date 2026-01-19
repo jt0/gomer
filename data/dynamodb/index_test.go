@@ -2,7 +2,6 @@ package dynamodb_test
 
 import (
 	"context"
-	"reflect"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -84,25 +83,25 @@ func TestIndex_BuildKeyValue_SinglePK(t *testing.T) {
 		},
 		{
 			name:       "Numeric field",
-			entity:     &ddbtest.NumericKeyEntity{Id: 42},
+			entity:     &ddbtest.NumericKeyEntity{Id: 42, Version: 1},
 			expectedPK: "42",
 		},
 		{
 			name:       "Zero numeric",
-			entity:     &ddbtest.NumericKeyEntity{Id: 0},
+			entity:     &ddbtest.NumericKeyEntity{Id: 0, Version: 1},
 			expectedPK: "", // Zero values are omitted
 		},
 		{
 			name: "Pointer to string",
 			entity: func() *ddbtest.PointerKeyEntity {
 				s := "test"
-				return &ddbtest.PointerKeyEntity{Id: &s}
+				return &ddbtest.PointerKeyEntity{Id: &s, SortVal: ddbtest.Ptr(1)}
 			}(),
 			expectedPK: "test",
 		},
 		{
 			name:       "Nil pointer",
-			entity:     &ddbtest.PointerKeyEntity{Id: nil},
+			entity:     &ddbtest.PointerKeyEntity{Id: nil, SortVal: ddbtest.Ptr(1)},
 			expectedPK: "",
 		},
 	}
@@ -122,23 +121,10 @@ func TestIndex_BuildKeyValue_SinglePK(t *testing.T) {
 			}
 
 			// Create the entity
-			ge := store.Create(ctx, tt.entity)
-			assert.Success(t, ge)
+			assert.Success(t, store.Create(ctx, tt.entity))
 
 			// Read back to verify keys were stored correctly
-			readEntity := reflect.New(reflect.TypeOf(tt.entity).Elem()).Interface().(data.Persistable)
-
-			// For pointer types, set the key field so Read knows what to look for
-			if ptr, ok := tt.entity.(*ddbtest.PointerKeyEntity); ok && ptr.Id != nil {
-				readPtr := readEntity.(*ddbtest.PointerKeyEntity)
-				readPtr.Id = ptr.Id
-			} else {
-				// Copy the key field for other types
-				reflect.ValueOf(readEntity).Elem().Field(0).Set(reflect.ValueOf(tt.entity).Elem().Field(0))
-			}
-
-			ge = store.Read(ctx, readEntity)
-			assert.Success(t, ge)
+			assert.Success(t, store.Read(ctx, tt.entity))
 		})
 	}
 }

@@ -15,8 +15,11 @@ var (
 func nilConstraint(name string, errorIfNil bool) Constraint {
 	return New(name, nil, func(toTest interface{}) gomerr.Gomerr {
 		ttv := reflect.ValueOf(toTest)
-		if !ttv.IsValid() && errorIfNil {
-			return NotSatisfied(name[2:])
+		if !ttv.IsValid() {
+			if errorIfNil {
+				return NotSatisfied(name[2:])
+			}
+			return nil
 		}
 		switch ttv.Kind() {
 		case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
