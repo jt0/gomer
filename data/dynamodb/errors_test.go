@@ -74,7 +74,7 @@ func (e *InvalidKeysEntity1) NewQueryable() data.Queryable { return &InvalidKeys
 
 type InvalidKeysQueryable1 struct{ data.BaseQueryable }
 
-func (q *InvalidKeysQueryable1) TypeNames() []string         { return []string{"InvalidKeysEntity1"} }
+func (q *InvalidKeysQueryable1) TypeName() string            { return "InvalidKeysEntity1" }
 func (q *InvalidKeysQueryable1) TypeOf(_ interface{}) string { return "InvalidKeysEntity1" }
 
 type InvalidKeysEntity2 struct {
@@ -86,7 +86,7 @@ func (e *InvalidKeysEntity2) NewQueryable() data.Queryable { return &InvalidKeys
 
 type InvalidKeysQueryable2 struct{ data.BaseQueryable }
 
-func (q *InvalidKeysQueryable2) TypeNames() []string         { return []string{"InvalidKeysEntity2"} }
+func (q *InvalidKeysQueryable2) TypeName() string            { return "InvalidKeysEntity2" }
 func (q *InvalidKeysQueryable2) TypeOf(_ interface{}) string { return "InvalidKeysEntity2" }
 
 type InvalidKeysEntity3 struct {
@@ -98,7 +98,7 @@ func (e *InvalidKeysEntity3) NewQueryable() data.Queryable { return &InvalidKeys
 
 type InvalidKeysQueryable3 struct{ data.BaseQueryable }
 
-func (q *InvalidKeysQueryable3) TypeNames() []string         { return []string{"InvalidKeysEntity3"} }
+func (q *InvalidKeysQueryable3) TypeName() string            { return "InvalidKeysEntity3" }
 func (q *InvalidKeysQueryable3) TypeOf(_ interface{}) string { return "InvalidKeysEntity3" }
 
 type InvalidKeysEntity4 struct {
@@ -110,7 +110,7 @@ func (e *InvalidKeysEntity4) NewQueryable() data.Queryable { return &InvalidKeys
 
 type InvalidKeysQueryable4 struct{ data.BaseQueryable }
 
-func (q *InvalidKeysQueryable4) TypeNames() []string         { return []string{"InvalidKeysEntity4"} }
+func (q *InvalidKeysQueryable4) TypeName() string            { return "InvalidKeysEntity4" }
 func (q *InvalidKeysQueryable4) TypeOf(_ interface{}) string { return "InvalidKeysEntity4" }
 
 type InvalidKeysEntity5 struct {
@@ -122,7 +122,7 @@ func (e *InvalidKeysEntity5) NewQueryable() data.Queryable { return &InvalidKeys
 
 type InvalidKeysQueryable5 struct{ data.BaseQueryable }
 
-func (q *InvalidKeysQueryable5) TypeNames() []string         { return []string{"InvalidKeysEntity5"} }
+func (q *InvalidKeysQueryable5) TypeName() string            { return "InvalidKeysEntity5" }
 func (q *InvalidKeysQueryable5) TypeOf(_ interface{}) string { return "InvalidKeysEntity5" }
 
 type InvalidKeysEntity6 struct {
@@ -134,7 +134,7 @@ func (e *InvalidKeysEntity6) NewQueryable() data.Queryable { return &InvalidKeys
 
 type InvalidKeysQueryable6 struct{ data.BaseQueryable }
 
-func (q *InvalidKeysQueryable6) TypeNames() []string         { return []string{"InvalidKeysEntity6"} }
+func (q *InvalidKeysQueryable6) TypeName() string            { return "InvalidKeysEntity6" }
 func (q *InvalidKeysQueryable6) TypeOf(_ interface{}) string { return "InvalidKeysEntity6" }
 
 func TestErrors_Configuration_InvalidKeysTag(t *testing.T) {
@@ -238,7 +238,7 @@ func (e *UndefinedIndexEntity) NewQueryable() data.Queryable { return &Undefined
 
 type UndefinedIndexQueryable struct{ data.BaseQueryable }
 
-func (q *UndefinedIndexQueryable) TypeNames() []string         { return []string{"UndefinedIndexEntity"} }
+func (q *UndefinedIndexQueryable) TypeName() string            { return "UndefinedIndexEntity" }
 func (q *UndefinedIndexQueryable) TypeOf(_ interface{}) string { return "UndefinedIndexEntity" }
 
 func TestErrors_Configuration_UndefinedIndex(t *testing.T) {
@@ -298,9 +298,7 @@ func (e *InvalidConstraintsEntity1) NewQueryable() data.Queryable {
 
 type InvalidConstraintsQueryable1 struct{ data.BaseQueryable }
 
-func (q *InvalidConstraintsQueryable1) TypeNames() []string {
-	return []string{"InvalidConstraintsEntity1"}
-}
+func (q *InvalidConstraintsQueryable1) TypeName() string { return "InvalidConstraintsEntity1" }
 func (q *InvalidConstraintsQueryable1) TypeOf(_ interface{}) string {
 	return "InvalidConstraintsEntity1"
 }
@@ -317,9 +315,7 @@ func (e *InvalidConstraintsEntity2) NewQueryable() data.Queryable {
 
 type InvalidConstraintsQueryable2 struct{ data.BaseQueryable }
 
-func (q *InvalidConstraintsQueryable2) TypeNames() []string {
-	return []string{"InvalidConstraintsEntity2"}
-}
+func (q *InvalidConstraintsQueryable2) TypeName() string { return "InvalidConstraintsEntity2" }
 func (q *InvalidConstraintsQueryable2) TypeOf(_ interface{}) string {
 	return "InvalidConstraintsEntity2"
 }
@@ -336,9 +332,7 @@ func (e *InvalidConstraintsEntity3) NewQueryable() data.Queryable {
 
 type InvalidConstraintsQueryable3 struct{ data.BaseQueryable }
 
-func (q *InvalidConstraintsQueryable3) TypeNames() []string {
-	return []string{"InvalidConstraintsEntity3"}
-}
+func (q *InvalidConstraintsQueryable3) TypeName() string { return "InvalidConstraintsEntity3" }
 func (q *InvalidConstraintsQueryable3) TypeOf(_ interface{}) string {
 	return "InvalidConstraintsEntity3"
 }
@@ -355,9 +349,7 @@ func (e *ValidEmptyConstraintEntity) NewQueryable() data.Queryable {
 
 type ValidEmptyConstraintQueryable struct{ data.BaseQueryable }
 
-func (q *ValidEmptyConstraintQueryable) TypeNames() []string {
-	return []string{"ValidEmptyConstraintEntity"}
-}
+func (q *ValidEmptyConstraintQueryable) TypeName() string { return "ValidEmptyConstraintEntity" }
 func (q *ValidEmptyConstraintQueryable) TypeOf(_ interface{}) string {
 	return "ValidEmptyConstraintEntity"
 }
@@ -374,9 +366,7 @@ func (e *InvalidConstraintsEntity4) NewQueryable() data.Queryable {
 
 type InvalidConstraintsQueryable4 struct{ data.BaseQueryable }
 
-func (q *InvalidConstraintsQueryable4) TypeNames() []string {
-	return []string{"InvalidConstraintsEntity4"}
-}
+func (q *InvalidConstraintsQueryable4) TypeName() string { return "InvalidConstraintsEntity4" }
 func (q *InvalidConstraintsQueryable4) TypeOf(_ interface{}) string {
 	return "InvalidConstraintsEntity4"
 }

@@ -33,7 +33,7 @@ type Users struct {
 	Email    string
 }
 
-func (q *Users) TypeNames() []string         { return []string{"User"} }
+func (q *Users) TypeName() string            { return "User" }
 func (q *Users) TypeOf(_ interface{}) string { return "User" }
 
 type Account struct {
@@ -52,7 +52,7 @@ type Accounts struct {
 	Email    string
 }
 
-func (q *Accounts) TypeNames() []string         { return []string{"Account"} }
+func (q *Accounts) TypeName() string            { return "Account" }
 func (q *Accounts) TypeOf(_ interface{}) string { return "Account" }
 
 // Test setup
@@ -76,10 +76,10 @@ func setupStore(t *testing.T, persistables ...data.Persistable) (data.Store, *dy
 		WithKeySchema("SK", types.KeyTypeRange).
 		WithLsi("lsi_1", []types.KeySchemaElement{
 			{AttributeName: ddbtest.Ptr("PK"), KeyType: types.KeyTypeHash},
-			{AttributeName: ddbtest.Ptr("LSI1SK"), KeyType: types.KeyTypeRange},
+			{AttributeName: ddbtest.Ptr("G1SK"), KeyType: types.KeyTypeRange},
 		}, types.Projection{ProjectionType: types.ProjectionTypeAll}).
 		WithGsi("gsi_1", []types.KeySchemaElement{
-			{AttributeName: ddbtest.Ptr("GSI1PK"), KeyType: types.KeyTypeHash},
+			{AttributeName: ddbtest.Ptr("G1PK"), KeyType: types.KeyTypeHash},
 		}, types.Projection{ProjectionType: types.ProjectionTypeAll})
 
 	tableDef.Create(client)

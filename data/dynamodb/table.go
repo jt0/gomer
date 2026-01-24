@@ -111,14 +111,6 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 		return nil, ge
 	}
 
-	// Initialize constraint tool and preprocess persistable types
-	t.constraintTool = NewConstraintTool(t)
-	for _, p := range persistables {
-		if ge := structs.Preprocess(p, t.constraintTool); ge != nil {
-			return nil, ge.AddAttribute("TypeName", p.TypeName())
-		}
-	}
-
 	tables[tableName] = t
 
 	return t, nil
@@ -126,12 +118,12 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 
 func validOrDefaultChar(ch byte, _default byte) (byte, gomerr.Gomerr) {
 	if ch != 0 {
-		s := string(ch)
-		if strings.Contains(SymbolChars, s) {
-			return ch, nil
-		} else {
-			return 0, gomerr.Configuration("QueryWildcardChar " + s + " not in the valid set: " + SymbolChars)
+		for _, sch := range []byte(SymbolChars) {
+			if ch == sch {
+				return ch, nil
+			}
 		}
+		return 0, gomerr.Configuration("character " + string(ch) + " not in the valid set: " + SymbolChars)
 	} else {
 		return _default, nil
 	}
@@ -209,21 +201,28 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 		// Validate that each key in each index has fully defined key fields for this persistable
 		for _, idx := range t.indexes {
 			for _, attribute := range idx.keyAttributes() {
+				// NB: require types to declare all key fields, even if name matches what's defined by ddb
+				// TODO: support 'KeyField string `db.keys=""`' to avoid re-typing field name
 				if keyFields := attribute.keyFieldsByPersistable[unqualifiedPersistableName]; keyFields != nil {
 					for i, kf := range keyFields {
 						if kf == nil {
-							return gomerr.Configuration(
-								fmt.Sprintf("Index %s is missing a key field: %s[%s][%d]", idx.friendlyName(), attribute.name, unqualifiedPersistableName, i),
+							return gomerr.Configuration(fmt.Sprintf("index %s is missing a key field: %s[%s][%d]",
+								idx.friendlyName(), attribute.name, unqualifiedPersistableName, i),
 							).AddAttribute("keyFields", keyFields)
 						}
 					}
-				} else {
-					attribute.keyFieldsByPersistable[unqualifiedPersistableName] = []*keyField{{name: pt.dbNameToFieldName(attribute.name), ascending: true}}
 				}
 			}
 		}
 
 		t.persistableTypes[unqualifiedPersistableName] = pt
+	}
+
+	t.constraintTool = NewConstraintTool(t)
+	for _, p := range persistables {
+		if ge := structs.Preprocess(p, t.constraintTool); ge != nil {
+			return ge.AddAttribute("TypeName", p.TypeName())
+		}
 	}
 
 	return nil
@@ -329,6 +328,7 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 	}
 
 	// Remove key fields from attributes - they're stored in composite keys only
+	// TODO:p0 this should be opt-in or performed only if STD is being used with names not present in the persistable type
 	pt.removeKeyFieldsFromAttributes(&av)
 
 	// TODO: here we could compare the current av map w/ one we stashed into the object somewhere
@@ -489,7 +489,7 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 	}()
 
 	var input *dynamodb.QueryInput
-	input, ge = t.buildQueryInput(ctx, q, q.TypeNames()[0]) // TODO:p2 Fix when query supports multiple types
+	input, ge = t.buildQueryInput(ctx, q)
 	if ge != nil {
 		return ge
 	}
@@ -531,63 +531,13 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 	return nil
 }
 
-func (t *table) isFieldTupleUnique(fields []string) func(pi interface{}) gomerr.Gomerr {
-	return func(pi interface{}) gomerr.Gomerr {
-		p, ok := pi.(data.Persistable)
-		if !ok {
-			return gomerr.Unprocessable("Test value is not a data.Persistable", pi)
-		}
-
-		q := p.NewQueryable()
-		if ct, ok := q.(ConsistencyTyper); ok {
-			ct.SetConsistencyType(Preferred)
-		}
-
-		qv := reflect.ValueOf(q).Elem()
-		pv := reflect.ValueOf(p).Elem()
-		for _, field := range fields {
-			qv.FieldByName(field).Set(pv.FieldByName(field))
-		}
-
-		ctx := context.Background() // Use background context for constraint validation
-		input, ge := t.buildQueryInput(ctx, q, p.TypeName())
-		if ge != nil {
-			return ge
-		}
-
-		for queryLimit := int32(1); queryLimit <= 300; queryLimit += 100 { // Bump limit up each time
-			input.Limit = &queryLimit
-
-			output, queryErr := t.runQuery(ctx, input)
-			if queryErr != nil {
-				return queryErr
-			}
-
-			if len(output.Items) > 0 {
-				newP := reflect.New(pv.Type()).Elem()
-				err := attributevalue.UnmarshalMap(output.Items[0], newP)
-				return constraint.NotSatisfied(pi).AddAttribute("Existing", newP).Wrap(err)
-			}
-
-			if output.LastEvaluatedKey == nil {
-				return nil
-			}
-
-			input.ExclusiveStartKey = output.LastEvaluatedKey
-		}
-
-		return gomerr.Unprocessable("Too many db checks to verify uniqueness constraint", pi)
-	}
-}
-
 // checkFieldTupleUnique validates that the given field tuple is unique by querying DynamoDB.
 // This is called from the constraint tool during put() operations.
 func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, fields []string) gomerr.Gomerr {
 	// Create queryable from persistable
 	q := p.NewQueryable()
 	if q == nil {
-		return gomerr.Configuration("unable to create queryable for uniqueness check").
-			AddAttribute("Type", p.TypeName())
+		return gomerr.Configuration("unable to create queryable for uniqueness check").AddAttribute("Type", p.TypeName())
 	}
 
 	// Set consistency preference
@@ -599,14 +549,17 @@ func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, f
 	qv := reflect.ValueOf(q).Elem()
 	pv := reflect.ValueOf(p).Elem()
 	for _, field := range fields {
-		fv := pv.FieldByName(field)
-		if fv.IsValid() {
-			qv.FieldByName(field).Set(fv)
+		qfv := qv.FieldByName(field)
+		pfv := pv.FieldByName(field)
+		if qfv.IsValid() && pfv.IsValid() {
+			if ge := flect.SetValue(qfv, pfv); ge != nil {
+				return gomerr.Configuration("unable to populate uniqueness").Wrap(ge)
+			}
 		}
 	}
 
 	// Build query
-	input, ge := t.buildQueryInput(ctx, q, p.TypeName())
+	input, ge := t.buildQueryInput(ctx, q)
 	if ge != nil {
 		return ge
 	}
@@ -614,16 +567,21 @@ func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, f
 	// Query with progressive limit increases
 	for queryLimit := int32(1); queryLimit <= 300; queryLimit += 100 {
 		input.Limit = &queryLimit
-		output, err := t.runQuery(ctx, input)
-		if err != nil {
-			return err
+
+		var output *dynamodb.QueryOutput
+		if output, ge = t.runQuery(ctx, input); ge != nil {
+			return ge
 		}
 
 		// If any results found, uniqueness violated
 		if len(output.Items) > 0 {
-			existing := reflect.New(pv.Type()).Interface()
-			if unmarshalErr := attributevalue.UnmarshalMap(output.Items[0], existing); unmarshalErr != nil {
-				return gomerr.Configuration("unable to unmarshal existing record").Wrap(unmarshalErr)
+			existing := reflect.New(pv.Type()).Interface().(data.Persistable)
+			pt := t.persistableTypes[p.TypeName()]
+
+			if err := attributevalue.UnmarshalMap(output.Items[0], existing); err != nil {
+				return gomerr.Configuration("unable to unmarshal existing record").Wrap(err)
+			} else if ge = pt.populateKeyFieldsFromAttributes(existing, output.Items[0], t.indexes, t.valueSeparatorChar, false); ge != nil {
+				return ge
 			}
 			return constraint.NotSatisfied(p).AddAttribute("Existing", existing)
 		}
@@ -645,7 +603,7 @@ type UniqueConstraint struct {
 
 // buildQueryInput Builds the DynamoDB QueryInput types based on the provided queryable. See indexFor and
 // nextTokenizer.untokenize for possible error types.
-func (t *table) buildQueryInput(ctx context.Context, q data.Queryable, persistableTypeName string) (*dynamodb.QueryInput, gomerr.Gomerr) {
+func (t *table) buildQueryInput(ctx context.Context, q data.Queryable) (*dynamodb.QueryInput, gomerr.Gomerr) {
 	idx, ascending, consistent, ge := indexFor(t, q)
 	if ge != nil {
 		return nil, ge
@@ -658,12 +616,12 @@ func (t *table) buildQueryInput(ctx context.Context, q data.Queryable, persistab
 	qElem := reflect.ValueOf(q).Elem()
 
 	keyConditionExpression := safeName(idx.pk.name, expressionAttributeNames) + "=:pk"
-	expressionAttributeValues[":pk"] = idx.pk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar, 0) // Non-null because indexFor succeeded
+	expressionAttributeValues[":pk"] = idx.pk.attributeValue(qElem, q.TypeName(), t.valueSeparatorChar, 0) // Non-null because indexFor succeeded
 
 	// TODO: customers should opt-in to wildcard matches on a field-by-field basis
 	// TODO: need to provide a way to sanitize, both when saving and querying data, the delimiter char
 	if idx.sk != nil {
-		if eav := idx.sk.attributeValue(qElem, persistableTypeName, t.valueSeparatorChar, t.queryWildcardChar); eav != nil {
+		if eav := idx.sk.attributeValue(qElem, q.TypeName(), t.valueSeparatorChar, t.queryWildcardChar); eav != nil {
 			if s, ok := eav.(*types.AttributeValueMemberS); ok {
 				if len(s.Value) > 0 && (s.Value[len(s.Value)-1] == t.queryWildcardChar || s.Value[len(s.Value)-1] == t.valueSeparatorChar) {
 					s.Value = s.Value[:len(s.Value)-1] // remove the last char
@@ -676,11 +634,9 @@ func (t *table) buildQueryInput(ctx context.Context, q data.Queryable, persistab
 		}
 	}
 
-	var filterExpression *string
-	if fe, ge := t.filterExpression(q, idx, persistableTypeName, expressionAttributeNames, expressionAttributeValues); ge != nil {
+	var fe string
+	if fe, ge = t.filterExpression(q, idx, expressionAttributeNames, expressionAttributeValues); ge != nil {
 		return nil, ge
-	} else if fe != "" {
-		filterExpression = &fe
 	}
 
 	// for _, attribute := range q.ResponseFields() {
@@ -710,7 +666,7 @@ func (t *table) buildQueryInput(ctx context.Context, q data.Queryable, persistab
 		ExpressionAttributeNames:  expressionAttributeNames,
 		ExpressionAttributeValues: expressionAttributeValues,
 		KeyConditionExpression:    &keyConditionExpression,
-		FilterExpression:          filterExpression,
+		FilterExpression:          ptrOrNil(fe),
 		ExclusiveStartKey:         exclusiveStartKey,
 		Limit:                     t.limit(q.MaximumPageSize()),
 		// ProjectionExpression:      projectionExpressionPtr,
@@ -720,7 +676,14 @@ func (t *table) buildQueryInput(ctx context.Context, q data.Queryable, persistab
 	return input, nil
 }
 
-func (t *table) filterExpression(q data.Queryable, idx *index, persistableTypeName string, expressionAttributeNames map[string]string, expressionAttributeValues map[string]types.AttributeValue) (string, gomerr.Gomerr) {
+func ptrOrNil[T any](t T) *T {
+	if reflect.ValueOf(t).IsZero() {
+		return nil
+	}
+	return &t
+}
+
+func (t *table) filterExpression(q data.Queryable, idx *index, expressionAttributeNames map[string]string, expressionAttributeValues map[string]types.AttributeValue) (string, gomerr.Gomerr) {
 	qv, ge := flect.IndirectValue(q, false)
 	if ge != nil {
 		return "", ge
@@ -728,7 +691,7 @@ func (t *table) filterExpression(q data.Queryable, idx *index, persistableTypeNa
 
 	keyFields := map[string]bool{}
 	for _, ka := range idx.keyAttributes() {
-		for _, kf := range ka.keyFieldsByPersistable[persistableTypeName] {
+		for _, kf := range ka.keyFieldsByPersistable[q.TypeName()] {
 			keyFields[kf.name] = true
 		}
 	}

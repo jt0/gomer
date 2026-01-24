@@ -33,12 +33,12 @@ func setupTestStore(t *testing.T, persistables ...data.Persistable) (data.Store,
 		WithKeySchema("PK", types.KeyTypeHash).
 		WithKeySchema("SK", types.KeyTypeRange).
 		WithGsi("gsi_1", []types.KeySchemaElement{
-			{AttributeName: ddbtest.Ptr("GSI1PK"), KeyType: types.KeyTypeHash},
-			{AttributeName: ddbtest.Ptr("GSI1SK"), KeyType: types.KeyTypeRange},
+			{AttributeName: ddbtest.Ptr("G1PK"), KeyType: types.KeyTypeHash},
+			{AttributeName: ddbtest.Ptr("G1SK"), KeyType: types.KeyTypeRange},
 		}, types.Projection{ProjectionType: types.ProjectionTypeAll}).
 		WithLsi("lsi_1", []types.KeySchemaElement{
 			{AttributeName: ddbtest.Ptr("PK"), KeyType: types.KeyTypeHash},
-			{AttributeName: ddbtest.Ptr("LSI1SK"), KeyType: types.KeyTypeRange},
+			{AttributeName: ddbtest.Ptr("L1SK"), KeyType: types.KeyTypeRange},
 		}, types.Projection{ProjectionType: types.ProjectionTypeAll})
 
 	tableDef.Create(client)

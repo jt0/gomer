@@ -24,10 +24,10 @@ type CompositeKeyEntities struct {
 	SortKey      string
 	Data         string
 	Status       string
-	//Active       bool
+	// Active       bool
 }
 
-func (q *CompositeKeyEntities) TypeNames() []string         { return []string{"CompositeKeyEntity"} }
+func (q *CompositeKeyEntities) TypeName() string            { return "CompositeKeyEntity" }
 func (q *CompositeKeyEntities) TypeOf(_ interface{}) string { return "CompositeKeyEntity" }
 
 // MultiPartKeyEntity - demonstrates composite keys with multiple parts
@@ -48,7 +48,7 @@ type MultiPartKeyEntities struct {
 	Id         string
 }
 
-func (q *MultiPartKeyEntities) TypeNames() []string         { return []string{"MultiPartKeyEntity"} }
+func (q *MultiPartKeyEntities) TypeName() string            { return "MultiPartKeyEntity" }
 func (q *MultiPartKeyEntities) TypeOf(_ interface{}) string { return "MultiPartKeyEntity" }
 
 // StaticKeyEntity - demonstrates static key prefixes for single table design
@@ -67,7 +67,7 @@ type StaticKeyEntities struct {
 	Status string // List by id + status
 }
 
-func (q *StaticKeyEntities) TypeNames() []string         { return []string{"StaticKeyEntity"} }
+func (q *StaticKeyEntities) TypeName() string            { return "StaticKeyEntity" }
 func (q *StaticKeyEntities) TypeOf(_ interface{}) string { return "StaticKeyEntity" }
 
 // User - concrete domain entity for multi-tenant service
@@ -89,7 +89,7 @@ type Users struct {
 	Email    string // Lookup user by email (uses gsi_1)
 }
 
-func (q *Users) TypeNames() []string         { return []string{"User"} }
+func (q *Users) TypeName() string            { return "User" }
 func (q *Users) TypeOf(_ interface{}) string { return "User" }
 
 // Product - concrete domain entity for multi-tenant e-commerce
@@ -115,7 +115,7 @@ type Products struct {
 	Name     string
 }
 
-func (q *Products) TypeNames() []string         { return []string{"Product"} }
+func (q *Products) TypeName() string            { return "Product" }
 func (q *Products) TypeOf(_ interface{}) string { return "Product" }
 
 // Order - concrete domain entity for multi-tenant e-commerce
@@ -139,7 +139,7 @@ type Orders struct {
 	Status   string // List orders by status within tenant (uses gsi_2, sorted by date desc)
 }
 
-func (q *Orders) TypeNames() []string         { return []string{"Order"} }
+func (q *Orders) TypeName() string            { return "Order" }
 func (q *Orders) TypeOf(_ interface{}) string { return "Order" }
 
 // EmptyValueEntity - demonstrates empty and zero value handling
@@ -160,7 +160,7 @@ type EmptyValueEntities struct {
 	Id string
 }
 
-func (q *EmptyValueEntities) TypeNames() []string         { return []string{"EmptyValueEntity"} }
+func (q *EmptyValueEntities) TypeName() string            { return "EmptyValueEntity" }
 func (q *EmptyValueEntities) TypeOf(_ interface{}) string { return "EmptyValueEntity" }
 
 // NumericKeyEntity - demonstrates numeric key handling
@@ -179,7 +179,7 @@ type NumericKeyEntities struct {
 	Id int
 }
 
-func (q *NumericKeyEntities) TypeNames() []string         { return []string{"NumericKeyEntity"} }
+func (q *NumericKeyEntities) TypeName() string            { return "NumericKeyEntity" }
 func (q *NumericKeyEntities) TypeOf(_ interface{}) string { return "NumericKeyEntity" }
 
 // EscapedValueEntity - demonstrates separator escaping in keys
@@ -199,7 +199,7 @@ type EscapedValueEntities struct {
 	Id string
 }
 
-func (q *EscapedValueEntities) TypeNames() []string         { return []string{"EscapedValueEntity"} }
+func (q *EscapedValueEntities) TypeName() string            { return "EscapedValueEntity" }
 func (q *EscapedValueEntities) TypeOf(_ interface{}) string { return "EscapedValueEntity" }
 
 // PointerKeyEntity - demonstrates pointer fields in keys
@@ -216,7 +216,7 @@ type PointerKeyEntities struct {
 	data.BaseQueryable
 }
 
-func (q *PointerKeyEntities) TypeNames() []string         { return []string{"PointerKeyEntity"} }
+func (q *PointerKeyEntities) TypeName() string            { return "PointerKeyEntity" }
 func (q *PointerKeyEntities) TypeOf(_ interface{}) string { return "PointerKeyEntity" }
 
 // MappedFieldEntity - demonstrates db.name tag mapping
@@ -234,7 +234,7 @@ type MappedFieldEntities struct {
 	data.BaseQueryable
 }
 
-func (q *MappedFieldEntities) TypeNames() []string         { return []string{"MappedFieldEntity"} }
+func (q *MappedFieldEntities) TypeName() string            { return "MappedFieldEntity" }
 func (q *MappedFieldEntities) TypeOf(_ interface{}) string { return "MappedFieldEntity" }
 
 // EntityWithExclusions - demonstrates db.name:"-" exclusion
@@ -252,5 +252,5 @@ type EntityWithExclusionsQuery struct {
 	data.BaseQueryable
 }
 
-func (q *EntityWithExclusionsQuery) TypeNames() []string         { return []string{"EntityWithExclusions"} }
+func (q *EntityWithExclusionsQuery) TypeName() string            { return "EntityWithExclusions" }
 func (q *EntityWithExclusionsQuery) TypeOf(_ interface{}) string { return "EntityWithExclusions" }

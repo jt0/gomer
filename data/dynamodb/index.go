@@ -114,19 +114,8 @@ func indexFor(t *table, q data.Queryable) (index *index, ascending bool, consist
 		//
 		// TODO: revisit - should be the one that covers the least, right? Amongst the viable candidates, choose the
 		//      best match under the (presumption) that fewer missing keys and longer key length are better
-		var match *candidate
-		for _, typeName := range q.TypeNames() {
-			if candidateForType := idx.candidate(qv, typeName); candidateForType == nil {
-				match = nil
-				break
-			} else if match == nil {
-				match = candidateForType
-			} else if compareCandidates(match, candidateForType) {
-				candidateForType = match
-			}
-		}
-		if match != nil {
-			candidates = append(candidates, match)
+		if c := idx.candidate(qv, q.TypeName()); c != nil {
+			candidates = append(candidates, c)
 		}
 	}
 
@@ -169,18 +158,13 @@ func indexFor(t *table, q data.Queryable) (index *index, ascending bool, consist
 	return candidates[0].index, candidates[0].ascending, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
 }
 
-func compareCandidates(c1 *candidate, c2 *candidate) bool {
-	// 4-2 vs 3-1  a_b_c_d  vs a_b_e_d
-	if c1.skMissing != c2.skMissing {
-		return c1.skMissing < c2.skMissing
-	}
-
-	return c1.skLength > c2.skLength
-}
-
 func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 	// TODO: validate index sufficiently projects over request. if not, return nil
-	for _, kf := range i.pk.keyFieldsByPersistable[ptName] {
+	var keyFields []*keyField
+	if keyFields = i.pk.keyFieldsByPersistable[ptName]; keyFields == nil {
+		return nil
+	}
+	for _, kf := range keyFields {
 		if kf.name[0] == '\'' {
 			continue
 		}
@@ -201,7 +185,10 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 
 	// Needs more work to handle multi-attribute cases such as "between"
 	if i.sk != nil {
-		for _, kf := range i.sk.keyFieldsByPersistable[ptName] {
+		if keyFields = i.sk.keyFieldsByPersistable[ptName]; keyFields == nil {
+			return nil
+		}
+		for _, kf := range keyFields {
 			c.preferred = kf.preferred
 			c.ascending = kf.ascending
 
@@ -275,7 +262,7 @@ func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeNa
 	case string(types.ScalarAttributeTypeS):
 		return &types.AttributeValueMemberS{Value: value}
 	case string(types.ScalarAttributeTypeN):
-		return &types.AttributeValueMemberN{Value: value} //TODO:p3 add better support for numeric values
+		return &types.AttributeValueMemberN{Value: value} // TODO:p3 add better support for numeric values
 	default:
 		// Log that safeAttributeType() missed something. received type: k.AttributeType
 	}
@@ -287,6 +274,9 @@ func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeNam
 	// sv := reflect.ValueOf(s).Elem()
 	escapeChar := valueSeparator + 1
 	keyFields := k.keyFieldsByPersistable[persistableTypeName]
+	if keyFields == nil {
+		return ""
+	}
 	keyValue := fieldValue(keyFields[0].name, elemValue, valueSeparator, escapeChar) // will always have at least one keyField
 	if len(keyFields) > 1 {                                                          // 3
 		separator := string(valueSeparator)

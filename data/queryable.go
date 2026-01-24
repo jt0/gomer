@@ -1,7 +1,7 @@
 package data
 
 type Queryable interface {
-	TypeNames() []string
+	TypeName() string
 	TypeOf(interface{}) string
 	Items() []interface{}
 	SetItems([]interface{})
