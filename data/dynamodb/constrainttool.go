@@ -65,7 +65,7 @@ type uniquenessApplier struct {
 	fieldTuple []string
 }
 
-func (a uniquenessApplier) Apply(sv reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (a uniquenessApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	// Get context from ToolContext
 	ctxVal := tc.Get("ctx")
 	if ctxVal == nil {

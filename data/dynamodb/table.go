@@ -309,8 +309,7 @@ func (t *table) Update(ctx context.Context, p data.Persistable, update data.Pers
 func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints bool, ensureUniqueId bool) gomerr.Gomerr {
 	// Validate constraints using tool framework
 	if validateConstraints {
-		tc := structs.EnsureContext(nil).Put("ctx", ctx)
-		if ge := structs.ApplyTools(p, tc, t.constraintTool); ge != nil {
+		if ge := structs.ApplyTools(p, structs.EnsureContext().With("ctx", ctx), t.constraintTool); ge != nil {
 			return ge
 		}
 	}

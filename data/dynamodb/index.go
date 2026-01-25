@@ -190,9 +190,9 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 		}
 		for _, kf := range keyFields {
 			c.preferred = kf.preferred
-			c.ascending = kf.ascending
 
 			if kf.name[:1] == "'" {
+				c.ascending = kf.ascending // static values use their indicator
 				continue
 			}
 
@@ -201,9 +201,10 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 			} else if c.skMissing > 0 { // Cannot have gaps in the middle of the sort key
 				return nil
 			}
+			c.ascending = kf.ascending // modify only if fields are set
 		}
 
-		c.skLength = len(i.sk.keyFieldsByPersistable[ptName])
+		c.skLength = len(keyFields)
 	}
 
 	return c
@@ -296,7 +297,7 @@ func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeNam
 			for i := 1; i < len(keyFields); i++ {
 				keyValue += separator
 			}
-		} else if lastFieldIndex < len(keyFields)-1 && len(keyValue) > 0 && keyValue[len(keyValue)-1] != queryWildcardChar && queryWildcardChar != 0 {
+		} else if lastFieldIndex < len(keyFields)-1 && len(keyValue) > 0 && keyValue[len(keyValue)-1] != queryWildcardChar {
 			// Add trailing separator for empty fields after last non-empty field
 			keyValue += separator
 		}

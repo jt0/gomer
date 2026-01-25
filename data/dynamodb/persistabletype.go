@@ -116,7 +116,7 @@ func (pt *persistableType) processConstraintsTag(fieldName string, tag string, e
 	return errors
 }
 
-var ddbKeyStatementRegexp = regexp.MustCompile(`(?:(!)?([+-])?([\w-.]+)?:)?(pk|sk)(?:.(\d))?(?:=('\w+')(\+)?)?`)
+var ddbKeyStatementRegexp = regexp.MustCompile(`(!)?([+-])?(?:([\w-.]+):)?(pk|sk)(?:.(\d))?(?:=('\w+')(\+)?)?`)
 
 func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes map[string]*index, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	if tag == "" {
