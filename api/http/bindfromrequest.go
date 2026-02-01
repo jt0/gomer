@@ -2,7 +2,7 @@ package http
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/jt0/gomer/auth"
-	bind2 "github.com/jt0/gomer/bind"
+	"github.com/jt0/gomer/bind"
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
@@ -22,7 +22,7 @@ import (
 // BindFromRequestConfiguration
 // TODO: add config option mechanism...
 type BindFromRequestConfiguration struct {
-	BindConfiguration bind2.Configuration
+	BindConfiguration bind.Configuration
 	BindDirectiveConfiguration
 
 	defaultContentType               string
@@ -36,7 +36,7 @@ type Unmarshal func(toUnmarshal []byte, ptrToTarget interface{}) error
 
 func NewBindFromRequestConfiguration() BindFromRequestConfiguration {
 	return BindFromRequestConfiguration{
-		BindConfiguration:                bind2.NewConfiguration(),
+		BindConfiguration:                bind.NewConfiguration(),
 		BindDirectiveConfiguration:       NewBindDirectiveConfiguration(),
 		defaultContentType:               DefaultContentType,
 		perContentTypeUnmarshalFunctions: make(map[string]Unmarshal),
@@ -50,16 +50,15 @@ var (
 )
 
 func init() {
-	rc := NewBindFromRequestConfiguration()
-	DefaultBindFromRequestTool = SetBindFromRequestConfiguration(rc)
+	DefaultBindFromRequestTool = SetBindFromRequestConfiguration(NewBindFromRequestConfiguration())
 }
 
 func SetBindFromRequestConfiguration(requestConfiguration BindFromRequestConfiguration) *structs.Tool {
-	if DefaultBindFromRequestTool == nil || !reflect.DeepEqual(requestConfig, requestConfiguration) {
-		requestConfig = requestConfiguration
-		requestConfig.BindConfiguration = bind2.CopyConfigurationWithOptions(requestConfig.BindConfiguration, bind2.ExtendsWith(requestExtension{}))
-		DefaultBindFromRequestTool = bind2.NewInTool(requestConfig.BindConfiguration, structs.StructTagDirectiveProvider{"in"})
-	}
+	requestConfig = requestConfiguration
+	requestConfig.BindConfiguration = bind.CopyConfigurationWithOptions(requestConfig.BindConfiguration, bind.ExtendsWith(requestExtension{}))
+
+	DefaultBindFromRequestTool = bind.NewInTool(requestConfig.BindConfiguration, structs.StructTagDirectiveProvider{"in"})
+
 	return DefaultBindFromRequestTool
 }
 
@@ -70,11 +69,11 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 	}
 
 	tc := structs.ToolContextWithScope(scope).
-		Put(pathPartsKey, strings.Split(strings.Trim(request.URL.Path, "/"), "/")). // remove any leading or trailing slashes
-		Put(queryParamsKey, request.URL.Query()).
-		Put(headersKey, request.Header)
+		With(pathPartsKey, strings.Split(strings.Trim(request.URL.Path, "/"), "/")). // remove any leading or trailing slashes
+		With(queryParamsKey, request.URL.Query()).
+		With(headersKey, request.Header)
 
-	bodyBytes, err := ioutil.ReadAll(request.Body) // TODO:p3 Support streaming rather than using []byte
+	bodyBytes, err := io.ReadAll(request.Body) // TODO:p3 Support streaming rather than using []byte
 	if err != nil {
 		return nil, gomerr.Internal("Failed to read request body content").Wrap(err)
 	}
@@ -102,7 +101,7 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 			}
 		}
 
-		tc.Put(bind2.InKey, unmarshaled)
+		tc.Put(bind.InKey, unmarshaled)
 	}
 
 	return r, structs.ApplyTools(r, tc, DefaultBindFromRequestTool, constraint.DefaultValidationTool)
@@ -146,10 +145,8 @@ func (requestExtension) Applier(structType reflect.Type, structField reflect.Str
 	return nil, nil
 }
 
-const bindFromRequestToolType = "http.BindFromRequestTool"
-
 func (requestExtension) Type() string {
-	return bindToResponseToolType
+	return "http.BindFromRequestTool"
 }
 
 var hasInBodyBinding = make(map[string]bool)
@@ -158,7 +155,7 @@ type bindPathApplier struct {
 	index int
 }
 
-func (b bindPathApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (b bindPathApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	pathParts := tc.Get(pathPartsKey).([]string)
 	if b.index >= len(pathParts) {
 		return nil
@@ -175,7 +172,7 @@ type bindQueryParamApplier struct {
 	name string
 }
 
-func (b bindQueryParamApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (b bindQueryParamApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	// TODO:p3 support case-insensitive (or canonical) param names
 	values, hasValues := tc.Get(queryParamsKey).(url.Values)[b.name]
 	if !hasValues {
@@ -197,7 +194,7 @@ type bindRequestHeaderApplier struct {
 	name string
 }
 
-func (b bindRequestHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (b bindRequestHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	values, hasValues := tc.Get(headersKey).(http.Header)[textproto.CanonicalMIMEHeaderKey(b.name)]
 	if !hasValues {
 		return nil
@@ -212,7 +209,7 @@ func (b bindRequestHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc *s
 
 type bodyInApplier struct{}
 
-func (bodyInApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (bodyInApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	fv.Set(reflect.ValueOf(tc.Get(bodyBytesKey)))
 	return nil
 }

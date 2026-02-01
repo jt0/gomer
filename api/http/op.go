@@ -40,14 +40,14 @@ func (o Op) IsBuiltIn() bool {
 type Method = Op
 
 const (
-	noMethod Method = iota // 0b00000000
-	Put                    // 0b00000001
-	Post                   // 0b00000010
-	Get                    // 0b00000011
-	Patch                  // 0b00000100
-	Delete_                // 0b00000101
-	Head                   // 0b00000110
-	Options                // 0b00000111
+	methodNone    Method = iota // 0b00000000
+	MethodPut                   // 0b00000001
+	MethodPost                  // 0b00000010
+	MethodGet                   // 0b00000011
+	MethodPatch                 // 0b00000100
+	MethodDelete                // 0b00000101
+	MethodHead                  // 0b00000110
+	MethodOptions               // 0b00000111
 
 	methodBitsCount = 5
 	methodMask      = 1<<methodBitsCount - 1 // 0b00011111
@@ -55,7 +55,7 @@ const (
 
 // Should be applied in order to consts above
 var methods = [1 << methodBitsCount]string{
-	"", // noMethod
+	"", // methodNone
 	"PUT",
 	"POST",
 	"GET",
@@ -107,19 +107,19 @@ const (
 )
 
 const (
-	PutCollection     = Put + collection
-	PostCollection    = Post + collection
-	GetCollection     = Get + collection
-	PatchCollection   = Patch + collection
-	DeleteCollection  = Delete_ + collection
-	HeadCollection    = Head + collection
-	OptionsCollection = Options + collection
+	PutCollection     = MethodPut + collection
+	PostCollection    = MethodPost + collection
+	GetCollection     = MethodGet + collection
+	PatchCollection   = MethodPatch + collection
+	DeleteCollection  = MethodDelete + collection
+	HeadCollection    = MethodHead + collection
+	OptionsCollection = MethodOptions + collection
 
-	PutInstance     = Put + instance
-	PostInstance    = Post + instance
-	GetInstance     = Get + instance
-	PatchInstance   = Patch + instance
-	DeleteInstance  = Delete_ + instance
-	HeadInstance    = Head + instance
-	OptionsInstance = Options + instance
+	PutInstance     = MethodPut + instance
+	PostInstance    = MethodPost + instance
+	GetInstance     = MethodGet + instance
+	PatchInstance   = MethodPatch + instance
+	DeleteInstance  = MethodDelete + instance
+	HeadInstance    = MethodHead + instance
+	OptionsInstance = MethodOptions + instance
 )

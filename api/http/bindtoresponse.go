@@ -38,67 +38,69 @@ func NewBindToResponseConfiguration() BindToResponseConfiguration {
 }
 
 var (
-	DefaultBindToResponseTool *structs.Tool
-	responseConfig            BindToResponseConfiguration
+	bindToResponseTool *structs.Tool
+	responseConfig     BindToResponseConfiguration
 )
 
 func init() {
-	rc := NewBindToResponseConfiguration()
-	DefaultBindToResponseTool = SetBindToResponseConfiguration(rc)
+	bindToResponseTool = SetBindToResponseConfiguration(NewBindToResponseConfiguration())
 }
 
 func SetBindToResponseConfiguration(responseConfiguration BindToResponseConfiguration) *structs.Tool {
-	if DefaultBindToResponseTool == nil || !reflect.DeepEqual(requestConfig, responseConfiguration) {
-		responseConfig = responseConfiguration
-		responseConfig.BindConfiguration = bind.CopyConfigurationWithOptions(responseConfig.BindConfiguration, bind.ExtendsWith(bindToResponseExtension{}))
-		DefaultBindToResponseTool = bind.NewOutTool(responseConfig.BindConfiguration, structs.StructTagDirectiveProvider{"out"})
-	}
-	return DefaultBindToResponseTool
+	responseConfig = responseConfiguration
+	responseConfig.BindConfiguration = bind.CopyConfigurationWithOptions(responseConfig.BindConfiguration, bind.ExtendsWith(bindToResponseExtension{}))
+
+	bindToResponseTool = bind.NewOutTool(responseConfig.BindConfiguration, structs.StructTagDirectiveProvider{"out"})
+	return bindToResponseTool
 }
 
 // BindToResponse
 // TODO: add support for data format type
-func BindToResponse(result reflect.Value, header http.Header, scope string, acceptLanguage string) (output []byte, ge gomerr.Gomerr) {
-	tc := structs.ToolContextWithScope(scope).Put(headersKey, header).Put(AcceptLanguageKey, acceptLanguage)
+func BindToResponse(result reflect.Value, header http.Header, scope string, acceptLanguage string, statusCode int) ([]byte, int) {
+	tc := structs.ToolContextWithScope(scope).
+		With(headersKey, header).
+		With(AcceptLanguageKey, acceptLanguage).
+		With(bind.OutKey, make(map[string]any))
 
-	outBodyBinding := hasOutBodyBinding[result.Type().String()]
-	if !outBodyBinding {
-		tc.Put(bind.OutKey, make(map[string]interface{}))
+	if ge := structs.ApplyTools(result, tc, bindToResponseTool); ge != nil {
+		// TODO: Previously returned error: ge (from ApplyTools)
+		// Consider logging or otherwise handling this error
+		return nil, http.StatusInternalServerError
 	}
 
-	if ge = structs.ApplyTools(result, tc, DefaultBindToResponseTool); ge != nil {
-		return nil, ge
+	if body := tc.Get(bodyBytesKey); body != nil {
+		return body.([]byte), statusCode
 	}
 
-	if outBodyBinding {
-		return tc.Get(bodyBytesKey).([]byte), nil
-	} else {
-		// based on content type, and the absence of any "body" attributes use the proper marshaler to put the
-		// data into the response bytes
-		// TODO:p3 Allow applications to provide alternative means to choose a marshaler
-		contentType := header.Get(AcceptsHeader) // TODO:p4 support multi-options
-		marshal, ok := responseConfig.perContentTypeMarshalFunctions[contentType]
-		if !ok {
-			if responseConfig.defaultMarshalFunction == nil {
-				return nil, gomerr.Marshal("Unsupported Accepts content type", contentType)
-			}
-			marshal = responseConfig.defaultMarshalFunction
-			contentType = DefaultContentType
+	// based on content type, and the absence of any "body" attributes use the proper marshaler to put the
+	// data into the response bytes
+	// TODO:p3 Allow applications to provide alternative means to choose a marshaler
+	contentType := header.Get(AcceptsHeader) // TODO:p4 support multi-options
+	marshal, ok := responseConfig.perContentTypeMarshalFunctions[contentType]
+	if !ok {
+		if responseConfig.defaultMarshalFunction == nil {
+			// TODO: Previously returned error: gomerr.Marshal("Unsupported Accepts content type", contentType)
+			// Consider logging or otherwise handling this error
+			return nil, http.StatusNotAcceptable
 		}
-
-		outMap := tc.Get(bind.OutKey).(map[string]interface{})
-		if len(outMap) == 0 && responseConfig.EmptyValueHandlingDefault == OmitEmpty {
-			return nil, ge
-		}
-
-		bytes, err := marshal(outMap)
-		if err != nil {
-			return nil, gomerr.Marshal("Unable to marshal data", outMap).AddAttribute("ContentType", contentType).Wrap(err)
-		}
-		header.Set(ContentTypeHeader, contentType)
-
-		return bytes, nil
+		marshal = responseConfig.defaultMarshalFunction
+		contentType = DefaultContentType
 	}
+
+	outMap := tc.Get(bind.OutKey).(map[string]interface{})
+	if len(outMap) == 0 && responseConfig.EmptyValueHandlingDefault == OmitEmpty {
+		return nil, statusCode
+	}
+
+	bytes, err := marshal(outMap)
+	if err != nil {
+		// TODO: Previously returned error: gomerr.Marshal("Unable to marshal data", outMap).AddAttribute("ContentType", contentType).Wrap(err)
+		// Consider logging or otherwise handling this error (includes contentType and err details)
+		return nil, http.StatusInternalServerError
+	}
+	header.Set(ContentTypeHeader, contentType)
+
+	return bytes, statusCode
 }
 
 // bindToResponseExtension
@@ -118,20 +120,15 @@ func (bindToResponseExtension) Applier(structType reflect.Type, structField refl
 		if structField.Type != byteSliceType {
 			return nil, gomerr.Configuration("Body field must be of type []byte, not: " + structField.Type.String())
 		}
-		hasOutBodyBinding[structType.String()] = true
 		return bodyOutApplier{}, nil
 	}
 
 	return nil, nil
 }
 
-const bindToResponseToolType = "http.BindToResponseTool"
-
 func (bindToResponseExtension) Type() string {
-	return bindToResponseToolType
+	return "http.bindToResponseTool"
 }
-
-var hasOutBodyBinding = make(map[string]bool)
 
 type bindResponseHeaderApplier struct {
 	name string
@@ -141,7 +138,7 @@ type Marshaler interface {
 	Marshal() ([]byte, error)
 }
 
-func (b bindResponseHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (b bindResponseHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	if fv.IsZero() {
 		return nil // Cannot apply an empty value to a header so returning nil
 	}
@@ -204,7 +201,7 @@ func (b bindResponseHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc *
 
 type bodyOutApplier struct{}
 
-func (bodyOutApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (bodyOutApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	tc.Put(bodyBytesKey, fv.Interface())
 	return nil
 }

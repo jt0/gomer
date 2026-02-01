@@ -1,14 +1,11 @@
-package gin
+package rest
 
 import (
 	"net/http"
 	"reflect"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-
 	. "github.com/jt0/gomer/api/http"
-	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/resource"
 )
 
@@ -34,7 +31,7 @@ var successStatusCodes = map[Op]int{
 	OptionsInstance:   http.StatusOK,
 }
 
-var crudlActions = map[interface{}]func() resource.Action{
+var CRUDL = map[any]func() resource.Action{
 	PostCollection: resource.CreateAction,
 	GetInstance:    resource.ReadAction,
 	PatchInstance:  resource.UpdateAction,
@@ -42,23 +39,25 @@ var crudlActions = map[interface{}]func() resource.Action{
 	GetCollection:  resource.ListAction,
 }
 
-func CrudlActions() map[interface{}]func() resource.Action {
-	return crudlActions // returns a copy
-}
+var NoActions = map[any]func() resource.Action{}
 
-var noActions = map[interface{}]func() resource.Action{}
-
-func NoActions() map[interface{}]func() resource.Action {
-	return noActions
-}
-
-func BuildRoutes(r *gin.Engine, topLevelResources ...resource.Metadata) {
-	for _, md := range topLevelResources {
-		buildRoutes(r, md, "")
+func BuildRoutes(domain *resource.Domain, middleware ...func(http.Handler) http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	for _, md := range domain.RootResources() {
+		buildRoutes(mux, md, "")
 	}
+
+	// // Add gomerr renderer if provided
+	// if gomerrRenderer != nil {
+	// 	rw.errRenderers = []func(w http.ResponseWriter, err error) bool{
+	// 		gomerrErrRenderer(gomerrRenderer, r),
+	// 	}
+	// }
+
+	return withMiddleware(mux, nil, middleware)
 }
 
-func buildRoutes(r *gin.Engine, md resource.Metadata, parentPath string) {
+func buildRoutes(mux *http.ServeMux, md *resource.Metadata, parentPath string) {
 	instanceType := md.ResourceType(resource.InstanceCategory)
 	collectionType := md.ResourceType(resource.CollectionCategory)
 
@@ -83,18 +82,20 @@ func buildRoutes(r *gin.Engine, md resource.Metadata, parentPath string) {
 			successStatus = http.StatusOK
 		}
 
-		r.Handle(op.Method(), relativePath, handler(md.ResourceType(action().AppliesToCategory()), action, successStatus))
+		// Register with method and path pattern
+		pattern := op.Method() + " " + relativePath
+		mux.Handle(pattern, handler(md.ResourceType(action().AppliesToCategory()), action, successStatus))
 	}
 
 	if collectionType != nil { // Cannot have resources other than instances under a collection
 		for _, childMetadata := range md.Children() {
-			buildRoutes(r, childMetadata, path[resource.InstanceCategory])
+			buildRoutes(mux, childMetadata, path[resource.InstanceCategory])
 		}
 	}
 }
 
 func variablePath(resourceType reflect.Type, path string) string {
-	return path + "/:" + typeName(resourceType) + "Id"
+	return path + "/{" + typeName(resourceType) + "Id}"
 }
 
 func namedPath(resourceType reflect.Type, path string) string {
@@ -108,26 +109,35 @@ func typeName(t reflect.Type) string {
 	return s[dotIndex+1:]
 }
 
-func handler(resourceType reflect.Type, actionFunc func() resource.Action, successStatus int) func(c *gin.Context) {
-	return func(c *gin.Context) {
-		action := actionFunc()
-		if r, ge := BindFromRequest(c.Request, resourceType, Subject(c), action.Name()); ge != nil {
-			_ = c.Error(ge)
-		} else if r, ge = r.DoAction(action); ge != nil {
-			_ = c.Error(ge)
-		} else if ge = renderResult(reflect.ValueOf(r).Elem(), c, action.Name(), successStatus); ge != nil {
-			_ = c.Error(ge)
+func handler(resourceType reflect.Type, actionFunc func() resource.Action, successStatus int) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rw, ok := w.(*ResponseWriter)
+		if !ok {
+			// If not wrapped with ResponseWriter, create one (shouldn't happen in normal flow)
+			rw = &ResponseWriter{}
+			defer rw.writeTo(w)
+			w = rw
 		}
-	}
+
+		action := actionFunc()
+		res, ge := BindFromRequest(r, resourceType, Subject(r), action.Name())
+		if ge != nil {
+			rw.WriteError(ge)
+			return
+		}
+
+		res, ge = res.DoAction(r.Context(), action)
+		if ge != nil {
+			rw.WriteError(ge)
+			return
+		}
+
+		renderResult(res, rw, r, action.Name(), successStatus)
+	})
 }
 
-func renderResult(result reflect.Value, c *gin.Context, scope string, statusCode int) gomerr.Gomerr {
-	bytes, ge := BindToResponse(result, c.Writer.Header(), scope, c.Request.Header.Get("Accept-Language"))
-	if ge != nil {
-		return ge
-	}
-
-	c.Data(statusCode, c.Writer.Header().Get(ContentTypeHeader), bytes)
-
-	return nil
+func renderResult(result any, w http.ResponseWriter, r *http.Request, scope string, statusCode int) {
+	bytes, statusCode := BindToResponse(reflect.ValueOf(result), w.Header(), scope, r.Header.Get("Accept-Language"), statusCode)
+	w.WriteHeader(statusCode)
+	w.Write(bytes)
 }

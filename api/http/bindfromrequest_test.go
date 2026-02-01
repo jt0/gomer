@@ -69,7 +69,8 @@ func (g Greeting) recipient(location int) string {
 }
 
 func TestBindInTypes(t *testing.T) {
-	_, ge := resource.Register(&Greeting{}, nil, actions, stores.PanicStore, nil)
+	d := resource.NewDomain()
+	_, ge := d.Register(&Greeting{}, nil, actions, stores.PanicStore)
 	assert.Success(t, ge)
 
 	const (
