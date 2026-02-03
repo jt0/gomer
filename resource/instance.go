@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"context"
 	"reflect"
 
 	"github.com/jt0/gomer/data"
@@ -13,13 +14,13 @@ type Instance interface {
 	Id() string
 }
 
-func SaveInstance(i Instance) gomerr.Gomerr {
+func SaveInstance(ctx context.Context, i Instance) gomerr.Gomerr {
 	// TODO: Consider alt form w/ Updatable.Update() that separates resource from data
 	// if ge := u.Update(u); ge != nil {
 	// 	return ge
 	// }
 
-	if ge := i.metadata().dataStore.Update(i, nil); ge != nil {
+	if ge := i.metadata().dataStore.Update(ctx, i, nil); ge != nil {
 		return ge
 	}
 
@@ -45,7 +46,7 @@ func (i BaseInstance) NewQueryable() data.Queryable {
 	collection := reflect.New(ct.Elem()).Interface().(Collection)
 	collection.setSelf(collection)
 	collection.setMetadata(i.md)
-	collection.setSubject(i.Subject())
+	collection.setSubject(i.Subject(context.TODO()))
 
 	return collection
 }
@@ -59,34 +60,34 @@ func (i BaseInstance) Id() string {
 	return instanceId
 }
 
-func (BaseInstance) PreCreate() gomerr.Gomerr {
+func (BaseInstance) PreCreate(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PostCreate() gomerr.Gomerr {
+func (BaseInstance) PostCreate(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PreRead() gomerr.Gomerr {
+func (BaseInstance) PreRead(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PostRead() gomerr.Gomerr {
+func (BaseInstance) PostRead(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PreUpdate(Resource) gomerr.Gomerr {
+func (BaseInstance) PreUpdate(context.Context, Resource) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PostUpdate(Resource) gomerr.Gomerr {
+func (BaseInstance) PostUpdate(context.Context, Resource) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PreDelete() gomerr.Gomerr {
+func (BaseInstance) PreDelete(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PostDelete() gomerr.Gomerr {
+func (BaseInstance) PostDelete(context.Context) gomerr.Gomerr {
 	return nil
 }

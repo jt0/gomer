@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -42,7 +43,7 @@ func decrement(limiter limit.Limiter, limited limit.Limited) gomerr.Gomerr {
 	return nil
 }
 
-func applyLimitAction(limitAction limitAction, i Resource) (limit.Limiter, gomerr.Gomerr) {
+func applyLimitAction(ctx context.Context, limitAction limitAction, i Resource) (limit.Limiter, gomerr.Gomerr) {
 	limited, ok := i.(limit.Limited)
 	if !ok {
 		return nil, nil
@@ -55,31 +56,31 @@ func applyLimitAction(limitAction limitAction, i Resource) (limit.Limiter, gomer
 
 	li, ok := limiter.(Instance)
 	if !ok {
-		return nil, gomerr.Configuration("Limiter from " + i.metadata().instanceName + " does not implement resource.Instance")
+		return nil, gomerr.Configuration("limiter from " + i.metadata().instanceName + " does not implement resource.Instance")
 	}
 
-	// If the metadata isn't set, then this is a new object and needs to be loaded
+	// If the metadata isn't set, then this is a New object and needs to be loaded
 	var loaded bool
 	if li.metadata() == nil {
 		resourceType := reflect.TypeOf(limiter)
-		metadata, ok := resourceTypeToMetadata[resourceType]
-		if !ok {
-			return nil, gomerr.Unprocessable("Unknown Resource type. Was resource.Register() called for it?", resourceType)
+		md, exists := defaultDomain.Load().metadata[resourceType]
+		if !exists {
+			return nil, gomerr.Unprocessable("unknown Resource type. Was resource.Register() called for it?", resourceType)
 		}
 
 		li.setSelf(li)
-		li.setMetadata(metadata)
-		li.setSubject(i.Subject())
+		li.setMetadata(md)
+		li.setSubject(i.Subject(ctx))
 
 		// TODO: cache in case needed by more than one resource...
-		if ge = li.metadata().dataStore.Read(li); ge != nil {
+		if ge = li.metadata().dataStore.Read(ctx, li); ge != nil {
 			return nil, ge
 		}
 
 		loaded = true
 	}
 
-	if ge := limitAction(limiter, limited); ge != nil {
+	if ge = limitAction(limiter, limited); ge != nil {
 		return nil, ge
 	}
 
@@ -91,17 +92,17 @@ func applyLimitAction(limitAction limitAction, i Resource) (limit.Limiter, gomer
 	return limiter, nil
 }
 
-func saveLimiterIfDirty(limiter limit.Limiter) {
+func saveLimiterIfDirty(ctx context.Context, limiter limit.Limiter) {
 	// TODO: need an optimistic lock mechanism to avoid overwriting
 	if limiter == nil || !limiter.IsDirty() {
 		return
 	}
 
-	limiterInstance := limiter.(Instance) // Should always be true
-	ge := limiterInstance.metadata().dataStore.Update(limiterInstance, nil)
+	li := limiter.(Instance) // Should always be true
+	ge := li.metadata().dataStore.Update(ctx, li, nil)
 	if ge != nil {
 		// TODO: use provided logger
-		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", limiterInstance.metadata().instanceName, limiterInstance.Id(), ge)
+		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", li.metadata().instanceName, li.Id(), ge)
 		return
 	}
 

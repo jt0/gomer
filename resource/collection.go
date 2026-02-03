@@ -1,6 +1,8 @@
 package resource
 
 import (
+	"context"
+
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 )
@@ -14,11 +16,7 @@ type BaseCollection struct {
 	BaseResource
 }
 
-func (c BaseCollection) TypeNames() []string {
-	return []string{c.md.instanceName}
-}
-
-func (c BaseCollection) TypeOf(interface{}) string {
+func (c BaseCollection) TypeName() string {
 	return c.md.instanceName
 }
 
@@ -26,10 +24,10 @@ func (BaseCollection) MaximumPageSize() int {
 	return 0
 }
 
-func (BaseCollection) PreList() gomerr.Gomerr {
+func (BaseCollection) PreList(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseCollection) PostList() gomerr.Gomerr {
+func (BaseCollection) PostList(context.Context) gomerr.Gomerr {
 	return nil
 }

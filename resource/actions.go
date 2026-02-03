@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"context"
 	"errors"
 	"reflect"
 
@@ -27,12 +28,12 @@ func init() {
 
 type Creatable interface {
 	Instance
-	PreCreate() gomerr.Gomerr
-	PostCreate() gomerr.Gomerr
+	PreCreate(context.Context) gomerr.Gomerr
+	PostCreate(context.Context) gomerr.Gomerr
 }
 
 type OnCreateFailer interface {
-	OnCreateFailure(gomerr.Gomerr) gomerr.Gomerr
+	OnCreateFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
 }
 
 func CreateAction() Action {
@@ -55,33 +56,33 @@ func (*createAction) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.CreatePermission
 }
 
-func (*createAction) Pre(r Resource) gomerr.Gomerr {
+func (*createAction) Pre(ctx context.Context, r Resource) gomerr.Gomerr {
 	creatable, ok := r.(Creatable)
 	if !ok {
 		return gomerr.Unprocessable("Type does not implement resource.Creatable", r)
 	}
 
-	return creatable.PreCreate()
+	return creatable.PreCreate(ctx)
 }
 
-func (a *createAction) Do(r Resource) (ge gomerr.Gomerr) {
-	a.limiter, ge = applyLimitAction(checkAndIncrement, r)
+func (a *createAction) Do(ctx context.Context, r Resource) (ge gomerr.Gomerr) {
+	a.limiter, ge = applyLimitAction(ctx, checkAndIncrement, r)
 	if ge != nil {
 		return ge
 	}
 
-	return r.metadata().dataStore.Create(r.(Creatable))
+	return r.metadata().dataStore.Create(ctx, r.(Creatable))
 }
 
-func (a *createAction) OnDoSuccess(r Resource) (Resource, gomerr.Gomerr) {
-	defer saveLimiterIfDirty(a.limiter)
+func (a *createAction) OnDoSuccess(ctx context.Context, r Resource) (Resource, gomerr.Gomerr) {
+	defer saveLimiterIfDirty(ctx, a.limiter)
 
-	return r, r.(Creatable).PostCreate()
+	return r, r.(Creatable).PostCreate(ctx)
 }
 
-func (*createAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
+func (*createAction) OnDoFailure(ctx context.Context, r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 	if failer, ok := r.(OnCreateFailer); ok {
-		return failer.OnCreateFailure(ge)
+		return failer.OnCreateFailure(ctx, ge)
 	}
 
 	return ge
@@ -89,12 +90,12 @@ func (*createAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 
 type Readable interface {
 	Instance
-	PreRead() gomerr.Gomerr
-	PostRead() gomerr.Gomerr
+	PreRead(ctx context.Context) gomerr.Gomerr
+	PostRead(ctx context.Context) gomerr.Gomerr
 }
 
 type OnReadFailer interface {
-	OnReadFailure(gomerr.Gomerr) gomerr.Gomerr
+	OnReadFailure(ctx context.Context, ge gomerr.Gomerr) gomerr.Gomerr
 }
 
 func ReadAction() Action {
@@ -115,26 +116,26 @@ func (readAction) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.ReadPermission
 }
 
-func (readAction) Pre(r Resource) gomerr.Gomerr {
+func (readAction) Pre(ctx context.Context, r Resource) gomerr.Gomerr {
 	readable, ok := r.(Readable)
 	if !ok {
 		return gomerr.Unprocessable("Type does not implement resource.Readable", r)
 	}
 
-	return readable.PreRead()
+	return readable.PreRead(ctx)
 }
 
-func (readAction) Do(r Resource) (ge gomerr.Gomerr) {
-	return r.metadata().dataStore.Read(r.(Readable))
+func (readAction) Do(ctx context.Context, r Resource) (ge gomerr.Gomerr) {
+	return r.metadata().dataStore.Read(ctx, r.(Readable))
 }
 
-func (readAction) OnDoSuccess(r Resource) (Resource, gomerr.Gomerr) {
-	return r, r.(Readable).PostRead()
+func (readAction) OnDoSuccess(ctx context.Context, r Resource) (Resource, gomerr.Gomerr) {
+	return r, r.(Readable).PostRead(ctx)
 }
 
-func (readAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
+func (readAction) OnDoFailure(ctx context.Context, r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 	if failer, ok := r.(OnReadFailer); ok {
-		return failer.OnReadFailure(ge)
+		return failer.OnReadFailure(ctx, ge)
 	}
 
 	return convertPersistableNotFoundIfApplicable(r.(Readable), ge)
@@ -142,12 +143,12 @@ func (readAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 
 type Updatable interface {
 	Instance
-	PreUpdate(update Resource) gomerr.Gomerr
-	PostUpdate(update Resource) gomerr.Gomerr
+	PreUpdate(ctx context.Context, update Resource) gomerr.Gomerr
+	PostUpdate(ctx context.Context, update Resource) gomerr.Gomerr
 }
 
 type OnUpdateFailer interface {
-	OnUpdateFailure(gomerr.Gomerr) gomerr.Gomerr
+	OnUpdateFailure(ctx context.Context, ge gomerr.Gomerr) gomerr.Gomerr
 }
 
 func UpdateAction() Action {
@@ -170,8 +171,9 @@ func (*updateAction) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.UpdatePermission
 }
 
-func (a *updateAction) Pre(update Resource) gomerr.Gomerr {
-	r, ge := New(reflect.TypeOf(update), update.Subject())
+func (a *updateAction) Pre(ctx context.Context, update Resource) gomerr.Gomerr {
+	d, _ := ctx.Value(DomainCtxKey).(*Domain)
+	r, ge := d.NewResource(reflect.TypeOf(update), update.Subject(ctx))
 	if ge != nil {
 		return ge
 	}
@@ -181,32 +183,32 @@ func (a *updateAction) Pre(update Resource) gomerr.Gomerr {
 	}
 
 	// Get the id fields from the update
-	tc := structs.EnsureContext().Put(SourceValue, reflect.ValueOf(update).Elem())
+	tc := structs.EnsureContext().With(SourceValue, reflect.ValueOf(update).Elem())
 	if ge = structs.ApplyTools(current, tc, IdTool); ge != nil {
 		return ge
 	}
 
 	// Populate other fields with data from the underlying store
-	if ge = current.metadata().dataStore.Read(current); ge != nil {
+	if ge = current.metadata().dataStore.Read(ctx, current); ge != nil {
 		return ge
 	}
 
 	a.actual = current
 
-	return current.PreUpdate(update)
+	return current.PreUpdate(ctx, update)
 }
 
-func (a *updateAction) Do(update Resource) (ge gomerr.Gomerr) {
-	return update.metadata().dataStore.Update(a.actual, update.(Updatable))
+func (a *updateAction) Do(ctx context.Context, update Resource) (ge gomerr.Gomerr) {
+	return update.metadata().dataStore.Update(ctx, a.actual, update.(Updatable))
 }
 
-func (a *updateAction) OnDoSuccess(update Resource) (Resource, gomerr.Gomerr) {
-	return a.actual, a.actual.PostUpdate(update)
+func (a *updateAction) OnDoSuccess(ctx context.Context, update Resource) (Resource, gomerr.Gomerr) {
+	return a.actual, a.actual.PostUpdate(ctx, update)
 }
 
-func (a *updateAction) OnDoFailure(update Resource, ge gomerr.Gomerr) gomerr.Gomerr {
+func (a *updateAction) OnDoFailure(ctx context.Context, update Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 	if failer, ok := a.actual.(OnUpdateFailer); ok {
-		return failer.OnUpdateFailure(ge)
+		return failer.OnUpdateFailure(ctx, ge)
 	}
 
 	return convertPersistableNotFoundIfApplicable(update.(Updatable), ge)
@@ -214,12 +216,12 @@ func (a *updateAction) OnDoFailure(update Resource, ge gomerr.Gomerr) gomerr.Gom
 
 type Deletable interface {
 	Instance
-	PreDelete() gomerr.Gomerr
-	PostDelete() gomerr.Gomerr
+	PreDelete(ctx context.Context) gomerr.Gomerr
+	PostDelete(ctx context.Context) gomerr.Gomerr
 }
 
 type OnDeleteFailer interface {
-	OnDeleteFailure(gomerr.Gomerr) gomerr.Gomerr
+	OnDeleteFailure(ctx context.Context, ge gomerr.Gomerr) gomerr.Gomerr
 }
 
 func DeleteAction() Action {
@@ -242,34 +244,34 @@ func (*deleteAction) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.NoPermissions
 }
 
-func (*deleteAction) Pre(r Resource) gomerr.Gomerr {
+func (*deleteAction) Pre(ctx context.Context, r Resource) gomerr.Gomerr {
 	deletable, ok := r.(Deletable)
 	if !ok {
 		return gomerr.Unprocessable("Type does not implement resource.Deletable", r)
 	}
 
-	return deletable.PreDelete()
+	return deletable.PreDelete(ctx)
 }
 
-func (a *deleteAction) Do(r Resource) (ge gomerr.Gomerr) {
-	a.limiter, ge = applyLimitAction(decrement, r)
+func (a *deleteAction) Do(ctx context.Context, r Resource) (ge gomerr.Gomerr) {
+	a.limiter, ge = applyLimitAction(ctx, decrement, r)
 	if ge != nil {
 		return ge
 	}
 
-	return r.metadata().dataStore.Delete(r.(Deletable))
+	return r.metadata().dataStore.Delete(ctx, r.(Deletable))
 }
 
-func (a *deleteAction) OnDoSuccess(r Resource) (Resource, gomerr.Gomerr) {
-	defer saveLimiterIfDirty(a.limiter)
+func (a *deleteAction) OnDoSuccess(ctx context.Context, r Resource) (Resource, gomerr.Gomerr) {
+	defer saveLimiterIfDirty(ctx, a.limiter)
 
 	// If we made it this far, we know r is a Deletable
-	return r, r.(Deletable).PostDelete()
+	return r, r.(Deletable).PostDelete(ctx)
 }
 
-func (*deleteAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
+func (*deleteAction) OnDoFailure(ctx context.Context, r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 	if failer, ok := r.(OnDeleteFailer); ok {
-		return failer.OnDeleteFailure(ge)
+		return failer.OnDeleteFailure(ctx, ge)
 	}
 
 	return convertPersistableNotFoundIfApplicable(r.(Deletable), ge)
@@ -277,16 +279,16 @@ func (*deleteAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 
 type Listable interface {
 	Collection
-	PreList() gomerr.Gomerr
-	PostList() gomerr.Gomerr
+	PreList(ctx context.Context) gomerr.Gomerr
+	PostList(ctx context.Context) gomerr.Gomerr
 }
 
 type Collectible interface {
-	OnCollect(Resource) gomerr.Gomerr
+	OnCollect(ctx context.Context, r Resource) gomerr.Gomerr
 }
 
 type OnListFailer interface {
-	OnListFailure(gomerr.Gomerr) gomerr.Gomerr
+	OnListFailure(ctx context.Context, ge gomerr.Gomerr) gomerr.Gomerr
 }
 
 func ListAction() Action {
@@ -307,17 +309,17 @@ func (listAction) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.WritePermissions // 'Write' because we're creating a query, not creating a resource per se
 }
 
-func (listAction) Pre(r Resource) gomerr.Gomerr {
+func (listAction) Pre(ctx context.Context, r Resource) gomerr.Gomerr {
 	listable, ok := r.(Listable)
 	if !ok {
 		return gomerr.Unprocessable("Type does not implement resource.Listable", r)
 	}
 
-	return listable.PreList()
+	return listable.PreList(ctx)
 }
 
-func (listAction) Do(r Resource) gomerr.Gomerr {
-	if ge := r.metadata().dataStore.Query(r.(Listable)); ge != nil {
+func (listAction) Do(ctx context.Context, r Resource) gomerr.Gomerr {
+	if ge := r.metadata().dataStore.Query(ctx, r.(Listable)); ge != nil {
 		return ge
 	}
 
@@ -325,10 +327,10 @@ func (listAction) Do(r Resource) gomerr.Gomerr {
 		item := elem.(Resource)
 		item.setSelf(item)
 		item.setMetadata(r.metadata())
-		item.setSubject(r.Subject())
+		item.setSubject(r.Subject(ctx))
 
 		if collectible, ok := item.(Collectible); ok {
-			if ge := collectible.OnCollect(r); ge != nil {
+			if ge := collectible.OnCollect(ctx, r); ge != nil {
 				return ge
 			}
 		}
@@ -337,13 +339,13 @@ func (listAction) Do(r Resource) gomerr.Gomerr {
 	return nil
 }
 
-func (listAction) OnDoSuccess(r Resource) (Resource, gomerr.Gomerr) {
-	return r, r.(Listable).PostList()
+func (listAction) OnDoSuccess(ctx context.Context, r Resource) (Resource, gomerr.Gomerr) {
+	return r, r.(Listable).PostList(ctx)
 }
 
-func (listAction) OnDoFailure(r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
+func (listAction) OnDoFailure(ctx context.Context, r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 	if failer, ok := r.(OnListFailer); ok {
-		return failer.OnListFailure(ge)
+		return failer.OnListFailure(ctx, ge)
 	}
 
 	return ge
@@ -359,19 +361,19 @@ func (NoOpAction) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.NoPermissions
 }
 
-func (NoOpAction) Pre(Resource) gomerr.Gomerr {
+func (NoOpAction) Pre(_ context.Context, _ Resource) gomerr.Gomerr {
 	return nil
 }
 
-func (NoOpAction) Do(Resource) gomerr.Gomerr {
+func (NoOpAction) Do(_ context.Context, _ Resource) gomerr.Gomerr {
 	return nil
 }
 
-func (NoOpAction) OnDoSuccess(r Resource) (Resource, gomerr.Gomerr) {
+func (NoOpAction) OnDoSuccess(_ context.Context, r Resource) (Resource, gomerr.Gomerr) {
 	return r, nil
 }
 
-func (NoOpAction) OnDoFailure(_ Resource, ge gomerr.Gomerr) gomerr.Gomerr {
+func (NoOpAction) OnDoFailure(_ context.Context, _ Resource, ge gomerr.Gomerr) gomerr.Gomerr {
 	return ge
 }
 
