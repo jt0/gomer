@@ -2,7 +2,6 @@ package data
 
 type Queryable interface {
 	TypeName() string
-	TypeOf(interface{}) string
 	Items() []interface{}
 	SetItems([]interface{})
 	NextPageToken() *string

@@ -346,6 +346,23 @@ func unescapeAndSplit(value string, separator, escape byte) []string {
 	return segments
 }
 
+// escapeAndJoin joins segments with separator, escaping any separator or escape chars in values.
+func escapeAndJoin(segments []string, separator, escape byte) string {
+	escaped := make([]string, len(segments))
+	for i, s := range segments {
+		escaped[i] = escapeKeyValue(s, separator, escape)
+	}
+
+	result := ""
+	for i, s := range escaped {
+		if i > 0 {
+			result += string(separator)
+		}
+		result += s
+	}
+	return result
+}
+
 // escapeKeyValue escapes separator and escape characters in field values to prevent ambiguity in composite keys.
 // Uses the next ASCII character after separator as the escape character to preserve sort order.
 func escapeKeyValue(value string, separator, escape byte) string {
@@ -406,4 +423,173 @@ func fieldValue(fieldName string, sv reflect.Value, separator, escape byte) stri
 			return ""
 		}
 	}
+}
+
+// =============================================================================
+// Multi-Type Index Selection (for Nested Queryables)
+// =============================================================================
+
+// indexForMultiple finds an index that supports querying multiple types together.
+// This is used when a Queryable has nested Queryables that should be fetched in a single query.
+//
+// Returns:
+//   - index: The best matching index, or nil if no single index can satisfy all types
+//   - ascending: Sort direction based on the parent type's key definition
+//   - consistent: Whether consistent reads should be used
+//   - error: Only returned for internal errors; nil index means fallback to separate queries
+func indexForMultiple(t *table, parentType string, childTypes []string, q data.Queryable) (*index, bool, *bool, gomerr.Gomerr) {
+	allTypes := append([]string{parentType}, childTypes...)
+
+	var consistencyType ConsistencyType
+	if c, ok := q.(ConsistencyTyper); ok {
+		consistencyType = c.ConsistencyType()
+	} else {
+		consistencyType = t.defaultConsistencyType
+	}
+
+	candidates := make([]*candidate, 0)
+	qv := reflect.ValueOf(q).Elem()
+
+	for _, idx := range t.indexes {
+		if consistencyType == Required && !idx.canReadConsistently {
+			continue
+		}
+
+		// Check if index supports ALL types
+		if !indexSupportsAllTypes(idx, allTypes) {
+			continue
+		}
+
+		// Verify PK compatibility (all types must have compatible PK structure)
+		if !verifyPKCompatibility(idx, allTypes) {
+			continue
+		}
+
+		// Use parent type for candidate evaluation
+		if c := idx.candidate(qv, parentType); c != nil {
+			candidates = append(candidates, c)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil, false, nil, nil // No shared index; caller should use separate queries
+	}
+
+	// Sort candidates (same logic as indexFor)
+	sort.Slice(candidates, func(i, j int) bool {
+		c1 := candidates[i]
+		c2 := candidates[j]
+
+		if c1.preferred != c2.preferred {
+			return c1.preferred
+		}
+
+		if c1.skMissing != c2.skMissing {
+			return c1.skMissing < c2.skMissing
+		}
+
+		if c1.skLength != c2.skLength {
+			return c1.skLength > c2.skLength
+		}
+
+		if consistencyType == Preferred && c1.index.canReadConsistently != c2.index.canReadConsistently {
+			return c1.index.canReadConsistently
+		}
+
+		return c1.index.name == nil
+	})
+
+	return candidates[0].index, candidates[0].ascending, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
+}
+
+// indexSupportsAllTypes checks if an index has key field mappings for all given types.
+func indexSupportsAllTypes(idx *index, types []string) bool {
+	for _, typeName := range types {
+		// Must have PK mapping
+		if idx.pk.keyFieldsByPersistable[typeName] == nil {
+			return false
+		}
+		// Must have SK mapping if index has SK
+		if idx.sk != nil && idx.sk.keyFieldsByPersistable[typeName] == nil {
+			return false
+		}
+	}
+	return true
+}
+
+// verifyPKCompatibility verifies that multiple types have compatible PK structures.
+// For types to share a query, their PK fields must have the same structure so that
+// a single PK value from the query can be used to fetch items of all types.
+func verifyPKCompatibility(idx *index, types []string) bool {
+	if len(types) < 2 {
+		return true
+	}
+
+	// Get PK field names for first type
+	baseFields := idx.pk.keyFieldsByPersistable[types[0]]
+	if baseFields == nil {
+		return false
+	}
+
+	// Verify all other types have same PK structure
+	for _, typeName := range types[1:] {
+		typeFields := idx.pk.keyFieldsByPersistable[typeName]
+		if typeFields == nil || len(typeFields) != len(baseFields) {
+			return false
+		}
+		for i, kf := range typeFields {
+			// Static fields must match exactly
+			if baseFields[i].name[0] == '\'' || kf.name[0] == '\'' {
+				if baseFields[i].name != kf.name {
+					return false
+				}
+			}
+			// Dynamic field names must match so query values can be shared
+			if baseFields[i].name != kf.name {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// commonKeyPrefix computes the SK prefix that covers both parent and child types.
+// This enables a single query using begins_with(SK, prefix) to return items of multiple types.
+//
+// For Extension (SK: E#<id>) and ExtensionVersion (SK: E#<id>#V#...),
+// the common prefix is "E#<id>#" which matches both.
+func commonKeyPrefix(idx *index, parentType string, qv reflect.Value, separator, escape byte) string {
+	if idx.sk == nil {
+		return ""
+	}
+
+	parentFields := idx.sk.keyFieldsByPersistable[parentType]
+	if parentFields == nil {
+		return ""
+	}
+
+	// Build segments from parent's key fields
+	var segments []string
+
+	for _, kf := range parentFields {
+		if len(kf.name) > 0 && kf.name[0] == '\'' {
+			// Static value - extract from quotes
+			segments = append(segments, kf.name[1:len(kf.name)-1])
+		} else {
+			// Dynamic field - get value from query
+			fv := qv.FieldByName(kf.name)
+			if !fv.IsValid() || fv.IsZero() {
+				// No more values - stop here
+				break
+			}
+			segments = append(segments, fmt.Sprint(fv.Interface()))
+		}
+	}
+
+	if len(segments) == 0 {
+		return ""
+	}
+
+	// Join with escaping and add trailing separator for begins_with
+	return escapeAndJoin(segments, separator, escape) + string(separator)
 }

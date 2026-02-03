@@ -38,6 +38,7 @@ type table struct {
 	failDeleteIfNotPresent      bool
 	validateKeyFieldConsistency bool
 	constraintTool              *structs.Tool
+	typeDiscriminator           *typeDiscriminator // For multi-type queries with nested Queryables
 }
 
 type Configuration struct {
@@ -487,6 +488,13 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 		}
 	}()
 
+	// Check for nested Queryables (enables multi-type STD queries)
+	nested := getNestedQueryables(q)
+	if len(nested) > 0 {
+		return t.queryWithNested(ctx, q, nested)
+	}
+
+	// Standard single-type query path
 	var input *dynamodb.QueryInput
 	input, ge = t.buildQueryInput(ctx, q)
 	if ge != nil {
@@ -506,8 +514,7 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 
 	items := make([]interface{}, len(output.Items))
 	for i, item := range output.Items {
-		typeName := q.TypeOf(item)
-		pt := t.persistableTypes[typeName]
+		pt := t.persistableTypes[q.TypeName()]
 
 		var resolvedItem interface{}
 		if resolvedItem, ge = pt.resolver(item); ge != nil {

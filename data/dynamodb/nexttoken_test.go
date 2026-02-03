@@ -29,7 +29,7 @@ type mockCipher struct {
 	key byte
 }
 
-func (m *mockCipher) Encrypt(ctx context.Context, plaintext []byte, ec map[string]*string) ([]byte, gomerr.Gomerr) {
+func (m *mockCipher) Encrypt(ctx context.Context, plaintext []byte, ec map[string]string) ([]byte, gomerr.Gomerr) {
 	encrypted := make([]byte, len(plaintext))
 	for i, b := range plaintext {
 		encrypted[i] = b ^ m.key
@@ -37,7 +37,7 @@ func (m *mockCipher) Encrypt(ctx context.Context, plaintext []byte, ec map[strin
 	return encrypted, nil
 }
 
-func (m *mockCipher) Decrypt(ctx context.Context, ciphertext []byte, ec map[string]*string) ([]byte, gomerr.Gomerr) {
+func (m *mockCipher) Decrypt(ctx context.Context, ciphertext []byte, ec map[string]string) ([]byte, gomerr.Gomerr) {
 	// XOR decryption is symmetric
 	return m.Encrypt(ctx, ciphertext, ec)
 }

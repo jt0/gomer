@@ -6,6 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
 	"github.com/jt0/gomer/_test/assert"
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
@@ -33,8 +34,7 @@ type Users struct {
 	Email    string
 }
 
-func (q *Users) TypeName() string            { return "User" }
-func (q *Users) TypeOf(_ interface{}) string { return "User" }
+func (q *Users) TypeName() string { return "User" }
 
 type Account struct {
 	TenantId string `db.keys:"pk"`
@@ -52,8 +52,7 @@ type Accounts struct {
 	Email    string
 }
 
-func (q *Accounts) TypeName() string            { return "Account" }
-func (q *Accounts) TypeOf(_ interface{}) string { return "Account" }
+func (q *Accounts) TypeName() string { return "Account" }
 
 // Test setup
 
