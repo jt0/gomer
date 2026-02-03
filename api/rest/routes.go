@@ -9,6 +9,19 @@ import (
 	"github.com/jt0/gomer/resource"
 )
 
+// PathNamer can be implemented by resources to provide a custom path name.
+// If PathName() returns a non-empty string, it will be used instead of
+// the automatically derived name.
+type PathNamer interface {
+	PathName() string
+}
+
+// ancestorContext holds information about an ancestor resource for path name derivation.
+type ancestorContext struct {
+	typeName string // The full type name of the ancestor (e.g., "ExtensionVersion")
+	pathName string // The derived path name of the ancestor (e.g., "Version")
+}
+
 type HttpSpec struct {
 	Method            string
 	SuccessStatusCode int
@@ -44,7 +57,7 @@ var NoActions = map[any]func() resource.Action{}
 func BuildRoutes(domain *resource.Domain, middleware ...func(http.Handler) http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	for _, md := range domain.RootResources() {
-		buildRoutes(mux, md, "")
+		buildRoutes(mux, md, "", nil)
 	}
 
 	// // Add gomerr renderer if provided
@@ -54,19 +67,24 @@ func BuildRoutes(domain *resource.Domain, middleware ...func(http.Handler) http.
 	// 	}
 	// }
 
-	return withMiddleware(mux, nil, middleware)
+	return withMiddleware(domain, mux, nil, middleware)
 }
 
-func buildRoutes(mux *http.ServeMux, md *resource.Metadata, parentPath string) {
+func buildRoutes(mux *http.ServeMux, md *resource.Metadata, parentPath string, ancestors []ancestorContext) {
 	instanceType := md.ResourceType(resource.InstanceCategory)
 	collectionType := md.ResourceType(resource.CollectionCategory)
 
+	// Determine the path name for this resource's instance type
+	instanceTypeName := typeName(instanceType)
+	instancePathName := pathName(instanceType, ancestors)
+
 	path := make(map[resource.Category]string, 2)
 	if collectionType == nil {
-		path[resource.InstanceCategory] = namedPath(instanceType, parentPath)
+		path[resource.InstanceCategory] = parentPath + "/" + strings.ToLower(instancePathName)
 	} else {
-		path[resource.CollectionCategory] = namedPath(collectionType, parentPath)
-		path[resource.InstanceCategory] = variablePath(instanceType, path[resource.CollectionCategory])
+		collectionPathName := pathName(collectionType, ancestors)
+		path[resource.CollectionCategory] = parentPath + "/" + strings.ToLower(collectionPathName)
+		path[resource.InstanceCategory] = path[resource.CollectionCategory] + "/{" + instancePathName + "Id}"
 	}
 
 	for key, action := range md.Actions() {
@@ -88,18 +106,64 @@ func buildRoutes(mux *http.ServeMux, md *resource.Metadata, parentPath string) {
 	}
 
 	if collectionType != nil { // Cannot have resources other than instances under a collection
+		// Prepend this resource's context to ancestors for children (closest ancestor first)
+		childAncestors := append([]ancestorContext{{
+			typeName: instanceTypeName,
+			pathName: instancePathName,
+		}}, ancestors...)
 		for _, childMetadata := range md.Children() {
-			buildRoutes(mux, childMetadata, path[resource.InstanceCategory])
+			buildRoutes(mux, childMetadata, path[resource.InstanceCategory], childAncestors)
 		}
 	}
 }
 
-func variablePath(resourceType reflect.Type, path string) string {
-	return path + "/{" + typeName(resourceType) + "Id}"
-}
+// pathName derives a path name for a resource type, applying automatic trimming
+// of redundant prefixes based on the ancestor chain, unless the resource implements
+// PathNamer to provide an explicit override.
+//
+// The trimming algorithm checks ancestors from closest to furthest, and for each
+// ancestor checks if the type name starts with either:
+//  1. The ancestor's full type name (e.g., "ExtensionVersion" trims "ExtensionVersionArtifact" to "Artifact")
+//  2. The ancestor's path name (e.g., "Version" trims "VersionArtifact" to "Artifact")
+//
+// This allows trimming against any ancestor in the hierarchy. For example, with
+// Extension -> ExtensionVersion -> ExtensionArtifact, the "Extension" prefix from
+// the grandparent will be trimmed, producing /extensions/{id}/versions/{id}/artifact.
+func pathName(resourceType reflect.Type, ancestors []ancestorContext) string {
+	name := typeName(resourceType)
 
-func namedPath(resourceType reflect.Type, path string) string {
-	return path + "/" + strings.ToLower(typeName(resourceType))
+	// Check for explicit override via PathNamer interface
+	if resourceType.Kind() == reflect.Ptr {
+		if impl, ok := reflect.New(resourceType.Elem()).Interface().(PathNamer); ok {
+			if override := impl.PathName(); override != "" {
+				return override
+			}
+		}
+	}
+
+	// No ancestors means no trimming possible
+	if len(ancestors) == 0 {
+		return name
+	}
+
+	// Check each ancestor from closest to furthest
+	for _, ancestor := range ancestors {
+		// Try to trim ancestor's type name first (longer match takes precedence)
+		if len(ancestor.typeName) > 0 && len(name) > len(ancestor.typeName) {
+			if strings.EqualFold(name[:len(ancestor.typeName)], ancestor.typeName) {
+				return name[len(ancestor.typeName):]
+			}
+		}
+
+		// Try to trim ancestor's path name
+		if len(ancestor.pathName) > 0 && len(name) > len(ancestor.pathName) {
+			if strings.EqualFold(name[:len(ancestor.pathName)], ancestor.pathName) {
+				return name[len(ancestor.pathName):]
+			}
+		}
+	}
+
+	return name
 }
 
 func typeName(t reflect.Type) string {
