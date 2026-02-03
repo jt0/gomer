@@ -13,15 +13,15 @@ type zeroVal struct{}
 
 var ZeroVal = zeroVal{}
 
-func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
+func SetValue(target reflect.Value, value any) gomerr.Gomerr {
 	if value == nil {
 		return nil
 	} else if value == ZeroVal {
-		targetValue.Set(reflect.Zero(targetValue.Type()))
+		target.Set(reflect.Zero(target.Type()))
 		return nil
 	}
 
-	indirectTargetValueType := targetValue.Type()
+	indirectTargetValueType := target.Type()
 	var tvtPtr bool
 	if indirectTargetValueType.Kind() == reflect.Ptr { // Doesn't handle pointer pointers
 		indirectTargetValueType = indirectTargetValueType.Elem()
@@ -54,7 +54,7 @@ func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
 	if !indirectTypesMatch {
 		vvConvertibleToTv = indirectValueValueType.ConvertibleTo(indirectTargetValueType)
 		if !vvConvertibleToTv && !indirectValueValueType.AssignableTo(indirectTargetValueType) {
-			return gomerr.Unprocessable("Unable to set value with type '"+valueValue.Type().String()+"' to '"+targetValue.Type().String()+"'", value)
+			return gomerr.Unprocessable("Unable to set value with type '"+valueValue.Type().String()+"' to '"+target.Type().String()+"'", value)
 		}
 	}
 
@@ -65,7 +65,7 @@ func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
 	pt := ptrType{tvtPtr, vvtPtr}
 	switch pt {
 	case ptrType{true, true}:
-		if targetValue.Type() == valueValue.Type() {
+		if target.Type() == valueValue.Type() {
 			break
 		}
 		valueValue = valueValue.Elem()
@@ -80,7 +80,7 @@ func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
 		valueValue = p
 	case ptrType{false, true}:
 		if valueValue.IsNil() {
-			targetValue.Set(reflect.Zero(targetValue.Type())) // won't this break length constraint that wants a nil value?
+			target.Set(reflect.Zero(target.Type())) // won't this break length constraint that wants a nil value?
 			return nil
 		}
 		valueValue = valueValue.Elem()
@@ -92,7 +92,7 @@ func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
 		valueValue = valueValue.Convert(indirectTargetValueType)
 	}
 
-	targetValue.Set(valueValue)
+	target.Set(valueValue)
 
 	return nil
 }
@@ -100,8 +100,8 @@ func SetValue(targetValue reflect.Value, value interface{}) gomerr.Gomerr {
 // StringToType returns a value corresponding to the provided targetType. If the targetType isn't recognized, this
 // returns nil rather than an error. An error occurs if the targetType is recognized, but it's not possible to convert
 // the string into that type.
-func StringToType(valueString string, targetType reflect.Type) (interface{}, gomerr.Gomerr) {
-	var value interface{}
+func StringToType(valueString string, targetType reflect.Type) (any, gomerr.Gomerr) {
+	var value any
 	var err error
 
 	switch targetType.Kind() {

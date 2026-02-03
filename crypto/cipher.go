@@ -7,11 +7,11 @@ import (
 )
 
 type Encrypter interface {
-	Encrypt(ctx context.Context, plaintext []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr)
+	Encrypt(ctx context.Context, plaintext []byte, encryptionContext map[string]string) ([]byte, gomerr.Gomerr)
 }
 
 type Decrypter interface {
-	Decrypt(ctx context.Context, encoded []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr)
+	Decrypt(ctx context.Context, encoded []byte, encryptionContext map[string]string) ([]byte, gomerr.Gomerr)
 }
 
 type Cipher struct {

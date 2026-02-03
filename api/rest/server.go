@@ -1,16 +1,18 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 
 	. "github.com/jt0/gomer/api/http"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/resource"
 )
 
 // withMiddleware wraps a ServeMux with middleware and sets up the ResponseWriter buffering
-func withMiddleware(mux *http.ServeMux, gomerrRenderer func(gomerr.Gomerr) StatusCoder, middleware []func(http.Handler) http.Handler) http.Handler {
+func withMiddleware(domain *resource.Domain, mux *http.ServeMux, gomerrRenderer func(gomerr.Gomerr) StatusCoder, middleware []func(http.Handler) http.Handler) http.Handler {
 	// Outermost middleware that initializes ResponseWriter and finalizes response.
 	outer := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -22,8 +24,8 @@ func withMiddleware(mux *http.ServeMux, gomerrRenderer func(gomerr.Gomerr) Statu
 				rw.errRenderers = []ErrRenderer{gomerrErrRenderer(gomerrRenderer, r)}
 			}
 
-			// Call middleware chain with buffered writer
-			next.ServeHTTP(rw, r)
+			// Call middleware chain with response writer and domain
+			next.ServeHTTP(rw, r.WithContext(context.WithValue(r.Context(), resource.DomainCtxKey, domain)))
 
 			// Write buffered response to actual ResponseWriter
 			rw.writeTo(w)

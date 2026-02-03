@@ -11,7 +11,7 @@ import (
 type TestCase struct {
 	Name     string
 	Tool     *structs.Tool
-	Context  *structs.ToolContext
+	Context  structs.ToolContext
 	Input    interface{}
 	Expected interface{} // can be the same type as output or a gomerr.Gomerr
 }

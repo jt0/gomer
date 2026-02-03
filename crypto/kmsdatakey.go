@@ -27,10 +27,10 @@ type kmsDataKeyEncrypter struct {
 }
 
 // TODO: add support for asymmetric keys
-func KmsDataKeyEncrypter(kmsClient *kms.Client, masterKeyId string) Encrypter {
+func KmsDataKeyEncrypter(kmsClient *kms.Client, keyId string) Encrypter {
 	return kmsDataKeyEncrypter{
 		kms:   kmsClient,
-		keyId: masterKeyId,
+		keyId: keyId,
 	}
 }
 
@@ -46,21 +46,10 @@ func KmsDataKeyEncrypter(kmsClient *kms.Client, masterKeyId string) Encrypter {
 //	    An unexpected error occurred calling KMS
 //
 // TODO: add support for grant tokens?
-func (k kmsDataKeyEncrypter) Encrypt(ctx context.Context, plaintext []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
-	// Convert map[string]*string to map[string]string for SDK v2
-	var ec map[string]string
-	if encryptionContext != nil {
-		ec = make(map[string]string, len(encryptionContext))
-		for k, v := range encryptionContext {
-			if v != nil {
-				ec[k] = *v
-			}
-		}
-	}
-
+func (k kmsDataKeyEncrypter) Encrypt(ctx context.Context, plaintext []byte, encryptionContext map[string]string) ([]byte, gomerr.Gomerr) {
 	input := &kms.GenerateDataKeyInput{
 		KeyId:             &k.keyId,
-		EncryptionContext: ec,
+		EncryptionContext: encryptionContext,
 		KeySpec:           types.DataKeySpecAes256,
 	}
 
@@ -155,26 +144,15 @@ func KmsDataKeyDecrypter(kmsClient *kms.Client) Decrypter {
 //	    An unexpected error occurred calling KMS
 //
 // Decrypt returns the same data (and errors) as DecryptWithContext using just the Background context.
-func (k kmsDataKeyDecrypter) Decrypt(ctx context.Context, encrypted []byte, encryptionContext map[string]*string) ([]byte, gomerr.Gomerr) {
+func (k kmsDataKeyDecrypter) Decrypt(ctx context.Context, encrypted []byte, encryptionContext map[string]string) ([]byte, gomerr.Gomerr) {
 	ciphertext, ciphertextBlob, nonce, ge := k.decode(encrypted)
 	if ge != nil {
 		return nil, ge
 	}
 
-	// Convert map[string]*string to map[string]string for SDK v2
-	var ec map[string]string
-	if encryptionContext != nil {
-		ec = make(map[string]string, len(encryptionContext))
-		for k, v := range encryptionContext {
-			if v != nil {
-				ec[k] = *v
-			}
-		}
-	}
-
 	input := &kms.DecryptInput{
 		CiphertextBlob:    ciphertextBlob,
-		EncryptionContext: ec,
+		EncryptionContext: encryptionContext,
 	}
 
 	dataKey, err := k.kms.Decrypt(ctx, input)
