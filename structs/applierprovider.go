@@ -117,7 +117,7 @@ type scopeSelect struct {
 	appliers map[string]Applier
 }
 
-func (s scopeSelect) Apply(sv reflect.Value, fv reflect.Value, tc *ToolContext) gomerr.Gomerr {
+func (s scopeSelect) Apply(sv reflect.Value, fv reflect.Value, tc ToolContext) gomerr.Gomerr {
 	scopedApplier, ok := s.appliers[tc.Scope()]
 	if !ok {
 		scopedApplier, ok = s.appliers[anyScope]
@@ -191,8 +191,8 @@ type ifThenElseApplier struct {
 	orElse Applier
 }
 
-//func (a ifThenElseApplier) Apply(sv reflect.Value, fv reflect.Value, tc *ToolContext) gomerr.Gomerr {
-//}
+// func (a ifThenElseApplier) Apply(sv reflect.Value, fv reflect.Value, tc ToolContext) gomerr.Gomerr {
+// }
 
 type leftTestRightApplier struct {
 	name  string
@@ -201,7 +201,7 @@ type leftTestRightApplier struct {
 	right Applier
 }
 
-func (a leftTestRightApplier) Apply(sv reflect.Value, fv reflect.Value, tc *ToolContext) gomerr.Gomerr {
+func (a leftTestRightApplier) Apply(sv reflect.Value, fv reflect.Value, tc ToolContext) gomerr.Gomerr {
 	var leftGe gomerr.Gomerr
 
 	if a.left != nil {

@@ -128,7 +128,7 @@ type accessApplier struct {
 	zeroVal     reflect.Value
 }
 
-func (a accessApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (a accessApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	accessAction, ok := tc.Get(accessToolAction).(action)
 	if !ok {
 		return nil // no action specified, return
@@ -143,13 +143,13 @@ const (
 )
 
 type action interface {
-	do(fieldValue reflect.Value, accessTool accessApplier, toolContext *structs.ToolContext) gomerr.Gomerr
+	do(fieldValue reflect.Value, accessTool accessApplier, toolContext structs.ToolContext) gomerr.Gomerr
 }
 
-func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...*structs.ToolContext) *structs.ToolContext {
+func AddClearIfDeniedToContext(subject Subject, accessPermission AccessPermissions, tcs ...structs.ToolContext) structs.ToolContext {
 	// If no access principal, all permissions will be denied
 	accessPrincipal, _ := subject.Principal(fieldAccessPrincipal).(AccessPrincipal)
-	return structs.EnsureContext(tcs...).Put(accessToolAction, remover{accessPrincipal, accessPermission})
+	return structs.EnsureContext(tcs...).With(accessToolAction, remover{accessPrincipal, accessPermission})
 }
 
 type remover struct {
@@ -157,7 +157,7 @@ type remover struct {
 	permission AccessPermissions
 }
 
-func (r remover) do(fv reflect.Value, aa accessApplier, _ *structs.ToolContext) (ge gomerr.Gomerr) {
+func (r remover) do(fv reflect.Value, aa accessApplier, _ structs.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
 			ge = gomerr.Unprocessable("Unable to remove non-writable field", r)
@@ -170,13 +170,13 @@ func (r remover) do(fv reflect.Value, aa accessApplier, _ *structs.ToolContext) 
 	return nil
 }
 
-func AddCopyProvidedToContext(fromStruct reflect.Value, tcs ...*structs.ToolContext) *structs.ToolContext {
-	return structs.EnsureContext(tcs...).Put(accessToolAction, copyProvided(fromStruct))
+func AddCopyProvidedToContext(fromStruct reflect.Value, tcs ...structs.ToolContext) structs.ToolContext {
+	return structs.EnsureContext(tcs...).With(accessToolAction, copyProvided(fromStruct))
 }
 
 type copyProvided reflect.Value
 
-func (cf copyProvided) do(fv reflect.Value, aa accessApplier, _ *structs.ToolContext) (ge gomerr.Gomerr) {
+func (cf copyProvided) do(fv reflect.Value, aa accessApplier, _ structs.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
 			ge = gomerr.Unprocessable("Unable to copy field", r)

@@ -11,7 +11,7 @@ import (
 )
 
 func RegisterIdGeneratorFieldFunction(idGenerator id.Generator) {
-	fn := func(reflect.Value, reflect.Value, *structs.ToolContext) (interface{}, gomerr.Gomerr) {
+	fn := func(reflect.Value, reflect.Value, structs.ToolContext) (interface{}, gomerr.Gomerr) {
 		return idGenerator.Generate(), nil
 	}
 	_ = structs.RegisterToolFunction("$id", fn)
@@ -87,7 +87,7 @@ type copyIdsApplier struct {
 	hidden   map[string]bool
 }
 
-func (a copyIdsApplier) Apply(sv reflect.Value, _ reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (a copyIdsApplier) Apply(sv reflect.Value, _ reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	sourceValue, ok := tc.Lookup(SourceValue)
 	if !ok {
 		return gomerr.Configuration("Missing source for ids to copy")

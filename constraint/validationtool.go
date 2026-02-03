@@ -11,7 +11,7 @@ import (
 
 var DefaultValidationTool = NewValidationTool(structs.StructTagDirectiveProvider{"validate"})
 
-func Validate(v interface{}, validationTool *structs.Tool, optional ...*structs.ToolContext) gomerr.Gomerr {
+func Validate(v interface{}, validationTool *structs.Tool, optional ...structs.ToolContext) gomerr.Gomerr {
 	return structs.ApplyTools(v, structs.EnsureContext(optional...), validationTool)
 }
 
@@ -54,13 +54,11 @@ func (ap validationApplierProvider) Applier(sv reflect.Type, sf reflect.StructFi
 }
 
 // TargetNamer provides an alternative value for NotSatisfiedError.Target if an error occurs. By default, the value
-// will be the field name, but one might want to have a camelCase value (using field.CamelCase) or pre-pend a value
-// with an underscore include using field.CamelCase to change the casing on a field or pre-pending an underscore if
-// desired.
+// will be the field name, but one might want to have a camelCase value or pre-pend an underscore.
 type TargetNamer func(reflect.Type, reflect.StructField) string
 
 // CamelCaseTargetNamer is a common alternative to rendering the field name in case of a validation error.
-var CamelCaseTargetNamer = TransformFieldName(bind.CamelCase)
+var CamelCaseTargetNamer = TransformFieldName(bind.CamelCaseFn)
 
 func TransformFieldName(transform func(string) string) TargetNamer {
 	return func(_ reflect.Type, sf reflect.StructField) string {
@@ -73,7 +71,7 @@ type validationApplier struct {
 	constraint Constraint
 }
 
-func (t validationApplier) Apply(sv reflect.Value, fv reflect.Value, _ *structs.ToolContext) gomerr.Gomerr {
+func (t validationApplier) Apply(sv reflect.Value, fv reflect.Value, _ structs.ToolContext) gomerr.Gomerr {
 	if dc, ok := t.constraint.(*dynamicConstraint); ok {
 		for source, dv := range dc.dynamicValues {
 			if value, ge := structs.ValueFromStruct(sv, fv, source); ge != nil {

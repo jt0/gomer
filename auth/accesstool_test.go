@@ -77,7 +77,7 @@ func TestPermissionsWithProvidedVerifiesForwardsCompatibility(t *testing.T) {
 	}
 }
 
-func clear(subject auth.Subject, permission auth.AccessPermissions) *structs.ToolContext {
+func clear(subject auth.Subject, permission auth.AccessPermissions) structs.ToolContext {
 	return auth.AddClearIfDeniedToContext(subject, permission)
 }
 

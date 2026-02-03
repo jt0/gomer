@@ -18,8 +18,8 @@ const (
 type casingFn func(s string) string
 
 var (
-	PascalCase casingFn = func(fieldName string) string { return fieldName } // Exported fields are already PascalCase
-	CamelCase  casingFn = func(fieldName string) string {
+	PascalCaseFn casingFn = func(fieldName string) string { return fieldName } // Exported fields are already PascalCase
+	CamelCaseFn  casingFn = func(fieldName string) string {
 		// NB: only supports field names with an initial ASCII character
 		firstChar := fieldName[0]
 		if 'A' <= firstChar && firstChar <= 'Z' {
@@ -59,7 +59,7 @@ func NewConfiguration(options ...func(*Configuration)) Configuration {
 	bc := &Configuration{
 		emptyDirective: skipField,
 		emptyValue:     omitEmpty,
-		toCase:         &PascalCase,
+		toCase:         &PascalCaseFn,
 		// strictMode: false,  // true if should fail on extra input values, false otherwise
 	}
 
@@ -86,12 +86,12 @@ func IncludeEmpty(c *Configuration) {
 	c.emptyValue = includeEmpty
 }
 
-func PascalCaseData(c *Configuration) {
-	c.toCase = &PascalCase
+func PascalCaseFields(c *Configuration) {
+	c.toCase = &PascalCaseFn
 }
 
-func CamelCaseData(c *Configuration) {
-	c.toCase = &CamelCase
+func CamelCaseFields(c *Configuration) {
+	c.toCase = &CamelCaseFn
 }
 
 type ExtensionProvider interface {

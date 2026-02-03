@@ -11,8 +11,8 @@ import (
 
 var DefaultOutTool = NewOutTool(NewConfiguration(), structs.StructTagDirectiveProvider{"out"})
 
-func Out(v interface{}, outTool *structs.Tool, optional ...*structs.ToolContext) (map[string]interface{}, gomerr.Gomerr) {
-	tc := structs.EnsureContext(optional...).Put(OutKey, make(map[string]interface{}))
+func Out(v interface{}, outTool *structs.Tool, optional ...structs.ToolContext) (map[string]interface{}, gomerr.Gomerr) {
+	tc := structs.EnsureContext(optional...).With(OutKey, make(map[string]interface{}))
 	if ge := structs.ApplyTools(v, tc, outTool); ge != nil {
 		return nil, ge
 	}
@@ -103,7 +103,7 @@ type outApplier struct {
 	tool      *structs.Tool
 }
 
-func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	if fv.IsZero() && a.omitempty {
 		return nil
 	}

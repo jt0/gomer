@@ -12,7 +12,7 @@ import (
 
 // TODO: Build a mechanism to generate structs from Smithy models and JSON schema definitions
 
-func ApplyTools(v interface{}, tc *ToolContext, tools ...*Tool) gomerr.Gomerr {
+func ApplyTools(v interface{}, tc ToolContext, tools ...*Tool) gomerr.Gomerr {
 	vv, ge := flect.IndirectValue(v, false)
 	if ge != nil {
 		return gomerr.Unprocessable("Unable to apply tools to invalid value", v).Wrap(ge)
@@ -211,7 +211,7 @@ func (ps *preparedStruct) addAppliers(fieldName string, appliersToAdd map[string
 }
 
 // ApplyTools will apply the tool associated with each tool type in the appliers slice, in order, to each value in sv.
-func (ps *preparedStruct) applyTools(sv reflect.Value, tc *ToolContext, tools ...*Tool) gomerr.Gomerr {
+func (ps *preparedStruct) applyTools(sv reflect.Value, tc ToolContext, tools ...*Tool) gomerr.Gomerr {
 	var errors []gomerr.Gomerr
 	for _, tool := range tools {
 		if !ps.applied[tool.Id()] {

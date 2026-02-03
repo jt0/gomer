@@ -10,7 +10,7 @@ import (
 )
 
 func RegisterStashFieldFunction(name, sourceKey string, include InclusionPredicate) {
-	_ = structs.RegisterToolFunction("$_stash."+name, func(sv reflect.Value, _ reflect.Value, tc *structs.ToolContext) (interface{}, gomerr.Gomerr) {
+	_ = structs.RegisterToolFunction("$_stash."+name, func(sv reflect.Value, _ reflect.Value, tc structs.ToolContext) (interface{}, gomerr.Gomerr) {
 		stashData := tc.Get(sourceKey)
 		if stashData == nil {
 			return nil, nil
@@ -35,7 +35,7 @@ func RegisterStashFieldFunction(name, sourceKey string, include InclusionPredica
 }
 
 func RegisterUnstashFieldFunction(name, destinationKey string, include InclusionPredicate, createIntermediates bool) {
-	_ = structs.RegisterToolFunction("$_unstash."+name, func(sv reflect.Value, fv reflect.Value, tc *structs.ToolContext) (interface{}, gomerr.Gomerr) {
+	_ = structs.RegisterToolFunction("$_unstash."+name, func(sv reflect.Value, fv reflect.Value, tc structs.ToolContext) (interface{}, gomerr.Gomerr) {
 		if !fv.IsValid() {
 			return nil, nil // TODO: return an error?
 		} // TODO:p3 handle fv as a ptr type

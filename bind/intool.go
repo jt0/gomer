@@ -12,8 +12,8 @@ import (
 
 var DefaultInTool = NewInTool(NewConfiguration(), structs.StructTagDirectiveProvider{"in"})
 
-func In(data map[string]interface{}, v interface{}, inTool *structs.Tool, optional ...*structs.ToolContext) gomerr.Gomerr {
-	return structs.ApplyTools(v, structs.EnsureContext(optional...).Put(InKey, data), inTool)
+func In(data map[string]interface{}, v interface{}, inTool *structs.Tool, optional ...structs.ToolContext) gomerr.Gomerr {
+	return structs.ApplyTools(v, structs.EnsureContext(optional...).With(InKey, data), inTool)
 }
 
 // NewInTool
@@ -78,7 +78,7 @@ var (
 	// uint8SliceType = reflect.TypeOf((*[]uint8)(nil)).Elem()
 )
 
-func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc *structs.ToolContext) gomerr.Gomerr {
+func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	inData := tc.Get(InKey)
 	if inData == nil {
 		return nil

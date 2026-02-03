@@ -4,77 +4,72 @@ import (
 	"strings"
 )
 
-type ToolContext struct {
-	m map[string]interface{}
+type ToolContext map[string]any
+
+func (tc ToolContext) Put(key string, value any) any {
+	old := tc[key]
+	tc[key] = value
+	return old
 }
 
-func (tc *ToolContext) Put(key string, value interface{}) *ToolContext {
-	if tc == nil {
-		//goland:noinspection ALL
-		tc = &ToolContext{map[string]interface{}{}}
-	} else if tc.m == nil {
-		tc.m = map[string]interface{}{}
-	}
-	tc.m[key] = value
+func (tc ToolContext) With(key string, value any) ToolContext {
+	tc[key] = value
 	return tc
 }
 
-func (tc *ToolContext) Get(key string) interface{} {
-	if tc == nil || tc.m == nil {
-		return nil
-	}
-	return tc.m[key]
+func (tc ToolContext) Get(key string) any {
+	return tc[key]
 }
 
-func (tc *ToolContext) Lookup(key string) (interface{}, bool) {
-	if tc == nil || tc.m == nil {
-		return nil, false
-	}
-	v, ok := tc.m[key]
+func (tc ToolContext) Lookup(key string) (any, bool) {
+	v, ok := tc[key]
 	return v, ok
 }
 
-func (tc *ToolContext) Descend(location string, createIntermediates bool) (*ToolContext, bool) {
-	if tc == nil || tc.m == nil {
+func (tc ToolContext) Delete(key string) any {
+	old := tc[key]
+	delete(tc, key)
+	return old
+}
+
+func (tc ToolContext) Descend(location string, createIntermediates bool) (ToolContext, bool) {
+	if tc == nil {
 		return nil, false
 	}
-	m := tc.m
+	m := tc
 	for _, locationPart := range strings.Split(location, ".") {
 		if mv, ok := m[locationPart]; ok {
-			intermediate, isMap := mv.(map[string]interface{})
+			intermediate, isMap := mv.(map[string]any)
 			if !isMap {
 				return nil, false
 			}
 			m = intermediate
 		} else if createIntermediates {
-			intermediate := make(map[string]interface{})
+			intermediate := make(map[string]any)
 			m[locationPart], m = intermediate, intermediate
 		} else {
 			return nil, false
 		}
 	}
-	return &ToolContext{m}, true
+	return m, true
 }
 
-func (tc *ToolContext) LookupNested(key string) (*ToolContext, bool) {
+func (tc ToolContext) LookupNested(key string) (ToolContext, bool) {
 	if lv, found := tc.Lookup(key); !found {
 		return nil, false
-	} else if n, ok := lv.(*ToolContext); ok {
+	} else if n, ok := lv.(ToolContext); ok {
 		return n, true
-	} else if m, ok := lv.(map[string]interface{}); ok {
-		return &ToolContext{m}, true
+	} else if m, ok := lv.(map[string]any); ok {
+		return m, true
 	}
 	return nil, false
 }
 
-func (tc *ToolContext) PutScope(scope string) *ToolContext {
-	return tc.Put(scopeKey, scope)
+func (tc ToolContext) PutScope(scope string) string {
+	return tc.Put(scopeKey, scope).(string)
 }
 
-func (tc *ToolContext) Scope() string {
-	if tc == nil || tc.m == nil {
-		return anyScope
-	}
+func (tc ToolContext) Scope() string {
 	scope, ok := tc.Get(scopeKey).(string)
 	if !ok {
 		return anyScope
@@ -82,13 +77,13 @@ func (tc *ToolContext) Scope() string {
 	return scope
 }
 
-func EnsureContext(tcs ...*ToolContext) *ToolContext {
+func EnsureContext(tcs ...ToolContext) ToolContext {
 	if len(tcs) > 0 && tcs[0] != nil {
 		return tcs[0]
 	}
-	return &ToolContext{}
+	return ToolContext{}
 }
 
-func ToolContextWithScope(scope string) *ToolContext {
-	return &ToolContext{map[string]interface{}{scopeKey: scope}}
+func ToolContextWithScope(scope string) ToolContext {
+	return map[string]any{scopeKey: scope}
 }

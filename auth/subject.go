@@ -13,7 +13,7 @@ type basicSubject struct {
 	principals map[PrincipalType]Principal
 }
 
-func NewSubject(principals ...Principal) *basicSubject {
+func NewSubject(principals ...Principal) Subject {
 	principalMap := make(map[PrincipalType]Principal, len(principals))
 
 	for _, principal := range principals {

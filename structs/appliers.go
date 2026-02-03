@@ -9,14 +9,14 @@ import (
 )
 
 type Applier interface {
-	Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext *ToolContext) gomerr.Gomerr
+	Apply(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) gomerr.Gomerr
 }
 
 type StructApplier struct {
 	Source string
 }
 
-func (a StructApplier) Apply(sv reflect.Value, fv reflect.Value, _ *ToolContext) gomerr.Gomerr {
+func (a StructApplier) Apply(sv reflect.Value, fv reflect.Value, _ ToolContext) gomerr.Gomerr {
 	value, ge := ValueFromStruct(sv, fv, a.Source)
 	if ge != nil {
 		return ge
@@ -80,7 +80,7 @@ func RegisterValueConstants(constants map[string]interface{}) {
 	}
 }
 
-func (a ValueApplier) Apply(_ reflect.Value, fv reflect.Value, _ *ToolContext) gomerr.Gomerr {
+func (a ValueApplier) Apply(_ reflect.Value, fv reflect.Value, _ ToolContext) gomerr.Gomerr {
 	staticValue, ok := valueConstants[a.StaticValue]
 	if !ok {
 		staticValue = a.StaticValue
@@ -94,6 +94,6 @@ func (a ValueApplier) Apply(_ reflect.Value, fv reflect.Value, _ *ToolContext) g
 
 type NoApplier struct{}
 
-func (NoApplier) Apply(reflect.Value, reflect.Value, *ToolContext) gomerr.Gomerr {
+func (NoApplier) Apply(reflect.Value, reflect.Value, ToolContext) gomerr.Gomerr {
 	return nil
 }
