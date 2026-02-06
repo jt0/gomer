@@ -242,3 +242,26 @@ type EntityWithExclusionsQuery struct {
 }
 
 func (q *EntityWithExclusionsQuery) TypeName() string { return "EntityWithExclusions" }
+
+// TimeSeriesEvent - demonstrates composite sort key with ascending/descending at different levels
+// Used to test wildcard sort order behavior
+type TimeSeriesEvent struct {
+	DeviceId  string `db.keys:"pk"`
+	Year      string `db.keys:"+sk.0"` // Ascending
+	Month     string `db.keys:"+sk.1"` // Ascending
+	DayDetail string `db.keys:"-sk.2"` // Descending - controls sort when Year+Month provided
+	Value     string
+}
+
+func (e *TimeSeriesEvent) TypeName() string             { return "TimeSeriesEvent" }
+func (e *TimeSeriesEvent) NewQueryable() data.Queryable { return &TimeSeriesEvents{} }
+
+type TimeSeriesEvents struct {
+	data.BaseQueryable
+	DeviceId  string
+	Year      string
+	Month     string
+	DayDetail string
+}
+
+func (q *TimeSeriesEvents) TypeName() string { return "TimeSeriesEvent" }

@@ -188,27 +188,51 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 		if keyFields = i.sk.keyFieldsByPersistable[ptName]; keyFields == nil {
 			return nil
 		}
+		applySort := true
+		hasWildcard := false
 		for _, kf := range keyFields {
+			// Sort order comes from the first unprovided (or partially-provided) field since that
+			// field contains the data to be ordered. We look one field ahead by continuing to
+			// apply until we find a missing or wildcarded value.
+			if applySort {
+				c.ascending = kf.ascending
+			}
+
 			if kf.name[:1] == "'" {
-				// static values use their indicator
-				c.preferred = kf.preferred
-				c.ascending = kf.ascending
+				c.preferred = kf.preferred // static values always apply preferred
 				continue
-			} else if fv := qv.FieldByName(kf.name); !fv.IsValid() || fv.IsZero() {
+			}
+
+			fv := qv.FieldByName(kf.name)
+			if !fv.IsValid() || fv.IsZero() {
+				applySort = false // sort indicator already captured from this field
 				c.skMissing++
-				continue
-			} else if c.skMissing > 0 { // Cannot have gaps in the middle of the sort key
+			} else if c.skMissing > 0 || hasWildcard { // Cannot have gaps in the middle of the sort key
 				return nil
-			} else {
-				// update if the key value is valid/non-zero
+			} else if i.queryWildcardChar != 0 && endsWithWildcard(fv, i.queryWildcardChar) {
+				// Wildcard means partial value - sort indicator captured, remaining fields are variable
+				applySort = false
+				hasWildcard = true
 				c.preferred = kf.preferred
-				c.ascending = kf.ascending
+			} else {
+				c.preferred = kf.preferred // only set preferred when field has a value
 			}
 		}
 		c.skLength = len(keyFields)
 	}
 
 	return c
+}
+
+// endsWithWildcard checks if a reflect.Value (string or *string) ends with the wildcard character.
+func endsWithWildcard(fv reflect.Value, wildcardChar byte) bool {
+	if fv.Kind() == reflect.Ptr {
+		fv = fv.Elem()
+	}
+	if s, ok := fv.Interface().(string); ok && s != "" {
+		return s[len(s)-1] == wildcardChar
+	}
+	return false
 }
 
 func (i *index) populateKeyValues(avm map[string]types.AttributeValue, p data.Persistable, valueSeparator byte, mustBeSet bool) gomerr.Gomerr {

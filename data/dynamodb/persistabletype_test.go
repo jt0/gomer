@@ -1223,6 +1223,117 @@ func TestQuery_SortOrder(t *testing.T) {
 	}
 }
 
+// Section 8b: Wildcard Sort Order Tests
+
+func TestQuery_WildcardSortOrder(t *testing.T) {
+	// TimeSeriesEvent has:
+	//   Year: +sk.0 (ascending)
+	//   Month: +sk.1 (ascending)
+	//   DayDetail: -sk.2 (descending)
+	//
+	// When querying with Month="01*" (wildcard), the sort order should come from Month's
+	// indicator since it's the "partially provided" field, resulting in ascending order.
+	// When querying with Month="01" (no wildcard), the sort order should come from
+	// DayDetail's indicator (first unprovided), resulting in descending order.
+
+	tests := []struct {
+		name          string
+		setupFunc     func(store data.Store)
+		queryFunc     func() data.Queryable
+		expectedOrder []string // expected DayDetail values in order
+		expectedAsc   bool     // true if ascending, false if descending
+	}{
+		{
+			name: "wildcard in Month field should use Month's ascending indicator",
+			setupFunc: func(store data.Store) {
+				ctx := context.Background()
+				// Create events with same Year, different Month+DayDetail
+				events := []struct{ month, day string }{
+					{"01", "15-morning"},
+					{"01", "20-evening"},
+					{"02", "05-noon"},
+				}
+				for _, e := range events {
+					entity := &testentities.TimeSeriesEvent{
+						DeviceId:  "device1",
+						Year:      "2024",
+						Month:     e.month,
+						DayDetail: e.day,
+						Value:     "test",
+					}
+					assert.Success(t, store.Create(ctx, entity))
+				}
+			},
+			queryFunc: func() data.Queryable {
+				// Wildcard on Month - should sort by Month ascending
+				return &testentities.TimeSeriesEvents{
+					DeviceId: "device1",
+					Year:     "2024",
+					Month:    "0*", // Wildcard - matches 01 and 02
+				}
+			},
+			expectedOrder: []string{"15-morning", "20-evening", "05-noon"}, // 01 before 02
+			expectedAsc:   true,
+		},
+		{
+			name: "no wildcard in Month should use DayDetail's descending indicator",
+			setupFunc: func(store data.Store) {
+				ctx := context.Background()
+				// Create events with same Year+Month, different DayDetail
+				days := []string{"10-morning", "15-afternoon", "20-evening"}
+				for _, day := range days {
+					entity := &testentities.TimeSeriesEvent{
+						DeviceId:  "device1",
+						Year:      "2024",
+						Month:     "01",
+						DayDetail: day,
+						Value:     "test",
+					}
+					assert.Success(t, store.Create(ctx, entity))
+				}
+			},
+			queryFunc: func() data.Queryable {
+				// No wildcard - DayDetail (first unprovided) determines sort: descending
+				return &testentities.TimeSeriesEvents{
+					DeviceId: "device1",
+					Year:     "2024",
+					Month:    "01",
+				}
+			},
+			expectedOrder: []string{"20-evening", "15-afternoon", "10-morning"}, // Descending
+			expectedAsc:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, client := setupQueryStore(t, &testentities.TimeSeriesEvent{})
+			defer cleanupQueryTable(t, client)
+
+			if tt.setupFunc != nil {
+				tt.setupFunc(store)
+			}
+
+			q := tt.queryFunc()
+			err := store.Query(context.Background(), q)
+			assert.Success(t, err)
+
+			items := q.Items()
+			if len(items) != len(tt.expectedOrder) {
+				t.Fatalf("Expected %d items, got %d", len(tt.expectedOrder), len(items))
+			}
+
+			for i, item := range items {
+				event := item.(*testentities.TimeSeriesEvent)
+				if event.DayDetail != tt.expectedOrder[i] {
+					t.Errorf("Position %d: expected DayDetail=%s, got %s",
+						i, tt.expectedOrder[i], event.DayDetail)
+				}
+			}
+		})
+	}
+}
+
 // Section 9: Error Cases Tests
 
 func TestQuery_ErrorCases(t *testing.T) {
