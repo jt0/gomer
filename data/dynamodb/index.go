@@ -189,21 +189,22 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 			return nil
 		}
 		for _, kf := range keyFields {
-			c.preferred = kf.preferred
-
 			if kf.name[:1] == "'" {
-				c.ascending = kf.ascending // static values use their indicator
+				// static values use their indicator
+				c.preferred = kf.preferred
+				c.ascending = kf.ascending
 				continue
-			}
-
-			if fv := qv.FieldByName(kf.name); !fv.IsValid() || fv.IsZero() {
+			} else if fv := qv.FieldByName(kf.name); !fv.IsValid() || fv.IsZero() {
 				c.skMissing++
+				continue
 			} else if c.skMissing > 0 { // Cannot have gaps in the middle of the sort key
 				return nil
+			} else {
+				// update if the key value is valid/non-zero
+				c.preferred = kf.preferred
+				c.ascending = kf.ascending
 			}
-			c.ascending = kf.ascending // modify only if fields are set
 		}
-
 		c.skLength = len(keyFields)
 	}
 
@@ -424,10 +425,6 @@ func fieldValue(fieldName string, sv reflect.Value, separator, escape byte) stri
 		}
 	}
 }
-
-// =============================================================================
-// Multi-Type Index Selection (for Nested Queryables)
-// =============================================================================
 
 // indexForMultiple finds an index that supports querying multiple types together.
 // This is used when a Queryable has nested Queryables that should be fetched in a single query.

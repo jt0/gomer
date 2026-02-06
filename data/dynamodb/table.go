@@ -489,7 +489,7 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 	}()
 
 	// Check for nested Queryables (enables multi-type STD queries)
-	nested := getNestedQueryables(q)
+	nested := nestedQueryables(q)
 	if len(nested) > 0 {
 		return t.queryWithNested(ctx, q, nested)
 	}
@@ -514,7 +514,8 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 
 	items := make([]interface{}, len(output.Items))
 	for i, item := range output.Items {
-		pt := t.persistableTypes[q.TypeName()]
+		name := q.TypeName()
+		pt := t.persistableTypes[name]
 
 		var resolvedItem interface{}
 		if resolvedItem, ge = pt.resolver(item); ge != nil {
