@@ -804,7 +804,7 @@ func TestCommonKeyPrefix(t *testing.T) {
 		name       string
 		idx        *index
 		parentType string
-		query      interface{}
+		query      any
 		separator  byte
 		escape     byte
 		expected   string

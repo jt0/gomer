@@ -121,7 +121,7 @@ func indexFor(t *table, q data.Queryable) (index *index, ascending bool, consist
 
 	switch len(candidates) {
 	case 0:
-		available := make(map[string]interface{}, 1)
+		available := make(map[string]any, 1)
 		for _, idx := range t.indexes {
 			available[idx.friendlyName()] = idx
 		}

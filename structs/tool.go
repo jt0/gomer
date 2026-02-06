@@ -12,7 +12,7 @@ import (
 
 // TODO: Build a mechanism to generate structs from Smithy models and JSON schema definitions
 
-func ApplyTools(v interface{}, tc ToolContext, tools ...*Tool) gomerr.Gomerr {
+func ApplyTools(v any, tc ToolContext, tools ...*Tool) gomerr.Gomerr {
 	vv, ge := flect.IndirectValue(v, false)
 	if ge != nil {
 		return gomerr.Unprocessable("Unable to apply tools to invalid value", v).Wrap(ge)
@@ -37,7 +37,7 @@ func ApplyTools(v interface{}, tc ToolContext, tools ...*Tool) gomerr.Gomerr {
 	return ps.applyTools(vv, tc, tools...)
 }
 
-func Preprocess(v interface{}, tools ...*Tool) gomerr.Gomerr {
+func Preprocess(v any, tools ...*Tool) gomerr.Gomerr {
 	vt := flect.IndirectType(v)
 	ps, errors := process(vt, tools...)
 	if ps == nil {

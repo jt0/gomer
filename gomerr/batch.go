@@ -38,13 +38,13 @@ func (b *BatchError) Errors() []Gomerr {
 
 var batchTypeString = reflect.TypeOf((*BatchError)(nil)).String()
 
-func (b *BatchError) ToMap() map[string]interface{} {
-	errors := make([]map[string]interface{}, len(b.errors))
+func (b *BatchError) ToMap() map[string]any {
+	errors := make([]map[string]any, len(b.errors))
 	for i, ge := range b.errors {
 		errors[i] = ge.ToMap()
 	}
 
-	m := map[string]interface{}{
+	m := map[string]any{
 		"$.errorType": batchTypeString,
 		"Errors":      errors,
 	}

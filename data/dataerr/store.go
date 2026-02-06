@@ -7,9 +7,9 @@ import (
 type StoreError struct {
 	gomerr.Gomerr
 	Operation string
-	Data      interface{} `gomerr:"include_type"`
+	Data      any `gomerr:"include_type"`
 }
 
-func Store(operation string, data interface{}) *StoreError {
+func Store(operation string, data any) *StoreError {
 	return gomerr.Build(new(StoreError), operation, data).(*StoreError)
 }

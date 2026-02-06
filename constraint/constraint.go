@@ -11,31 +11,31 @@ import (
 
 type Constraint interface {
 	Type() string
-	Parameters() interface{}
-	Validate(target string, toTest interface{}) gomerr.Gomerr
-	Test(toTest interface{}) gomerr.Gomerr
+	Parameters() any
+	Validate(target string, toTest any) gomerr.Gomerr
+	Test(toTest any) gomerr.Gomerr
 	String() string
 }
 
-func New(constraintType string, constraintParameters interface{}, testFn func(toTest interface{}) gomerr.Gomerr) Constraint {
+func New(constraintType string, constraintParameters any, testFn func(toTest any) gomerr.Gomerr) Constraint {
 	return &constraint{constraintType, constraintParameters, testFn}
 }
 
 type constraint struct {
 	type_  string
-	params interface{}
-	testFn func(toTest interface{}) gomerr.Gomerr
+	params any
+	testFn func(toTest any) gomerr.Gomerr
 }
 
 func (c *constraint) Type() string {
 	return c.type_
 }
 
-func (c *constraint) Parameters() interface{} {
+func (c *constraint) Parameters() any {
 	return c.params
 }
 
-func (c *constraint) Validate(target string, toTest interface{}) gomerr.Gomerr {
+func (c *constraint) Validate(target string, toTest any) gomerr.Gomerr {
 	ge := c.Test(toTest)
 	if ge == nil {
 		return nil
@@ -90,7 +90,7 @@ func (c *constraint) updateTarget(validationTarget string, ge gomerr.Gomerr) gom
 	return nse
 }
 
-func (c *constraint) Test(toTest interface{}) gomerr.Gomerr {
+func (c *constraint) Test(toTest any) gomerr.Gomerr {
 	ge := c.testFn(toTest)
 	if nse := gomerr.ErrorAs[*NotSatisfiedError](ge); nse != nil && nse.Constraint == nil {
 		nse.Constraint = c // set only if nil to keep the most specific constraint error

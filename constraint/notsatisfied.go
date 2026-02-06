@@ -6,11 +6,11 @@ import (
 
 type NotSatisfiedError struct {
 	gomerr.Gomerr
-	ToTest     interface{} `gomerr:"include_type"` // Needs to be first (after gomerr.Gomerr) to populate properly via gomerr.Build()
+	ToTest     any `gomerr:"include_type"` // Needs to be first (after gomerr.Gomerr) to populate properly via gomerr.Build()
 	Target     string
 	Constraint Constraint
 }
 
-func NotSatisfied(toTest interface{}) *NotSatisfiedError {
+func NotSatisfied(toTest any) *NotSatisfiedError {
 	return gomerr.Build(new(NotSatisfiedError), toTest).(*NotSatisfiedError)
 }

@@ -12,7 +12,7 @@ import (
 
 var DefaultInTool = NewInTool(NewConfiguration(), structs.StructTagDirectiveProvider{"in"})
 
-func In(data map[string]interface{}, v interface{}, inTool *structs.Tool, optional ...structs.ToolContext) gomerr.Gomerr {
+func In(data map[string]any, v any, inTool *structs.Tool, optional ...structs.ToolContext) gomerr.Gomerr {
 	return structs.ApplyTools(v, structs.EnsureContext(optional...).With(InKey, data), inTool)
 }
 
@@ -132,7 +132,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 			} // TODO:p2 treat the rest as raw input data - but may have already been exploded depending on how the rest of the data has been handled
 		}
 
-		sliceData := value.([]interface{})
+		sliceData := value.([]any)
 		sliceLen := len(sliceData)
 		fv.Grow(sliceLen)
 		fv.SetLen(sliceLen)
@@ -144,7 +144,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 		for i := 0; i < sliceLen; i++ {
 			index := strconv.Itoa(i)
 			a.source = index
-			tc.Put(InKey, map[string]interface{}{a.source: sliceData[i]})
+			tc.Put(InKey, map[string]any{a.source: sliceData[i]})
 			if ge := a.Apply(sv, fv.Index(i), tc); ge != nil {
 				return ge.AddAttribute("Source", sliceSource).AddAttribute("Key", index)
 			}
@@ -158,7 +158,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 		for iter.Next() {
 			key := iter.Key().Interface().(string)
 			a.source = key
-			tc.Put(InKey, map[string]interface{}{a.source: iter.Value().Interface()})
+			tc.Put(InKey, map[string]any{a.source: iter.Value().Interface()})
 			mapElem := reflect.New(fvt.Elem()).Elem()
 			if ge := a.Apply(sv, mapElem, tc); ge != nil {
 				return ge.AddAttribute("Source", mapSource).AddAttribute("Key", key)

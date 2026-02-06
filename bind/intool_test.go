@@ -35,8 +35,8 @@ func TestAnonymous(t *testing.T) {
 	assert.Success(t, ge)
 }
 
-func dataFrom(t *testing.T, b []byte) map[string]interface{} {
-	d := map[string]interface{}{}
+func dataFrom(t *testing.T, b []byte) map[string]any {
+	d := map[string]any{}
 	err := json.Unmarshal(b, &d)
 	assert.Success(t, err)
 	return d

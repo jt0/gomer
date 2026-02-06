@@ -28,7 +28,7 @@ func IntCompare(comparisonType ComparisonType, compareTo *int64) Constraint {
 		panic("unrecognized comparison type: " + comparisonType)
 	}
 
-	return New("int_"+comparisonType, compareTo, func(toTest interface{}) (ge gomerr.Gomerr) {
+	return New("int_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
 		if compareTo == nil {
 			return nil
 		}
@@ -83,7 +83,7 @@ func UintCompare(comparisonType ComparisonType, compareTo *uint64) Constraint {
 		panic("unrecognized comparison type: " + comparisonType)
 	}
 
-	return New("uint_"+comparisonType, compareTo, func(toTest interface{}) (ge gomerr.Gomerr) {
+	return New("uint_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
 		if compareTo == nil {
 			return nil
 		}
@@ -137,7 +137,7 @@ func FloatCompare(comparisonType ComparisonType, compareTo *float64) Constraint 
 		panic("unrecognized comparison type: " + comparisonType)
 	}
 
-	return New("float_"+comparisonType, compareTo, func(toTest interface{}) (ge gomerr.Gomerr) {
+	return New("float_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
 		if compareTo == nil {
 			return nil
 		}
@@ -190,7 +190,7 @@ func TimeCompare(comparisonType ComparisonType, compareTo *time.Time) Constraint
 		panic("unrecognized comparison type: " + comparisonType)
 	}
 
-	return New("time_"+comparisonType, compareTo, func(toTest interface{}) (ge gomerr.Gomerr) {
+	return New("time_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
 		if compareTo == nil {
 			return nil
 		}

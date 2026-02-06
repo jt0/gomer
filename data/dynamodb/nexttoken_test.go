@@ -157,7 +157,7 @@ func seedOrders(t *testing.T, store data.Store, tenantId, userId string, count i
 }
 
 // collectAllPages executes query and follows pagination to retrieve all items
-func collectAllPages(t *testing.T, store data.Store, q data.Queryable) []interface{} {
+func collectAllPages(t *testing.T, store data.Store, q data.Queryable) []any {
 	ctx := context.Background()
 	allItems := []interface{}{}
 	pageCount := 0
@@ -185,7 +185,7 @@ func collectAllPages(t *testing.T, store data.Store, q data.Queryable) []interfa
 }
 
 // verifyNoDuplicates checks that all items have unique IDs
-func verifyNoDuplicates(t *testing.T, items []interface{}) {
+func verifyNoDuplicates(t *testing.T, items []any) {
 	seen := make(map[string]bool)
 
 	for _, item := range items {
@@ -401,7 +401,7 @@ func TestPagination_NextTokenEncryption(t *testing.T) {
 		assert.Success(t, err)
 
 		// Attempt to parse as JSON - should fail (it's encrypted)
-		var tokenMap map[string]interface{}
+		var tokenMap map[string]any
 		err = json.Unmarshal(decoded, &tokenMap)
 		assert.Assert(t, err != nil, "Encrypted token should not be parsable as JSON")
 

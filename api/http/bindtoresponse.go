@@ -25,7 +25,7 @@ type BindToResponseConfiguration struct {
 }
 
 // Marshal provides a function to convert the toMarshal to bytes suitable for returning in a response body.
-type Marshal func(toMarshal interface{}) ([]byte, error)
+type Marshal func(toMarshal any) ([]byte, error)
 
 func NewBindToResponseConfiguration() BindToResponseConfiguration {
 	return BindToResponseConfiguration{
@@ -87,7 +87,7 @@ func BindToResponse(result reflect.Value, header http.Header, scope string, acce
 		contentType = DefaultContentType
 	}
 
-	outMap := tc.Get(bind.OutKey).(map[string]interface{})
+	outMap := tc.Get(bind.OutKey).(map[string]any)
 	if len(outMap) == 0 && responseConfig.EmptyValueHandlingDefault == OmitEmpty {
 		return nil, statusCode
 	}

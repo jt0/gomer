@@ -22,7 +22,7 @@ var built = map[string]Constraint{
 	"false":    IsFalse,
 }
 
-var builders = map[string]interface{}{
+var builders = map[string]any{
 	"and":          And,
 	"array":        Elements,
 	"elements":     Elements,
@@ -64,7 +64,7 @@ var builders = map[string]interface{}{
 	"zero":         Zero,
 }
 
-func RegisterEach(constraintsAndBuilders map[string]interface{}) gomerr.Gomerr {
+func RegisterEach(constraintsAndBuilders map[string]any) gomerr.Gomerr {
 	var errors []gomerr.Gomerr
 	for name, cob := range constraintsAndBuilders {
 		if ge := Register(name, cob); ge != nil {
@@ -74,7 +74,7 @@ func RegisterEach(constraintsAndBuilders map[string]interface{}) gomerr.Gomerr {
 	return gomerr.Batcher(errors)
 }
 
-func Register(name string, constraintOrBuilder interface{}) gomerr.Gomerr {
+func Register(name string, constraintOrBuilder any) gomerr.Gomerr {
 	if name[0] != '$' || len(name) < 2 || len(name) > 64 {
 		return gomerr.Configuration("registered constraint names must start with a '$' symbol and between 2 and 64 characters long")
 	}
@@ -294,7 +294,7 @@ func parameterValue(pType reflect.Type, pString string, dynamicValues map[string
 	// TODO: generalize to add support for functions (e.g. $now)
 	if strings.HasPrefix(pString, "$.") {
 		if pType.Kind() != reflect.Ptr {
-			return reflect.Value{}, gomerr.Configuration(fmt.Sprintf("dynamic value '%s' requires a pointer (or pointer-safe interface{}) input parameter type, found '%s'", pString, pType))
+			return reflect.Value{}, gomerr.Configuration(fmt.Sprintf("dynamic value '%s' requires a pointer (or pointer-safe any) input parameter type, found '%s'", pString, pType))
 		}
 
 		pv := reflect.New(pType).Elem()

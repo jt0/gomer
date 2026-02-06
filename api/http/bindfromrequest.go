@@ -32,7 +32,7 @@ type BindFromRequestConfiguration struct {
 
 // Unmarshal defines a function that processes the input and stores the result in the value pointed to by ptrToTarget.
 // If ptrToTarget is nil, not a pointer, or otherwise unprocessable, Unmarshal returns a gomerr.Gomerr.
-type Unmarshal func(toUnmarshal []byte, ptrToTarget interface{}) error
+type Unmarshal func(toUnmarshal []byte, ptrToTarget any) error
 
 func NewBindFromRequestConfiguration() BindFromRequestConfiguration {
 	return BindFromRequestConfiguration{
@@ -81,7 +81,7 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 	if hasInBodyBinding[resourceType.Elem().String()] {
 		tc.Put(bodyBytesKey, bodyBytes)
 	} else {
-		unmarshaled := make(map[string]interface{})
+		unmarshaled := make(map[string]any)
 
 		if len(bodyBytes) > 0 {
 			// based on content type, and the absence of any "body" attributes use the proper unmarshaler to put the

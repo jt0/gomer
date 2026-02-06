@@ -160,10 +160,10 @@ var (
 func init() {
 	// Import the default functions from encoding/json
 	// These match the defaults in NewBindFromRequestConfiguration and NewBindToResponseConfiguration
-	defaultUnmarshal = func(data []byte, v interface{}) error {
+	defaultUnmarshal = func(data []byte, v any) error {
 		return json.Unmarshal(data, v)
 	}
-	defaultMarshal = func(v interface{}) ([]byte, error) {
+	defaultMarshal = func(v any) ([]byte, error) {
 		return json.Marshal(v)
 	}
 }

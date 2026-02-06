@@ -21,7 +21,7 @@ func And(constraints ...Constraint) Constraint {
 		return constraints[0]
 	}
 
-	return dynamicIfNeeded(New(andOp, constraints, func(toTest interface{}) gomerr.Gomerr {
+	return dynamicIfNeeded(New(andOp, constraints, func(toTest any) gomerr.Gomerr {
 		for _, operand := range constraints {
 			if ge := operand.Test(toTest); ge != nil {
 				if nse, ok := ge.(*NotSatisfiedError); ok {
@@ -48,7 +48,7 @@ func Or(constraints ...Constraint) Constraint {
 		return constraints[0]
 	}
 
-	return dynamicIfNeeded(New(orOp, constraints, func(toTest interface{}) gomerr.Gomerr {
+	return dynamicIfNeeded(New(orOp, constraints, func(toTest any) gomerr.Gomerr {
 		var errors []gomerr.Gomerr
 		for _, operand := range constraints {
 			ge := operand.Test(toTest)
@@ -80,7 +80,7 @@ func Or(constraints ...Constraint) Constraint {
 }
 
 func Not(constraint Constraint) Constraint {
-	return dynamicIfNeeded(New(notOp, constraint, func(toTest interface{}) gomerr.Gomerr {
+	return dynamicIfNeeded(New(notOp, constraint, func(toTest any) gomerr.Gomerr {
 		if ge := constraint.Test(toTest); ge == nil {
 			return NotSatisfied(toTest) // TODO:p1 ensure .String() captures what is "Not"ed
 		}

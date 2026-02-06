@@ -29,7 +29,7 @@ func (a StructApplier) Apply(sv reflect.Value, fv reflect.Value, _ ToolContext) 
 	return nil
 }
 
-func ValueFromStruct(sv reflect.Value, fv reflect.Value, source string) (interface{}, gomerr.Gomerr) {
+func ValueFromStruct(sv reflect.Value, fv reflect.Value, source string) (any, gomerr.Gomerr) {
 	if source == "$" {
 		return sv.Interface(), nil
 	}
@@ -69,9 +69,9 @@ type ValueApplier struct {
 	StaticValue string
 }
 
-var valueConstants = make(map[string]interface{})
+var valueConstants = make(map[string]any)
 
-func RegisterValueConstants(constants map[string]interface{}) {
+func RegisterValueConstants(constants map[string]any) {
 	for k, v := range constants {
 		if len(k) < 2 || len(k) > 64 || k[0] != '#' {
 			panic("Constants must start with a '#' symbol and be between 2 and 64 characters long")

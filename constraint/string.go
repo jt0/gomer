@@ -45,8 +45,8 @@ var IsRegexp = stringTest("isRegexp", nil, func(s string) bool {
 	return err == nil
 })
 
-func stringTest(name string, parameters interface{}, test func(s string) bool) Constraint {
-	return New(name, parameters, func(toTest interface{}) gomerr.Gomerr {
+func stringTest(name string, parameters any, test func(s string) bool) Constraint {
+	return New(name, parameters, func(toTest any) gomerr.Gomerr {
 		if tt, ok := flect.IndirectInterface(toTest); !ok {
 			return NotSatisfied(toTest)
 		} else if s, ok := tt.(string); !ok {

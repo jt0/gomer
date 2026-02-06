@@ -3,9 +3,9 @@ package gomerr
 type DependencyError struct {
 	Gomerr
 	Service string
-	Request interface{} `gomerr:"include_type"`
+	Request any `gomerr:"include_type"`
 }
 
-func Dependency(service string, request interface{}) *DependencyError {
+func Dependency(service string, request any) *DependencyError {
 	return Build(new(DependencyError), service, request).(*DependencyError)
 }

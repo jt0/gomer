@@ -154,11 +154,11 @@ func (t *table) querySingleType(ctx context.Context, q data.Queryable) gomerr.Go
 		return gomerr.Internal("Unable to generate nextToken").Wrap(ge)
 	}
 
-	items := make([]interface{}, len(output.Items))
+	items := make([]any, len(output.Items))
 	for i, item := range output.Items {
 		pt := t.persistableTypes[q.TypeName()]
 
-		var resolvedItem interface{}
+		var resolvedItem any
 		if resolvedItem, ge = pt.resolver(item); ge != nil {
 			return ge
 		}
@@ -245,10 +245,10 @@ func (t *table) routeQueryResults(ctx context.Context, q data.Queryable, nested 
 	pc := newPaginationContext(q.TypeName(), q, nested)
 
 	// Prepare item slices for each Queryable
-	parentItems := make([]interface{}, 0)
-	nestedItems := make(map[string][]interface{})
+	parentItems := make([]any, 0)
+	nestedItems := make(map[string][]any)
 	for _, n := range nested {
-		nestedItems[n.queryable.TypeName()] = make([]interface{}, 0)
+		nestedItems[n.queryable.TypeName()] = make([]any, 0)
 	}
 
 	// Get index name and SK attribute name for discrimination

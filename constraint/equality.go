@@ -7,8 +7,8 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-func Equals(value interface{}) Constraint {
-	return New("equals", value, func(toTest interface{}) gomerr.Gomerr {
+func Equals(value any) Constraint {
+	return New("equals", value, func(toTest any) gomerr.Gomerr {
 		if tt, ok := flect.IndirectInterface(toTest); !ok || tt != value {
 			return NotSatisfied(tt)
 		}
@@ -16,8 +16,8 @@ func Equals(value interface{}) Constraint {
 	})
 }
 
-func NotEquals(value interface{}) Constraint {
-	return New("notEquals", value, func(toTest interface{}) gomerr.Gomerr {
+func NotEquals(value any) Constraint {
+	return New("notEquals", value, func(toTest any) gomerr.Gomerr {
 		if tt, ok := flect.IndirectInterface(toTest); !ok || tt == value {
 			return NotSatisfied(tt)
 		}
@@ -25,13 +25,13 @@ func NotEquals(value interface{}) Constraint {
 	})
 }
 
-func OneOf(values ...interface{}) Constraint {
+func OneOf(values ...any) Constraint {
 	if len(values) == 0 {
 		panic(gomerr.Configuration("oneOf constraint defined without values"))
 	}
 	valuesType := reflect.TypeOf(values[0])
 
-	return New("oneOf", values, func(toTest interface{}) gomerr.Gomerr {
+	return New("oneOf", values, func(toTest any) gomerr.Gomerr {
 		if ttv, ok := flect.ReadableIndirectValue(toTest); !ok {
 			return NotSatisfied(toTest)
 		} else if !ttv.CanConvert(valuesType) {

@@ -3,9 +3,9 @@ package gomerr
 type UnprocessableError struct {
 	Gomerr
 	Reason string
-	Value  interface{} `gomerr:"include_type"`
+	Value  any `gomerr:"include_type"`
 }
 
-func Unprocessable(reason string, value interface{}) *UnprocessableError {
+func Unprocessable(reason string, value any) *UnprocessableError {
 	return Build(new(UnprocessableError), reason, value).(*UnprocessableError)
 }

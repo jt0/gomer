@@ -19,7 +19,7 @@ func Length(values ...*uint64) Constraint {
 	case 2:
 		if values[0] != nil {
 			if values[1] != nil {
-				return length("lengthBetween", []interface{}{*values[0], *values[1]}, values[0], values[1])
+				return length("lengthBetween", []any{*values[0], *values[1]}, values[0], values[1])
 			} else {
 				return MinLength(values[0])
 			}
@@ -53,11 +53,11 @@ var (
 	Empty    = length("empty", nil, nil, &uintZero)
 	NonEmpty = length("nonEmpty", nil, &uintOne, nil)
 
-	zeroLength = reflect.ValueOf([]interface{}{})
+	zeroLength = reflect.ValueOf([]any{})
 )
 
-func length(lengthType string, lengthParams interface{}, min, max *uint64) Constraint {
-	return New(lengthType, lengthParams, func(toTest interface{}) gomerr.Gomerr {
+func length(lengthType string, lengthParams any, min, max *uint64) Constraint {
+	return New(lengthType, lengthParams, func(toTest any) gomerr.Gomerr {
 		ttv, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
 			ttv = zeroLength

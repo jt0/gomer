@@ -9,24 +9,24 @@ import (
 
 // JsonEqual accepts two JSON-containing byte arrays and compares their content equality (rather than their byte
 // equality). This allows ordering to be ignored
-func JsonEqual(tb testing.TB, expected, actual []byte, msg ...interface{}) {
-	var expectedMap map[string]interface{}
+func JsonEqual(tb testing.TB, expected, actual []byte, msg ...any) {
+	var expectedMap map[string]any
 	err := json.Unmarshal(expected, &expectedMap)
 	Success(tb, err)
 
-	var actualMap map[string]interface{}
+	var actualMap map[string]any
 	err = json.Unmarshal(actual, &actualMap)
 	Success(tb, err)
 
 	if !mapsEqual(expectedMap, actualMap, "") {
-		fmt.Println(append([]interface{}{"Failed equality check"}, msg...)...)
+		fmt.Println(append([]any{"Failed equality check"}, msg...)...)
 		tb.FailNow()
 	}
 }
 
-// mapsEqual accepts two map[string]interface{}s, walking both looking at per-key and value equivalency. Any mismatches
+// mapsEqual accepts two map[string]anys, walking both looking at per-key and value equivalency. Any mismatches
 // will be printed to standard out and overall inequality will result in a
-func mapsEqual(expected, actual map[string]interface{}, path string) bool {
+func mapsEqual(expected, actual map[string]any, path string) bool {
 	if expected == nil || actual == nil {
 		if expected == nil && actual == nil {
 			return true
@@ -54,10 +54,10 @@ func mapsEqual(expected, actual map[string]interface{}, path string) bool {
 			continue
 		}
 		switch a1 := v1.(type) {
-		case map[string]interface{}:
-			equal = equal && mapsEqual(v1.(map[string]interface{}), v2.(map[string]interface{}), path+k+".")
-		case []interface{}:
-			a2 := v2.([]interface{})
+		case map[string]any:
+			equal = equal && mapsEqual(v1.(map[string]any), v2.(map[string]any), path+k+".")
+		case []any:
+			a2 := v2.([]any)
 			if len(a1) != len(a2) {
 				fmt.Printf("\tlen(%s) are not equal (%d vs %d)", path+k, len(a1), len(a2))
 				equal = false
@@ -68,9 +68,9 @@ func mapsEqual(expected, actual map[string]interface{}, path string) bool {
 				}
 				e2 := a2[i]
 				switch e1 := a1[i].(type) {
-				case map[string]interface{}:
+				case map[string]any:
 					// TODO: verify e2's type
-					equal = equal && mapsEqual(e1, e2.(map[string]interface{}), path+k+"["+strconv.Itoa(i)+"].")
+					equal = equal && mapsEqual(e1, e2.(map[string]any), path+k+"["+strconv.Itoa(i)+"].")
 				default:
 					if e1 != e2 {
 						fmt.Printf("\tkey %s[%d]'s values not equal: %v != %v\n", path+k, i, e1, e2)

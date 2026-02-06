@@ -11,12 +11,12 @@ import (
 
 var DefaultOutTool = NewOutTool(NewConfiguration(), structs.StructTagDirectiveProvider{"out"})
 
-func Out(v interface{}, outTool *structs.Tool, optional ...structs.ToolContext) (map[string]interface{}, gomerr.Gomerr) {
-	tc := structs.EnsureContext(optional...).With(OutKey, make(map[string]interface{}))
+func Out(v any, outTool *structs.Tool, optional ...structs.ToolContext) (map[string]any, gomerr.Gomerr) {
+	tc := structs.EnsureContext(optional...).With(OutKey, make(map[string]any))
 	if ge := structs.ApplyTools(v, tc, outTool); ge != nil {
 		return nil, ge
 	}
-	return tc.Get(OutKey).(map[string]interface{}), nil
+	return tc.Get(OutKey).(map[string]any), nil
 }
 
 // NewOutTool
@@ -108,7 +108,7 @@ func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolCont
 		return nil
 	}
 
-	outData := tc.Get(OutKey).(map[string]interface{})
+	outData := tc.Get(OutKey).(map[string]any)
 
 	switch fv.Kind() {
 	case reflect.Struct:
@@ -118,7 +118,7 @@ func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolCont
 			return nil
 		}
 
-		structMap := make(map[string]interface{})
+		structMap := make(map[string]any)
 		tc.Put(OutKey, structMap)
 
 		if ge := structs.ApplyTools(fv, tc, a.tool); ge != nil {
@@ -139,10 +139,10 @@ func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolCont
 		}
 
 		fvLen := fv.Len()
-		sliceOutput := make([]interface{}, 0, fvLen)
+		sliceOutput := make([]any, 0, fvLen)
 
 		for i := 0; i < fvLen; i++ {
-			sliceMap := make(map[string]interface{}, 1)
+			sliceMap := make(map[string]any, 1)
 			tc.Put(OutKey, sliceMap)
 			if ge := a.Apply(reflect.Value{}, fv.Index(i), tc); ge != nil {
 				return ge.AddAttribute("Index", i)
@@ -161,11 +161,11 @@ func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolCont
 		if fv.Type().Key().Kind() != reflect.String {
 			return gomerr.Configuration("Unable to produce a map without string ")
 		}
-		mapOutput := make(map[string]interface{}, fv.Len())
+		mapOutput := make(map[string]any, fv.Len())
 
 		iter := fv.MapRange()
 		for iter.Next() {
-			dummyMap := make(map[string]interface{})
+			dummyMap := make(map[string]any)
 			tc.Put(OutKey, dummyMap)
 			if ge := a.Apply(reflect.Value{}, iter.Value(), tc); ge != nil {
 				return ge.AddAttribute("Key", iter.Key().Interface())

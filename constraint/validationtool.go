@@ -11,7 +11,7 @@ import (
 
 var DefaultValidationTool = NewValidationTool(structs.StructTagDirectiveProvider{"validate"})
 
-func Validate(v interface{}, validationTool *structs.Tool, optional ...structs.ToolContext) gomerr.Gomerr {
+func Validate(v any, validationTool *structs.Tool, optional ...structs.ToolContext) gomerr.Gomerr {
 	return structs.ApplyTools(v, structs.EnsureContext(optional...), validationTool)
 }
 

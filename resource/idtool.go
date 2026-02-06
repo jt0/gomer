@@ -11,7 +11,7 @@ import (
 )
 
 func RegisterIdGeneratorFieldFunction(idGenerator id.Generator) {
-	fn := func(reflect.Value, reflect.Value, structs.ToolContext) (interface{}, gomerr.Gomerr) {
+	fn := func(reflect.Value, reflect.Value, structs.ToolContext) (any, gomerr.Gomerr) {
 		return idGenerator.Generate(), nil
 	}
 	_ = structs.RegisterToolFunction("$id", fn)

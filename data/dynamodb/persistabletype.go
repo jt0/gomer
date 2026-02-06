@@ -41,8 +41,8 @@ func newPersistableType(table *table, persistableName string, pType reflect.Type
 	return pt, nil
 }
 
-func resolver(pt reflect.Type) func(interface{}) (interface{}, gomerr.Gomerr) {
-	return func(i interface{}) (interface{}, gomerr.Gomerr) {
+func resolver(pt reflect.Type) func(any) (any, gomerr.Gomerr) {
+	return func(i any) (any, gomerr.Gomerr) {
 		m, ok := i.(map[string]types.AttributeValue)
 		if !ok {
 			return nil, gomerr.Internal("dynamodb item is not a map[string]types.AttributeValue").AddAttribute("Actual", i)
@@ -304,7 +304,7 @@ func (pt *persistableType) populateKeyFieldsFromAttributes(p data.Persistable, a
 				}
 
 				// Handle empty segments - set to zero value (matches write behavior)
-				var valueToSet interface{}
+				var valueToSet any
 				if segmentValue == "" {
 					valueToSet = flect.ZeroVal
 				} else {

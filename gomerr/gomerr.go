@@ -16,17 +16,17 @@ type Gomerr interface {
 	Is(err error) bool
 
 	Wrap(err error) Gomerr
-	AddAttribute(key string, value interface{}) Gomerr
-	ReplaceAttribute(key string, value interface{}) Gomerr
+	AddAttribute(key string, value any) Gomerr
+	ReplaceAttribute(key string, value any) Gomerr
 	DeleteAttribute(key string) Gomerr
-	AddAttributes(keysAndValues ...interface{}) Gomerr
-	WithAttributes(attributes map[string]interface{}) Gomerr
+	AddAttributes(keysAndValues ...any) Gomerr
+	WithAttributes(attributes map[string]any) Gomerr
 
-	Attribute(key string) (value interface{})
-	AttributeLookup(key string) (value interface{}, ok bool)
-	Attributes() map[string]interface{}
+	Attribute(key string) (value any)
+	AttributeLookup(key string) (value any, ok bool)
+	Attributes() map[string]any
 	String() string
-	ToMap() map[string]interface{}
+	ToMap() map[string]any
 
 	// Ensures that Gomerrs behave as expected
 	isFromBuildFunc() bool
@@ -39,13 +39,13 @@ func ErrorAs[E error](err error) (e E) {
 
 var gomerrType = reflect.TypeOf((*Gomerr)(nil)).Elem()
 
-func Build(g Gomerr, attributes ...interface{}) Gomerr {
+func Build(g Gomerr, attributes ...any) Gomerr {
 	build(reflect.ValueOf(g).Elem(), attributes, newGomerr(4, g))
 
 	return g
 }
 
-func build(v reflect.Value, attributes []interface{}, gomerr *gomerr) (attributesProcessed int) {
+func build(v reflect.Value, attributes []any, gomerr *gomerr) (attributesProcessed int) {
 	attributesProcessed = 0
 	attributesLength := len(attributes)
 	for i := 0; i < v.NumField(); i++ {
@@ -84,7 +84,7 @@ func build(v reflect.Value, attributes []interface{}, gomerr *gomerr) (attribute
 type gomerr struct {
 	self       Gomerr
 	wrapped    error
-	attributes map[string]interface{}
+	attributes map[string]any
 	stack      []string
 }
 
@@ -140,21 +140,21 @@ func (g *gomerr) Wrap(err error) Gomerr {
 	return g.self
 }
 
-func (g *gomerr) Attribute(key string) interface{} {
+func (g *gomerr) Attribute(key string) any {
 	return g.attributes[key]
 }
 
-func (g *gomerr) AttributeLookup(key string) (value interface{}, ok bool) {
+func (g *gomerr) AttributeLookup(key string) (value any, ok bool) {
 	value, ok = g.attributes[key]
 	return
 }
 
-func (g *gomerr) AddAttribute(key string, value interface{}) Gomerr {
+func (g *gomerr) AddAttribute(key string, value any) Gomerr {
 	g.addAttribute(key, value, add)
 	return g.self
 }
 
-func (g *gomerr) ReplaceAttribute(key string, value interface{}) Gomerr {
+func (g *gomerr) ReplaceAttribute(key string, value any) Gomerr {
 	g.addAttribute(key, value, replace)
 	return g.self
 }
@@ -164,7 +164,7 @@ func (g *gomerr) DeleteAttribute(key string) Gomerr {
 	return g.self
 }
 
-func (g *gomerr) AddAttributes(keysAndValues ...interface{}) Gomerr {
+func (g *gomerr) AddAttributes(keysAndValues ...any) Gomerr {
 	if len(keysAndValues)%2 != 0 {
 		return Configuration("AddAttributes() requires an even number of arguments for keysAndValues").AddAttributes("Input", keysAndValues, "TargetedError", g)
 	}
@@ -185,7 +185,7 @@ func (g *gomerr) AddAttributes(keysAndValues ...interface{}) Gomerr {
 	return g.self
 }
 
-func (g *gomerr) WithAttributes(attributes map[string]interface{}) Gomerr {
+func (g *gomerr) WithAttributes(attributes map[string]any) Gomerr {
 	// Short-circuit if no attributes yet
 	if g.attributes == nil {
 		g.attributes = attributes
@@ -207,7 +207,7 @@ const (
 	replace
 )
 
-func (g *gomerr) addAttribute(key string, toAdd interface{}, addType addType) {
+func (g *gomerr) addAttribute(key string, toAdd any, addType addType) {
 	// gw := newGomerr(2, g.self) // wrap first to get line/file info
 	//
 	// // If the notes are being added in the same place g is introduced, use g instead of the new one
@@ -216,12 +216,12 @@ func (g *gomerr) addAttribute(key string, toAdd interface{}, addType addType) {
 	// }
 
 	if g.attributes == nil {
-		g.attributes = make(map[string]interface{})
+		g.attributes = make(map[string]any)
 	}
 
 	if value, exists := g.attributes[key]; exists && addType == add {
-		if valueSlice, ok := value.([]interface{}); !ok {
-			g.attributes[key] = []interface{}{value, toAdd}
+		if valueSlice, ok := value.([]any); !ok {
+			g.attributes[key] = []any{value, toAdd}
 		} else {
 			g.attributes[key] = append(valueSlice, toAdd)
 		}
@@ -240,7 +240,7 @@ func (g *gomerr) Unwrap() error {
 	return g.wrapped
 }
 
-func (g *gomerr) Attributes() map[string]interface{} {
+func (g *gomerr) Attributes() map[string]any {
 	return g.attributes
 }
 
@@ -248,12 +248,12 @@ func (g *gomerr) Stack() []string {
 	return g.stack
 }
 
-func (g *gomerr) ToMap() map[string]interface{} {
+func (g *gomerr) ToMap() map[string]any {
 	gt := reflect.TypeOf(g.self)
 	gte := gt.Elem()
 	gve := reflect.ValueOf(g.self).Elem()
 
-	m := make(map[string]interface{}, gte.NumField()+1)
+	m := make(map[string]any, gte.NumField()+1)
 	m["$.errorType"] = gt.String()
 
 	for i := 0; i < gte.NumField(); i++ {
@@ -281,15 +281,15 @@ func (g *gomerr) ToMap() map[string]interface{} {
 	}
 
 	if wrapped := g.Unwrap(); wrapped != nil {
-		var w map[string]interface{}
+		var w map[string]any
 		if gWrapped, ok := wrapped.(Gomerr); ok {
 			w = gWrapped.ToMap()
 		} else {
-			w = make(map[string]interface{}, 3)
+			w = make(map[string]any, 3)
 			w["$.errorType"] = reflect.TypeOf(wrapped).String()
 			w["_errorString"] = wrapped.Error()
 			if marshaled, err := json.Marshal(wrapped); err == nil {
-				wm := make(map[string]interface{})
+				wm := make(map[string]any)
 				if err = json.Unmarshal(marshaled, &wm); err == nil {
 					w["_error"] = wm
 				}
@@ -309,12 +309,12 @@ func (g *gomerr) Error() string {
 }
 
 func (g *gomerr) String() string {
-	return g.string(func(v interface{}) ([]byte, error) {
+	return g.string(func(v any) ([]byte, error) {
 		return json.MarshalIndent(v, "", "  ")
 	})
 }
 
-func (g *gomerr) string(marshal func(interface{}) ([]byte, error)) string {
+func (g *gomerr) string(marshal func(any) ([]byte, error)) string {
 	if bytes, err := marshal(g.self.ToMap()); err != nil {
 		return "Failed to create gomerr string representation: " + err.Error()
 	} else {

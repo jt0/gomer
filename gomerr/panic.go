@@ -2,9 +2,9 @@ package gomerr
 
 type PanicError struct {
 	Gomerr
-	Recover interface{}
+	Recover any
 }
 
-func Panic(recover interface{}) *PanicError {
+func Panic(recover any) *PanicError {
 	return Build(new(PanicError), recover).(*PanicError)
 }

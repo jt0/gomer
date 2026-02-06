@@ -13,7 +13,7 @@ var (
 )
 
 func nilConstraint(name string, errorIfNil bool) Constraint {
-	return New(name, nil, func(toTest interface{}) gomerr.Gomerr {
+	return New(name, nil, func(toTest any) gomerr.Gomerr {
 		ttv := reflect.ValueOf(toTest)
 		if !ttv.IsValid() {
 			if errorIfNil {
@@ -33,14 +33,14 @@ func nilConstraint(name string, errorIfNil bool) Constraint {
 	})
 }
 
-func Nil(value *interface{}) Constraint {
-	return New("nil", value, func(interface{}) gomerr.Gomerr {
+func Nil(value *any) Constraint {
+	return New("nil", value, func(any) gomerr.Gomerr {
 		return IsNil.Test(value)
 	})
 }
 
-func NotNil(value *interface{}) Constraint {
-	return New("notNil", value, func(interface{}) gomerr.Gomerr {
+func NotNil(value *any) Constraint {
+	return New("notNil", value, func(any) gomerr.Gomerr {
 		return IsNotNil.Test(value)
 	})
 }
@@ -51,7 +51,7 @@ var (
 )
 
 func zeroConstraint(name string, errorIfZero bool) Constraint {
-	return New(name, nil, func(toTest interface{}) gomerr.Gomerr {
+	return New(name, nil, func(toTest any) gomerr.Gomerr {
 		ttv := reflect.ValueOf(toTest)
 		if !ttv.IsValid() && errorIfZero {
 			return NotSatisfied(name[2:])
@@ -63,19 +63,19 @@ func zeroConstraint(name string, errorIfZero bool) Constraint {
 	})
 }
 
-func Zero(value *interface{}) Constraint {
-	return New("zero", value, func(interface{}) gomerr.Gomerr {
+func Zero(value *any) Constraint {
+	return New("zero", value, func(any) gomerr.Gomerr {
 		return IsZero.Test(*value)
 	})
 }
 
-func NotZero(value *interface{}) Constraint {
-	return New("notZero", value, func(interface{}) gomerr.Gomerr {
+func NotZero(value *any) Constraint {
+	return New("notZero", value, func(any) gomerr.Gomerr {
 		return IsNotZero.Test(*value)
 	})
 }
 
-var IsRequired = New("isRequired", nil, func(toTest interface{}) gomerr.Gomerr {
+var IsRequired = New("isRequired", nil, func(toTest any) gomerr.Gomerr {
 	ttv, ok := flect.ReadableIndirectValue(toTest)
 	if !ok || ttv.IsZero() {
 		return NotSatisfied(toTest)
@@ -83,8 +83,8 @@ var IsRequired = New("isRequired", nil, func(toTest interface{}) gomerr.Gomerr {
 	return nil
 })
 
-func Required(value *interface{}) Constraint {
-	return New("required", value, func(interface{}) gomerr.Gomerr {
+func Required(value *any) Constraint {
+	return New("required", value, func(any) gomerr.Gomerr {
 		return IsRequired.Test(*value)
 	})
 }
@@ -95,7 +95,7 @@ var (
 )
 
 func boolConstraint(name string, errorIfTrue bool) Constraint {
-	return New(name, nil, func(toTest interface{}) gomerr.Gomerr {
+	return New(name, nil, func(toTest any) gomerr.Gomerr {
 		if ttv, ok := flect.ReadableIndirectValue(toTest); !ok {
 			return NotSatisfied(name[2:]) // neither true nor false
 		} else if ttv.Kind() != reflect.Bool {
@@ -107,14 +107,14 @@ func boolConstraint(name string, errorIfTrue bool) Constraint {
 	})
 }
 
-func True(value *interface{}) Constraint {
-	return New("true", value, func(interface{}) gomerr.Gomerr {
+func True(value *any) Constraint {
+	return New("true", value, func(any) gomerr.Gomerr {
 		return IsTrue.Test(*value)
 	})
 }
 
-func False(value *interface{}) Constraint {
-	return New("false", value, func(interface{}) gomerr.Gomerr {
+func False(value *any) Constraint {
+	return New("false", value, func(any) gomerr.Gomerr {
 		return IsFalse.Test(*value)
 	})
 }

@@ -121,7 +121,7 @@ func TestCreate(t *testing.T) {
 		name        string
 		entity      data.Persistable
 		expectError bool
-		errorType   interface{}
+		errorType   any
 		setupFunc   func(store data.Store)
 		verifyFunc  func(t *testing.T, store data.Store, client *dynamodb.Client)
 	}{

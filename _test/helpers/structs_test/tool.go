@@ -12,8 +12,8 @@ type TestCase struct {
 	Name     string
 	Tool     *structs.Tool
 	Context  structs.ToolContext
-	Input    interface{}
-	Expected interface{} // can be the same type as output or a gomerr.Gomerr
+	Input    any
+	Expected any // can be the same type as output or a gomerr.Gomerr
 }
 
 func RunTests(t *testing.T, tests []TestCase) {

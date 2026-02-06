@@ -9,7 +9,7 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-type ToolFunction func(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) (output interface{}, ge gomerr.Gomerr)
+type ToolFunction func(structValue reflect.Value, fieldValue reflect.Value, toolContext ToolContext) (output any, ge gomerr.Gomerr)
 
 func (f ToolFunction) Apply(sv reflect.Value, fv reflect.Value, tc ToolContext) gomerr.Gomerr {
 	value, ge := f(sv, fv, tc)
@@ -52,7 +52,7 @@ func RegisterToolFunction(name string, function ToolFunction) gomerr.Gomerr {
 }
 
 func SetNowToolFunctionPrecision(precision time.Duration) {
-	putToolFunction("$_now", func(reflect.Value, reflect.Value, ToolContext) (interface{}, gomerr.Gomerr) {
+	putToolFunction("$_now", func(reflect.Value, reflect.Value, ToolContext) (any, gomerr.Gomerr) {
 		return time.Now().UTC().Truncate(precision), nil
 	})
 }

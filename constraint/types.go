@@ -25,7 +25,7 @@ import (
 var UseBracketsForContainedTargets = false
 
 func Struct(validationTool *structs.Tool) Constraint {
-	return New("struct", nil, func(toTest interface{}) gomerr.Gomerr {
+	return New("struct", nil, func(toTest any) gomerr.Gomerr {
 		// Do we need to check for 'nil' here?
 		_, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
@@ -64,7 +64,7 @@ func Map(keyConstraint Constraint, valueConstraint Constraint) Constraint {
 	} else {
 		cp = kvConstraints
 	}
-	return dynamicIfNeeded(New("map", cp, func(toTest interface{}) gomerr.Gomerr {
+	return dynamicIfNeeded(New("map", cp, func(toTest any) gomerr.Gomerr {
 		ttv, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
 			return nil
@@ -99,12 +99,12 @@ func Map(keyConstraint Constraint, valueConstraint Constraint) Constraint {
 }
 
 type Entry struct {
-	Key   interface{}
-	Value interface{}
+	Key   any
+	Value any
 }
 
 func Entries(entryConstraint Constraint) Constraint {
-	return dynamicIfNeeded(New("entries", entryConstraint, func(toTest interface{}) gomerr.Gomerr {
+	return dynamicIfNeeded(New("entries", entryConstraint, func(toTest any) gomerr.Gomerr {
 		ttv, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
 			return nil
@@ -133,7 +133,7 @@ func Entries(entryConstraint Constraint) Constraint {
 }
 
 func Elements(elementsConstraint Constraint) Constraint {
-	return dynamicIfNeeded(New("elements", elementsConstraint, func(toTest interface{}) gomerr.Gomerr {
+	return dynamicIfNeeded(New("elements", elementsConstraint, func(toTest any) gomerr.Gomerr {
 		ttv, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
 			return nil
@@ -160,13 +160,13 @@ func Elements(elementsConstraint Constraint) Constraint {
 	}), elementsConstraint)
 }
 
-func TypeOf(value interface{}) Constraint {
+func TypeOf(value any) Constraint {
 	t, ok := value.(reflect.Type)
 	if !ok {
 		t = reflect.TypeOf(value)
 	}
 
-	return New("typeOf", t.String(), func(toTest interface{}) gomerr.Gomerr {
+	return New("typeOf", t.String(), func(toTest any) gomerr.Gomerr {
 		if reflect.TypeOf(toTest) != t {
 			return NotSatisfied(t.String())
 		}

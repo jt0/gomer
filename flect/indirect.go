@@ -6,7 +6,7 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-func IndirectInterface(v interface{}) (indirect interface{}, ok bool) {
+func IndirectInterface(v any) (indirect any, ok bool) {
 	ttv := reflect.ValueOf(v)
 	if !ttv.IsValid() {
 		return nil, false
@@ -22,7 +22,7 @@ func IndirectInterface(v interface{}) (indirect interface{}, ok bool) {
 	return v, true
 }
 
-func ReadableIndirectValue(v interface{}) (indirectValue reflect.Value, ok bool) {
+func ReadableIndirectValue(v any) (indirectValue reflect.Value, ok bool) {
 	vv, ok := v.(reflect.Value)
 	if !ok {
 		vv = reflect.ValueOf(v)
@@ -43,7 +43,7 @@ func ReadableIndirectValue(v interface{}) (indirectValue reflect.Value, ok bool)
 	return vv, true
 }
 
-func IndirectType(v interface{}) reflect.Type {
+func IndirectType(v any) reflect.Type {
 	vt, ok := v.(reflect.Type)
 	if !ok {
 		vt = reflect.TypeOf(v)
@@ -55,7 +55,7 @@ func IndirectType(v interface{}) reflect.Type {
 	return vt.Elem()
 }
 
-func IndirectValue(v interface{}, mustSet bool) (reflect.Value, gomerr.Gomerr) {
+func IndirectValue(v any, mustSet bool) (reflect.Value, gomerr.Gomerr) {
 	vv, ok := v.(reflect.Value)
 	if !ok {
 		vv = reflect.ValueOf(v)

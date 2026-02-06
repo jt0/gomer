@@ -18,18 +18,18 @@ type BadValueError struct {
 	Gomerr
 	Type  BadValueType
 	Name  string
-	Value interface{}
+	Value any
 }
 
-func BadValue(badValueType BadValueType, name string, value interface{}) *BadValueError {
+func BadValue(badValueType BadValueType, name string, value any) *BadValueError {
 	return Build(new(BadValueError), badValueType, name, value).(*BadValueError)
 }
 
-func InvalidValue(name string, value interface{}, expected interface{}) *BadValueError {
+func InvalidValue(name string, value any, expected any) *BadValueError {
 	return Build(new(BadValueError), InvalidValueType, name, value).AddAttributes(expectedAttributeKey, expected).(*BadValueError)
 }
 
-func MalformedValue(name string, value interface{}) *BadValueError {
+func MalformedValue(name string, value any) *BadValueError {
 	return Build(new(BadValueError), MalformedValueType, name, value).(*BadValueError)
 }
 

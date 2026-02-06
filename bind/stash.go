@@ -10,7 +10,7 @@ import (
 )
 
 func RegisterStashFieldFunction(name, sourceKey string, include InclusionPredicate) {
-	_ = structs.RegisterToolFunction("$_stash."+name, func(sv reflect.Value, _ reflect.Value, tc structs.ToolContext) (interface{}, gomerr.Gomerr) {
+	_ = structs.RegisterToolFunction("$_stash."+name, func(sv reflect.Value, _ reflect.Value, tc structs.ToolContext) (any, gomerr.Gomerr) {
 		stashData := tc.Get(sourceKey)
 		if stashData == nil {
 			return nil, nil
@@ -22,7 +22,7 @@ func RegisterStashFieldFunction(name, sourceKey string, include InclusionPredica
 			return nil, gomerr.Unprocessable("Expected data map", sdv.Type().String())
 		}
 
-		out := make(map[string]interface{})
+		out := make(map[string]any)
 		iter := sdv.MapRange()
 		for iter.Next() { // TODO:p1 should only be from tc or can be from struct?
 			key := iter.Key().String()
@@ -35,7 +35,7 @@ func RegisterStashFieldFunction(name, sourceKey string, include InclusionPredica
 }
 
 func RegisterUnstashFieldFunction(name, destinationKey string, include InclusionPredicate, createIntermediates bool) {
-	_ = structs.RegisterToolFunction("$_unstash."+name, func(sv reflect.Value, fv reflect.Value, tc structs.ToolContext) (interface{}, gomerr.Gomerr) {
+	_ = structs.RegisterToolFunction("$_unstash."+name, func(sv reflect.Value, fv reflect.Value, tc structs.ToolContext) (any, gomerr.Gomerr) {
 		if !fv.IsValid() {
 			return nil, nil // TODO: return an error?
 		} // TODO:p3 handle fv as a ptr type
@@ -63,7 +63,7 @@ func RegisterUnstashFieldFunction(name, destinationKey string, include Inclusion
 					tf := stashValueType.Field(i)
 					vf := stashValue.Field(i)
 					if include(tf.Name, vf, stashValue) {
-						// m := make(map[string]interface{})
+						// m := make(map[string]any)
 						// for
 						itemDestination.Put(tf.Name, vf.Interface())
 					}
@@ -85,17 +85,17 @@ func RegisterUnstashFieldFunction(name, destinationKey string, include Inclusion
 
 // InclusionPredicate and helper functions
 
-type InclusionPredicate func(key string, value interface{}, sv reflect.Value) bool
+type InclusionPredicate func(key string, value any, sv reflect.Value) bool
 
-func IsField(key string, _ interface{}, sv reflect.Value) bool {
+func IsField(key string, _ any, sv reflect.Value) bool {
 	return sv.FieldByName(strings.Title(key)).IsValid()
 }
 
-func IsNotField(key string, _ interface{}, sv reflect.Value) bool {
+func IsNotField(key string, _ any, sv reflect.Value) bool {
 	return !sv.FieldByName(strings.Title(key)).IsValid()
 }
 
-func All(_ string, _ interface{}, _ reflect.Value) bool {
+func All(_ string, _ any, _ reflect.Value) bool {
 	return true
 }
 
@@ -104,13 +104,13 @@ func NameMatches(names ...string) InclusionPredicate {
 	for _, name := range names {
 		nm[name] = true
 	}
-	return func(key string, _ interface{}, _ reflect.Value) bool {
+	return func(key string, _ any, _ reflect.Value) bool {
 		return nm[key]
 	}
 }
 
 func IfAll(predicates ...InclusionPredicate) InclusionPredicate {
-	return func(key string, value interface{}, sv reflect.Value) bool {
+	return func(key string, value any, sv reflect.Value) bool {
 		for _, p := range predicates {
 			if !p(key, value, sv) {
 				return false
@@ -121,7 +121,7 @@ func IfAll(predicates ...InclusionPredicate) InclusionPredicate {
 }
 
 func IfAny(predicates ...InclusionPredicate) InclusionPredicate {
-	return func(key string, value interface{}, sv reflect.Value) bool {
+	return func(key string, value any, sv reflect.Value) bool {
 		for _, p := range predicates {
 			if p(key, value, sv) {
 				return true
@@ -133,13 +133,13 @@ func IfAny(predicates ...InclusionPredicate) InclusionPredicate {
 
 // UnstashConflictResolver and helper functions
 
-type UnstashConflictResolver func(stashed, destination interface{}) interface{}
+type UnstashConflictResolver func(stashed, destination any) any
 
-func UseStashed(stashed, _ interface{}) interface{} {
+func UseStashed(stashed, _ any) any {
 	return stashed
 }
 
-// func UseDestination(_, destination interface{}) interface{} {
+// func UseDestination(_, destination any) any {
 // 	return destination
 // }
 
@@ -156,7 +156,7 @@ func UseStashed(stashed, _ interface{}) interface{} {
 
 func MergeStashed(include InclusionPredicate) UnstashConflictResolver {
 	// TODO: revisit name; revisit resolver options
-	return func(stashed, destination interface{}) interface{} {
+	return func(stashed, destination any) any {
 
 		return nil // FIXME: dummy val
 	}

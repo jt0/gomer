@@ -74,7 +74,7 @@ type ConsistencyTyper interface {
 	SetConsistencyType(consistencyType ConsistencyType)
 }
 
-type ItemResolver func(interface{}) (interface{}, gomerr.Gomerr)
+type ItemResolver func(any) (any, gomerr.Gomerr)
 
 func Store(tableName string, config *Configuration /* resolver data.ItemResolver,*/, persistables ...data.Persistable) (store data.Store, ge gomerr.Gomerr) {
 	t := &table{
@@ -512,12 +512,12 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 		return gomerr.Internal("Unable to generate nextToken").Wrap(ge)
 	}
 
-	items := make([]interface{}, len(output.Items))
+	items := make([]any, len(output.Items))
 	for i, item := range output.Items {
 		name := q.TypeName()
 		pt := t.persistableTypes[name]
 
-		var resolvedItem interface{}
+		var resolvedItem any
 		if resolvedItem, ge = pt.resolver(item); ge != nil {
 			return ge
 		}

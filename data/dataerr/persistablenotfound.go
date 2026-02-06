@@ -7,9 +7,9 @@ import (
 type PersistableNotFoundError struct {
 	gomerr.Gomerr
 	TypeName string
-	Key      interface{}
+	Key      any
 }
 
-func PersistableNotFound(typeName string, key interface{}) *PersistableNotFoundError {
+func PersistableNotFound(typeName string, key any) *PersistableNotFoundError {
 	return gomerr.Build(new(PersistableNotFoundError), typeName, key).(*PersistableNotFoundError)
 }
