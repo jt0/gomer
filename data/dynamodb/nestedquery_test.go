@@ -3,6 +3,7 @@ package dynamodb
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/jt0/gomer/data"
@@ -127,57 +128,8 @@ func TestPaginationContext_TryInclude_UnknownType(t *testing.T) {
 	}
 }
 
-func TestGetNestedQueryables_NilNestedSkipped(t *testing.T) {
-	parent := &mockParentQueryable{
-		AccountId:   "acc1",
-		ExtensionId: "ext1",
-		Children:    nil, // Not initialized - should be skipped
-	}
-
-	nested := nestedQueryables(parent)
-
-	if len(nested) != 0 {
-		t.Errorf("Expected 0 nested queryables (nil skipped), got %d", len(nested))
-	}
-}
-
-func TestGetNestedQueryables_NonNilDetected(t *testing.T) {
-	parent := &mockParentQueryable{
-		AccountId:   "acc1",
-		ExtensionId: "ext1",
-		Children:    &mockChildQueryableNQ{}, // Initialized - should be detected
-	}
-
-	nested := nestedQueryables(parent)
-
-	if len(nested) != 1 {
-		t.Fatalf("Expected 1 nested queryable, got %d", len(nested))
-	}
-
-	if nested[0].fieldName != "Children" {
-		t.Errorf("Expected field name 'Children', got '%s'", nested[0].fieldName)
-	}
-
-	if nested[0].queryable.TypeName() != "ExtensionVersion" {
-		t.Errorf("Expected persistable type 'ExtensionVersion', got '%s'", nested[0].queryable.TypeName())
-	}
-}
-
-func TestHasNestedQueryables(t *testing.T) {
-	t.Run("no nested", func(t *testing.T) {
-		parent := &mockParentQueryable{Children: nil}
-		if len(nestedQueryables(parent)) > 0 {
-			t.Error("Expected false for nil children")
-		}
-	})
-
-	t.Run("has nested", func(t *testing.T) {
-		parent := &mockParentQueryable{Children: &mockChildQueryableNQ{}}
-		if len(nestedQueryables(parent)) == 0 {
-			t.Error("Expected true for non-nil children")
-		}
-	})
-}
+// NOTE: Tests for nil nested skipped, non-nil detected, and hasNestedQueryables
+// were consolidated into TestDetectNestedQueryables_* tests below.
 
 // Integration test: Full Extension/ExtensionVersion scenario
 // This tests the complete flow from detection through pagination context
@@ -1334,5 +1286,613 @@ func TestTypeDiscriminator_Discriminate_EmptyPrefix(t *testing.T) {
 				t.Errorf("Expected type '%s', got '%s'", tt.expectedType, typeName)
 			}
 		})
+	}
+}
+
+// Additional tests for nestedQueryables edge cases
+
+// EmbeddedPointerBase is exported to allow proper field access via reflection
+type EmbeddedPointerBase struct {
+	BaseField string
+	Nested    *mockChildQueryable
+}
+
+type structWithEmbeddedPointer struct {
+	*EmbeddedPointerBase
+	Name string
+}
+
+func TestNestedQueryables_EmbeddedPointerStruct(t *testing.T) {
+	t.Run("nil embedded pointer", func(t *testing.T) {
+		s := &structWithEmbeddedPointer{
+			EmbeddedPointerBase: nil,
+			Name:                "test",
+		}
+		result := nestedQueryables(s)
+		if len(result) != 0 {
+			t.Errorf("Expected 0 nested queryables for nil embedded pointer, got %d", len(result))
+		}
+	})
+
+	t.Run("non-nil embedded pointer with nested", func(t *testing.T) {
+		s := &structWithEmbeddedPointer{
+			EmbeddedPointerBase: &EmbeddedPointerBase{
+				BaseField: "base",
+				Nested:    &mockChildQueryable{ParentId: "parent"},
+			},
+			Name: "test",
+		}
+		result := nestedQueryables(s)
+		if len(result) != 1 {
+			t.Errorf("Expected 1 nested queryable from embedded pointer struct, got %d", len(result))
+		}
+	})
+}
+
+func TestNestedQueryables_NonPointerStructInput(t *testing.T) {
+	// Test passing a non-pointer struct (should work with reflect.Value handling)
+	type simpleWithChild struct {
+		ID    string
+		Child *mockChildQueryable
+	}
+
+	s := simpleWithChild{
+		ID:    "test",
+		Child: &mockChildQueryable{ParentId: "parent"},
+	}
+
+	// Pass the value directly (not pointer)
+	result := nestedQueryables(s)
+
+	// Should handle non-pointer input appropriately
+	if len(result) != 1 {
+		t.Errorf("Expected 1 nested queryable from value struct, got %d", len(result))
+	}
+}
+
+// NOTE: Trivial edge case tests for sortPatternsBySpecificity (empty slice, single element)
+// were removed as they don't add meaningful coverage. The main test TestSortPatternsBySpecificity
+// covers the core functionality adequately.
+
+func TestTypeDiscriminator_Discriminate_UnexpectedSKType(t *testing.T) {
+	td := &typeDiscriminator{
+		patternsByIndex: map[string][]typePattern{
+			"": {{prefix: "E", skLength: 2, typeName: "Extension"}},
+		},
+		separator: '#',
+	}
+
+	// Test with binary type (unsupported)
+	item := map[string]types.AttributeValue{
+		"SK": &types.AttributeValueMemberB{Value: []byte("binary")},
+	}
+
+	_, err := td.discriminate(item, "", "SK")
+	if err == nil {
+		t.Error("Expected error for unsupported SK type")
+	}
+}
+
+func TestTypeDiscriminator_Discriminate_NoMatchingSegmentCount(t *testing.T) {
+	td := &typeDiscriminator{
+		patternsByIndex: map[string][]typePattern{
+			"": {
+				{prefix: "E", skLength: 2, typeName: "Extension"},
+				{prefix: "V", skLength: 4, typeName: "Version"},
+			},
+		},
+		separator: '#',
+	}
+
+	// Item with 3 segments (no pattern matches)
+	item := map[string]types.AttributeValue{
+		"SK": &types.AttributeValueMemberS{Value: "E#abc#extra"},
+	}
+
+	// Should fall back to prefix matching
+	typeName, err := td.discriminate(item, "", "SK")
+	if err != nil {
+		t.Errorf("Should fall back to prefix match, got error: %v", err)
+	}
+	if typeName != "Extension" {
+		t.Errorf("Expected Extension via prefix fallback, got %s", typeName)
+	}
+}
+
+func TestBuildStaticPrefix_MinimalQuotedValue(t *testing.T) {
+	// Test edge case with minimal quoted value
+	keyFields := []*keyField{
+		{name: "''"}, // Empty quoted value
+	}
+	result := buildStaticPrefix(keyFields, '#')
+	if result != "" {
+		t.Errorf("Expected empty result for empty quoted value, got '%s'", result)
+	}
+}
+
+func TestPaginationContext_ZeroLimits(t *testing.T) {
+	parent := &mockParentQueryable{}
+	parent.SetMaximumPageSize(0) // Zero limit
+
+	pc := newPaginationContext("Extension", parent, nil)
+
+	// Should handle zero limit
+	if pc.combinedLimit() != 0 {
+		t.Errorf("Expected combined limit 0, got %d", pc.combinedLimit())
+	}
+
+	// tryInclude should fail immediately for parent
+	if pc.tryInclude("Extension") {
+		t.Error("Expected tryInclude to fail with zero limit")
+	}
+}
+
+func TestPaginationContext_LargeNumberOfNestedTypes(t *testing.T) {
+	parent := &mockParentQueryable{}
+	parent.SetMaximumPageSize(10)
+
+	// Create nested types - note that all mockChildQueryableNQ return same TypeName
+	// so the nestedMax map will only have one entry for that type
+	nested := make([]nestedQueryableInfo, 5)
+	for i := 0; i < 5; i++ {
+		child := &mockChildQueryableNQ{}
+		child.SetMaximumPageSize(5)
+		nested[i] = nestedQueryableInfo{queryable: child}
+	}
+
+	pc := newPaginationContext("Extension", parent, nested)
+
+	// All 5 nested queryables have same TypeName ("ExtensionVersion")
+	// So nestedMax will have one entry for ExtensionVersion = 5 (last one wins)
+	// Combined limit: (10 + 5) * 2 = 30
+	expected := int32(30)
+	if pc.combinedLimit() != expected {
+		t.Errorf("Expected combined limit %d, got %d", expected, pc.combinedLimit())
+	}
+}
+
+// Test nestedQueryables with interface type field (non-Queryable)
+type nonQueryableInterface interface {
+	DoSomething()
+}
+
+type structWithNonQueryableInterface struct {
+	ID   string
+	Intf nonQueryableInterface
+}
+
+func TestNestedQueryables_NonQueryableInterface(t *testing.T) {
+	s := &structWithNonQueryableInterface{
+		ID:   "test",
+		Intf: nil,
+	}
+	result := nestedQueryables(s)
+	if len(result) != 0 {
+		t.Errorf("Expected 0 nested queryables for non-Queryable interface, got %d", len(result))
+	}
+}
+
+func TestCommonKeyPrefix_EmptySegments(t *testing.T) {
+	// Test with index that has no key fields for the type
+	type EmptyQuery struct{}
+
+	idx := &index{
+		sk: &keyAttribute{
+			keyFieldsByPersistable: map[string][]*keyField{
+				"OtherType": {{name: "'E'"}},
+			},
+		},
+	}
+
+	qv := reflect.ValueOf(&EmptyQuery{}).Elem()
+	result := commonKeyPrefix(idx, "NonExistentType", qv, '#', '$')
+	if result != "" {
+		t.Errorf("Expected empty prefix for non-existent type, got '%s'", result)
+	}
+}
+
+func TestTypeDiscriminator_Discriminate_MultipleCandidatesSamePrefixLength(t *testing.T) {
+	// Edge case: multiple candidates with same segment count and same prefix length
+	td := &typeDiscriminator{
+		patternsByIndex: map[string][]typePattern{
+			"": {
+				{prefix: "ABC", skLength: 3, typeName: "TypeA"},
+				{prefix: "ABC", skLength: 3, typeName: "TypeB"}, // Same prefix and length
+			},
+		},
+		separator: '#',
+	}
+
+	item := map[string]types.AttributeValue{
+		"SK": &types.AttributeValueMemberS{Value: "ABC#x#y"},
+	}
+
+	// Should return first match
+	typeName, err := td.discriminate(item, "", "SK")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	// Should match first candidate
+	if typeName != "TypeA" {
+		t.Errorf("Expected TypeA (first match), got %s", typeName)
+	}
+}
+
+func TestTypeDiscriminator_Discriminate_NoMatchAtAll(t *testing.T) {
+	td := &typeDiscriminator{
+		patternsByIndex: map[string][]typePattern{
+			"": {
+				{prefix: "SPECIFIC", skLength: 2, typeName: "SpecificType"},
+			},
+		},
+		separator: '#',
+	}
+
+	// Item with wrong segment count and non-matching prefix
+	item := map[string]types.AttributeValue{
+		"SK": &types.AttributeValueMemberS{Value: "OTHER#a#b#c#d"},
+	}
+
+	_, err := td.discriminate(item, "", "SK")
+	if err == nil {
+		t.Error("Expected error when no type matches at all")
+	}
+}
+
+// ==============================================================================
+// Tier 1: NextToken Tests (ExpiresAt and formatVersionExpired)
+// ==============================================================================
+
+func TestNextToken_ExpiresAt(t *testing.T) {
+	tests := []struct {
+		name       string
+		expiration time.Time
+	}{
+		{
+			name:       "future expiration",
+			expiration: time.Now().Add(24 * time.Hour),
+		},
+		{
+			name:       "past expiration",
+			expiration: time.Now().Add(-24 * time.Hour),
+		},
+		{
+			name:       "zero time",
+			expiration: time.Time{},
+		},
+		{
+			name:       "specific time",
+			expiration: time.Date(2024, 6, 15, 10, 30, 0, 0, time.UTC),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nt := nextToken{
+				Version:    1,
+				Expiration: tt.expiration,
+			}
+
+			result := nt.ExpiresAt()
+			if !result.Equal(tt.expiration) {
+				t.Errorf("ExpiresAt() = %v, want %v", result, tt.expiration)
+			}
+		})
+	}
+}
+
+func TestNextToken_FormatVersionExpired(t *testing.T) {
+	tests := []struct {
+		name          string
+		version       uint
+		expectExpired bool
+	}{
+		{
+			name:          "current version not expired",
+			version:       formatVersion,
+			expectExpired: false,
+		},
+		{
+			name:          "version 0 always expired",
+			version:       0,
+			expectExpired: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nt := &nextToken{
+				Version:    tt.version,
+				Expiration: time.Now().Add(24 * time.Hour), // Not expired by time
+			}
+
+			result := nt.formatVersionExpired()
+			if result != tt.expectExpired {
+				t.Errorf("formatVersionExpired() = %v, want %v", result, tt.expectExpired)
+			}
+		})
+	}
+}
+
+func TestNextToken_FormatVersionExpired_CurrentVersion(t *testing.T) {
+	// Test that current format version is never expired
+	nt := &nextToken{
+		Version:    formatVersion,
+		Expiration: time.Now().Add(24 * time.Hour),
+	}
+
+	if nt.formatVersionExpired() {
+		t.Error("Current format version should not be expired")
+	}
+}
+
+func TestNextToken_TokenExpired(t *testing.T) {
+	tests := []struct {
+		name          string
+		expiration    time.Time
+		expectExpired bool
+	}{
+		{
+			name:          "future expiration - not expired",
+			expiration:    time.Now().Add(24 * time.Hour),
+			expectExpired: false,
+		},
+		{
+			name:          "past expiration - expired",
+			expiration:    time.Now().Add(-24 * time.Hour),
+			expectExpired: true,
+		},
+		{
+			name:          "just expired",
+			expiration:    time.Now().Add(-1 * time.Minute),
+			expectExpired: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nt := &nextToken{
+				Version:    formatVersion,
+				Expiration: tt.expiration,
+			}
+
+			result := nt.tokenExpired()
+			if result != tt.expectExpired {
+				t.Errorf("tokenExpired() = %v, want %v", result, tt.expectExpired)
+			}
+		})
+	}
+}
+
+func TestExpirationTime(t *testing.T) {
+	// expirationTime should return a time 24 hours in the future
+	before := time.Now().UTC()
+	result := expirationTime()
+	after := time.Now().UTC()
+
+	// The result should be approximately 24 hours from now
+	expectedMin := before.Add(24 * time.Hour)
+	expectedMax := after.Add(24 * time.Hour)
+
+	if result.Before(expectedMin) || result.After(expectedMax) {
+		t.Errorf("expirationTime() = %v, expected between %v and %v", result, expectedMin, expectedMax)
+	}
+}
+
+func TestEncodeDecodeLastEvaluatedKey_StringKey(t *testing.T) {
+	// Test encoding and decoding string keys
+	original := map[string]types.AttributeValue{
+		"PK": &types.AttributeValueMemberS{Value: "partition123"},
+		"SK": &types.AttributeValueMemberS{Value: "sort456"},
+	}
+
+	encoded := encodeLastEvaluatedKey(original)
+
+	// Verify encoding
+	if encoded["PK"] != "S:partition123" {
+		t.Errorf("Expected encoded PK to be 'S:partition123', got '%s'", encoded["PK"])
+	}
+	if encoded["SK"] != "S:sort456" {
+		t.Errorf("Expected encoded SK to be 'S:sort456', got '%s'", encoded["SK"])
+	}
+
+	// Verify decoding roundtrip
+	decoded := decodeLastEvaluatedKey(encoded)
+	pkValue := decoded["PK"].(*types.AttributeValueMemberS).Value
+	skValue := decoded["SK"].(*types.AttributeValueMemberS).Value
+
+	if pkValue != "partition123" {
+		t.Errorf("Decoded PK = %s, want partition123", pkValue)
+	}
+	if skValue != "sort456" {
+		t.Errorf("Decoded SK = %s, want sort456", skValue)
+	}
+}
+
+func TestEncodeDecodeLastEvaluatedKey_NumericKey(t *testing.T) {
+	// Test encoding and decoding numeric keys
+	original := map[string]types.AttributeValue{
+		"PK": &types.AttributeValueMemberN{Value: "12345"},
+		"SK": &types.AttributeValueMemberN{Value: "67890"},
+	}
+
+	encoded := encodeLastEvaluatedKey(original)
+
+	// Verify encoding
+	if encoded["PK"] != "N:12345" {
+		t.Errorf("Expected encoded PK to be 'N:12345', got '%s'", encoded["PK"])
+	}
+	if encoded["SK"] != "N:67890" {
+		t.Errorf("Expected encoded SK to be 'N:67890', got '%s'", encoded["SK"])
+	}
+
+	// Verify decoding roundtrip
+	decoded := decodeLastEvaluatedKey(encoded)
+	pkValue := decoded["PK"].(*types.AttributeValueMemberN).Value
+	skValue := decoded["SK"].(*types.AttributeValueMemberN).Value
+
+	if pkValue != "12345" {
+		t.Errorf("Decoded PK = %s, want 12345", pkValue)
+	}
+	if skValue != "67890" {
+		t.Errorf("Decoded SK = %s, want 67890", skValue)
+	}
+}
+
+func TestEncodeDecodeLastEvaluatedKey_MixedKeys(t *testing.T) {
+	// Test encoding and decoding mixed key types
+	original := map[string]types.AttributeValue{
+		"PK":       &types.AttributeValueMemberS{Value: "tenant#user"},
+		"SK":       &types.AttributeValueMemberS{Value: "order#123"},
+		"GSI_1_PK": &types.AttributeValueMemberS{Value: "email@example.com"},
+		"LSI_1_SK": &types.AttributeValueMemberN{Value: "1704067200"},
+	}
+
+	encoded := encodeLastEvaluatedKey(original)
+	decoded := decodeLastEvaluatedKey(encoded)
+
+	// Verify string keys
+	pkValue := decoded["PK"].(*types.AttributeValueMemberS).Value
+	if pkValue != "tenant#user" {
+		t.Errorf("Decoded PK = %s, want tenant#user", pkValue)
+	}
+
+	// Verify numeric key
+	lsiValue := decoded["LSI_1_SK"].(*types.AttributeValueMemberN).Value
+	if lsiValue != "1704067200" {
+		t.Errorf("Decoded LSI_1_SK = %s, want 1704067200", lsiValue)
+	}
+}
+
+func TestEncodeLastEvaluatedKey_EmptyMap(t *testing.T) {
+	original := map[string]types.AttributeValue{}
+	encoded := encodeLastEvaluatedKey(original)
+
+	if len(encoded) != 0 {
+		t.Errorf("Expected empty encoded map, got %d entries", len(encoded))
+	}
+}
+
+func TestDecodeLastEvaluatedKey_EmptyMap(t *testing.T) {
+	encoded := map[string]string{}
+	decoded := decodeLastEvaluatedKey(encoded)
+
+	if len(decoded) != 0 {
+		t.Errorf("Expected empty decoded map, got %d entries", len(decoded))
+	}
+}
+
+// ==============================================================================
+// Tier 2: consistentRead Tests
+// ==============================================================================
+
+func TestConsistentRead(t *testing.T) {
+	tests := []struct {
+		name                string
+		consistencyType     ConsistencyType
+		canReadConsistently bool
+		expectedNil         bool
+		expectedValue       bool
+	}{
+		{
+			name:                "Indifferent returns false",
+			consistencyType:     Indifferent,
+			canReadConsistently: true,
+			expectedNil:         false,
+			expectedValue:       false,
+		},
+		{
+			name:                "Required returns true",
+			consistencyType:     Required,
+			canReadConsistently: true,
+			expectedNil:         false,
+			expectedValue:       true,
+		},
+		{
+			name:                "Required on non-consistent index returns true",
+			consistencyType:     Required,
+			canReadConsistently: false,
+			expectedNil:         false,
+			expectedValue:       true,
+		},
+		{
+			name:                "Preferred on consistent index returns true",
+			consistencyType:     Preferred,
+			canReadConsistently: true,
+			expectedNil:         false,
+			expectedValue:       true,
+		},
+		{
+			name:                "Preferred on non-consistent index returns false",
+			consistencyType:     Preferred,
+			canReadConsistently: false,
+			expectedNil:         false,
+			expectedValue:       false,
+		},
+		{
+			name:                "Unknown consistency type returns nil",
+			consistencyType:     ConsistencyType(99), // Invalid value
+			canReadConsistently: true,
+			expectedNil:         true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := consistentRead(tt.consistencyType, tt.canReadConsistently)
+
+			if tt.expectedNil {
+				if result != nil {
+					t.Errorf("Expected nil, got %v", *result)
+				}
+			} else {
+				if result == nil {
+					t.Error("Expected non-nil result, got nil")
+				} else if *result != tt.expectedValue {
+					t.Errorf("Expected %v, got %v", tt.expectedValue, *result)
+				}
+			}
+		})
+	}
+}
+
+// ==============================================================================
+// Tier 2: sortPatternsBySpecificity Additional Tests
+// ==============================================================================
+
+func TestSortPatternsBySpecificity_EqualSegments(t *testing.T) {
+	// Test sorting when segment counts are equal
+	patterns := []typePattern{
+		{prefix: "AB", skLength: 3, typeName: "TwoChar"},
+		{prefix: "ABCD", skLength: 3, typeName: "FourChar"},
+		{prefix: "A", skLength: 3, typeName: "OneChar"},
+	}
+
+	sortPatternsBySpecificity(patterns)
+
+	// Expected order: FourChar, TwoChar, OneChar (by prefix length descending)
+	expected := []string{"FourChar", "TwoChar", "OneChar"}
+	for i, p := range patterns {
+		if p.typeName != expected[i] {
+			t.Errorf("Position %d: expected %s, got %s", i, expected[i], p.typeName)
+		}
+	}
+}
+
+func TestSortPatternsBySpecificity_EmptySlice(t *testing.T) {
+	patterns := []typePattern{}
+	sortPatternsBySpecificity(patterns)
+	if len(patterns) != 0 {
+		t.Error("Expected empty slice after sorting")
+	}
+}
+
+func TestSortPatternsBySpecificity_SingleElement(t *testing.T) {
+	patterns := []typePattern{
+		{prefix: "ABC", skLength: 3, typeName: "Only"},
+	}
+	sortPatternsBySpecificity(patterns)
+	if patterns[0].typeName != "Only" {
+		t.Error("Single element should remain unchanged")
 	}
 }

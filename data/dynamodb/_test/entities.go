@@ -136,26 +136,6 @@ type Orders struct {
 
 func (q *Orders) TypeName() string { return "Order" }
 
-// EmptyValueEntity - demonstrates empty and zero value handling
-// Note: Zero int values (0) are treated as "not set" and become empty segments
-type EmptyValueEntity struct {
-	Id          string `db.keys:"pk"`
-	EmptyString string `db.keys:"sk.0"`
-	ZeroInt     int    `db.keys:"sk.1"` // Zero (0) treated as "not set" -> empty segment
-	OptionalPtr *string
-	RequiredStr string
-}
-
-func (e *EmptyValueEntity) TypeName() string             { return "EmptyValueEntity" }
-func (e *EmptyValueEntity) NewQueryable() data.Queryable { return &EmptyValueEntities{} }
-
-type EmptyValueEntities struct {
-	data.BaseQueryable
-	Id string
-}
-
-func (q *EmptyValueEntities) TypeName() string { return "EmptyValueEntity" }
-
 // NumericKeyEntity - demonstrates numeric key handling
 // WARNING: Zero values (0) treated as "not set", sort order is lexicographic not numeric
 type NumericKeyEntity struct {
@@ -209,39 +189,25 @@ type PointerKeyEntities struct {
 
 func (q *PointerKeyEntities) TypeName() string { return "PointerKeyEntity" }
 
-// MappedFieldEntity - demonstrates db.name tag mapping
-type MappedFieldEntity struct {
-	Id       string `db.keys:"pk"`
-	Username string `db.name:"user_name"`
-	Email    string `db.name:"email_addr"`
-	FullName string
-}
-
-func (m *MappedFieldEntity) TypeName() string             { return "MappedFieldEntity" }
-func (m *MappedFieldEntity) NewQueryable() data.Queryable { return &MappedFieldEntities{} }
-
-type MappedFieldEntities struct {
-	data.BaseQueryable
-}
-
-func (q *MappedFieldEntities) TypeName() string { return "MappedFieldEntity" }
-
-// EntityWithExclusions - demonstrates db.name:"-" exclusion
-type EntityWithExclusions struct {
+// EmptyValueEntity - demonstrates empty and zero value handling
+// Note: Zero int values (0) are treated as "not set" and become empty segments
+type EmptyValueEntity struct {
 	Id          string `db.keys:"pk"`
-	Name        string
-	Password    string `db.name:"-"`
-	CachedValue int    `db.name:"-"`
+	EmptyString string `db.keys:"sk.0"`
+	ZeroInt     int    `db.keys:"sk.1"` // Zero (0) treated as "not set" -> empty segment
+	OptionalPtr *string
+	RequiredStr string
 }
 
-func (e *EntityWithExclusions) TypeName() string             { return "EntityWithExclusions" }
-func (e *EntityWithExclusions) NewQueryable() data.Queryable { return &EntityWithExclusionsQuery{} }
+func (e *EmptyValueEntity) TypeName() string             { return "EmptyValueEntity" }
+func (e *EmptyValueEntity) NewQueryable() data.Queryable { return &EmptyValueEntities{} }
 
-type EntityWithExclusionsQuery struct {
+type EmptyValueEntities struct {
 	data.BaseQueryable
+	Id string
 }
 
-func (q *EntityWithExclusionsQuery) TypeName() string { return "EntityWithExclusions" }
+func (q *EmptyValueEntities) TypeName() string { return "EmptyValueEntity" }
 
 // TimeSeriesEvent - demonstrates composite sort key with ascending/descending at different levels
 // Used to test wildcard sort order behavior
