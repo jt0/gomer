@@ -45,8 +45,19 @@ var successStatusCodes = map[Op]int{
 	OptionsInstance:   http.StatusOK,
 }
 
+// CrudlActions is a helper function to create standard resource actions for a given Instance[I] type.
+func CrudlActions[I resource.Instance[I]]() map[any]func() resource.AnyAction {
+	return map[any]func() resource.AnyAction{
+		PostCollection: func() resource.AnyAction { return resource.CreateAction[I]() },
+		GetInstance:    func() resource.AnyAction { return resource.ReadAction[I]() },
+		PatchInstance:  func() resource.AnyAction { return resource.UpdateAction[I]() },
+		DeleteInstance: func() resource.AnyAction { return resource.DeleteAction[I]() },
+		GetCollection:  func() resource.AnyAction { return resource.ListAction[I]() },
+	}
+}
+
 // NoActions is an empty action map for resources that don't expose REST endpoints.
-var NoActions = map[any]func() any{}
+var NoActions = map[any]func() resource.AnyAction{}
 
 func BuildRoutes(domain *resource.Domain, middleware ...func(http.Handler) http.Handler) http.Handler {
 	mux := http.NewServeMux()
