@@ -24,7 +24,11 @@ func init() {
 }
 
 func b64DecodeFunction(encoding *b64.Encoding) structs.ToolFunction {
-	return func(_ reflect.Value, fv reflect.Value, _ structs.ToolContext) (interface{}, gomerr.Gomerr) {
+	return func(_ reflect.Value, fv reflect.Value, _ structs.ToolContext) (any, gomerr.Gomerr) {
+		if !fv.IsValid() || fv.IsZero() {
+			return nil, nil
+		}
+
 		bytes, ok := fv.Interface().([]byte)
 		if !ok {
 			return nil, gomerr.Configuration("b64Decode requires input value to already be an []byte, not " + fv.Type().String())
@@ -41,7 +45,11 @@ func b64DecodeFunction(encoding *b64.Encoding) structs.ToolFunction {
 }
 
 func b64EncodeFunction(encoding *b64.Encoding) structs.ToolFunction {
-	return func(_ reflect.Value, fv reflect.Value, _ structs.ToolContext) (interface{}, gomerr.Gomerr) {
+	return func(_ reflect.Value, fv reflect.Value, _ structs.ToolContext) (any, gomerr.Gomerr) {
+		if !fv.IsValid() || fv.IsZero() {
+			return nil, nil
+		}
+
 		bytes, ok := fv.Interface().([]byte)
 		if !ok {
 			return nil, gomerr.Unprocessable("Field type must be '[]byte'", fv.Type().String())
