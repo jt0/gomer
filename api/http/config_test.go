@@ -15,7 +15,7 @@ import (
 )
 
 type Person struct {
-	resource.BaseInstance `structs:"ignore"`
+	resource.BaseInstance[*Person] `structs:"ignore"`
 
 	FirstName *string `in:"+" out:"+"`
 	LastName  *string `in:"+" out:"+"`
@@ -23,9 +23,10 @@ type Person struct {
 	MiddleName *string
 }
 
+var personActions = map[any]func() resource.AnyAction{PostCollection: func() resource.AnyAction { return resource.CreateAction[*Person]() }}
+
 func init() {
-	d := resource.NewDomain()
-	_, ge := d.Register(&Person{}, nil, actions, stores.PanicStore)
+	_, ge := resource.Register[*Person](domain, nil, personActions, stores.PanicStore)
 	if ge != nil {
 		panic(ge)
 	}
@@ -39,12 +40,12 @@ func TestConfigure_PascalCaseFields(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"FirstName": "Alice", "LastName": "Wonder"}`)),
 	}
 
-	r, ge := BindFromRequest(req, reflect.TypeOf(&Person{}), subject, "test")
+	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
-	p := r.(*Person)
-	assert.Equals(t, "Alice", *p.FirstName)
-	assert.Equals(t, "Wonder", *p.LastName)
+	assert.Equals(t, "Alice", *person.FirstName)
+	assert.Equals(t, "Wonder", *person.LastName)
 }
 
 func TestConfigure_CamelCaseFields(t *testing.T) {
@@ -55,12 +56,12 @@ func TestConfigure_CamelCaseFields(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Bruce", "lastName": "Wayne"}`)),
 	}
 
-	r, ge := BindFromRequest(req, reflect.TypeOf(&Person{}), subject, "test")
+	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
-	p := r.(*Person)
-	assert.Equals(t, "Bruce", *p.FirstName)
-	assert.Equals(t, "Wayne", *p.LastName)
+	assert.Equals(t, "Bruce", *person.FirstName)
+	assert.Equals(t, "Wayne", *person.LastName)
 }
 
 func TestConfigure_PascalCaseFields_CamelCaseInput(t *testing.T) {
@@ -72,12 +73,12 @@ func TestConfigure_PascalCaseFields_CamelCaseInput(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Betty", "lastName": "Crocker"}`)),
 	}
 
-	r, ge := BindFromRequest(req, reflect.TypeOf(&Person{}), subject, "test")
+	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
-	p := r.(*Person)
-	assert.Nil(t, p.FirstName) // nil since field case is different from expected
-	assert.Nil(t, p.LastName)  // ^^
+	assert.Nil(t, person.FirstName) // nil since field case is different from expected
+	assert.Nil(t, person.LastName)  // ^^
 }
 
 func TestConfigure_MultipleOptions(t *testing.T) {
@@ -89,13 +90,13 @@ func TestConfigure_MultipleOptions(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "James", "middleName": "Earl", "lastName": "Jones"}`)),
 	}
 
-	r, ge := BindFromRequest(req, reflect.TypeOf(&Person{}), subject, "test")
+	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
-	p := r.(*Person)
-	assert.Equals(t, "James", *p.FirstName)
-	assert.Equals(t, "Earl", *p.MiddleName) // IncludeEmptyDirective should cause this to be set
-	assert.Equals(t, "Jones", *p.LastName)
+	assert.Equals(t, "James", *person.FirstName)
+	assert.Equals(t, "Earl", *person.MiddleName) // IncludeEmptyDirective should cause this to be set
+	assert.Equals(t, "Jones", *person.LastName)
 }
 
 func TestNewBindingConfiguration_SetAsDefault(t *testing.T) {
@@ -107,12 +108,12 @@ func TestNewBindingConfiguration_SetAsDefault(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Plato"}`)),
 	}
 
-	r, ge := BindFromRequest(req, reflect.TypeOf(&Person{}), subject, "test")
+	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
-	p := r.(*Person)
-	assert.Equals(t, "Plato", *p.FirstName)
-	assert.Nil(t, p.LastName)
+	assert.Equals(t, "Plato", *person.FirstName)
+	assert.Nil(t, person.LastName)
 }
 
 func TestConfigure_CamelCaseFields_DefaultNaming(t *testing.T) {
@@ -123,12 +124,12 @@ func TestConfigure_CamelCaseFields_DefaultNaming(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Charlie", "lastName": "Brown"}`)),
 	}
 
-	r, ge := BindFromRequest(req, reflect.TypeOf(&Person{}), subject, "test")
+	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
-	p := r.(*Person)
-	assert.Equals(t, "Charlie", *p.FirstName)
-	assert.Equals(t, "Brown", *p.LastName)
+	assert.Equals(t, "Charlie", *person.FirstName)
+	assert.Equals(t, "Brown", *person.LastName)
 }
 
 func TestConfigure_RequestOption(t *testing.T) {
@@ -143,11 +144,11 @@ func TestConfigure_RequestOption(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Edgar", "middleName": "Allan", "lastName": "Poe"}`)),
 	}
 
-	r, ge := BindFromRequest(req, reflect.TypeOf(&Person{}), subject, "test")
+	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
-	p := r.(*Person)
-	assert.Equals(t, "Allan", *p.MiddleName)
+	assert.Equals(t, "Allan", *person.MiddleName)
 }
 
 func TestConfigure_ResponseOption(t *testing.T) {
@@ -163,16 +164,16 @@ func TestConfigure_ResponseOption(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Madonna"}`)),
 	}
 
-	r, ge := BindFromRequest(req, reflect.TypeOf(&Person{}), subject, "test")
+	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
-	p := r.(*Person)
-	assert.Equals(t, "Madonna", *p.FirstName)
-	assert.Nil(t, p.LastName) // nil since not provided and OmitEmptyValues is set
+	assert.Equals(t, "Madonna", *person.FirstName)
+	assert.Nil(t, person.LastName) // nil since not provided and OmitEmptyValues is set
 
 	// Bind to response - should include lastName:null due to ResponseOption(IncludeEmptyValues)
 	header := make(http.Header)
-	bytes, statusCode := BindToResponse(reflect.ValueOf(p), header, "test", "", http.StatusOK)
+	bytes, statusCode := BindToResponse(reflect.ValueOf(person), header, "test", "", http.StatusOK)
 	assert.Equals(t, http.StatusOK, statusCode)
 
 	responseBody := string(bytes)

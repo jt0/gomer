@@ -3,8 +3,8 @@ package resource
 import (
 	"context"
 	"fmt"
-	"reflect"
 
+	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
 )
@@ -43,7 +43,20 @@ func decrement(limiter limit.Limiter, limited limit.Limited) gomerr.Gomerr {
 	return nil
 }
 
-func applyLimitAction(ctx context.Context, limitAction limitAction, i Resource) (limit.Limiter, gomerr.Gomerr) {
+// resourceLike is an internal interface that abstracts over generic Resource types.
+type resourceLike interface {
+	Metadata() *Metadata
+	Subject(context.Context) any
+}
+
+// instanceLike is an internal interface that abstracts over generic Instance types.
+type instanceLike interface {
+	resourceLike
+	data.Persistable
+	Id() string
+}
+
+func applyLimitAction(ctx context.Context, limitAction limitAction, i resourceLike) (limit.Limiter, gomerr.Gomerr) {
 	limited, ok := i.(limit.Limited)
 	if !ok {
 		return nil, nil
@@ -51,33 +64,20 @@ func applyLimitAction(ctx context.Context, limitAction limitAction, i Resource) 
 
 	limiter, ge := limited.Limiter()
 	if ge != nil {
-		return nil, gomerr.Configuration(i.metadata().instanceName + " did not provide a Limiter for itself.").Wrap(ge)
+		return nil, gomerr.Configuration(i.Metadata().instanceName + " did not provide a Limiter for itself.").Wrap(ge)
 	}
 
-	li, ok := limiter.(Instance)
+	li, ok := limiter.(instanceLike)
 	if !ok {
-		return nil, gomerr.Configuration("limiter from " + i.metadata().instanceName + " does not implement resource.Instance")
+		return nil, gomerr.Configuration("limiter from " + i.Metadata().instanceName + " does not implement resource.Instance")
 	}
 
 	// If the metadata isn't set, then this is a New object and needs to be loaded
 	var loaded bool
-	if li.metadata() == nil {
-		resourceType := reflect.TypeOf(limiter)
-		md, exists := defaultDomain.Load().metadata[resourceType]
-		if !exists {
-			return nil, gomerr.Unprocessable("unknown Resource type. Was resource.Register() called for it?", resourceType)
-		}
-
-		li.setSelf(li)
-		li.setMetadata(md)
-		li.setSubject(i.Subject(ctx))
-
-		// TODO: cache in case needed by more than one resource...
-		if ge = li.metadata().dataStore.Read(ctx, li); ge != nil {
-			return nil, ge
-		}
-
-		loaded = true
+	if li.Metadata() == nil {
+		// Note: this path requires a global domain lookup which is not available
+		// in the generic design. Consider requiring pre-initialized limiters.
+		return nil, gomerr.Configuration("limiter must be pre-initialized with metadata")
 	}
 
 	if ge = limitAction(limiter, limited); ge != nil {
@@ -98,11 +98,11 @@ func saveLimiterIfDirty(ctx context.Context, limiter limit.Limiter) {
 		return
 	}
 
-	li := limiter.(Instance) // Should always be true
-	ge := li.metadata().dataStore.Update(ctx, li, nil)
+	li := limiter.(instanceLike) // Should always be true
+	ge := li.Metadata().dataStore.Update(ctx, li, nil)
 	if ge != nil {
 		// TODO: use provided logger
-		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", li.metadata().instanceName, li.Id(), ge)
+		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", li.Metadata().instanceName, li.Id(), ge)
 		return
 	}
 

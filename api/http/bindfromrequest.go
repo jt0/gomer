@@ -10,12 +10,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/bind"
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/resource"
 	"github.com/jt0/gomer/structs"
 )
 
@@ -62,11 +60,11 @@ func SetBindFromRequestConfiguration(requestConfiguration BindFromRequestConfigu
 	return DefaultBindFromRequestTool
 }
 
-func BindFromRequest(request *http.Request, resourceType reflect.Type, subject auth.Subject, scope string) (resource.Resource, gomerr.Gomerr) {
-	r, ge := resource.New(resourceType, subject)
-	if ge != nil {
-		return nil, ge
-	}
+// BindFromRequest binds request data to an already-created resource.
+// The resource should be created via Metadata.NewInstance or Metadata.NewCollection before calling this.
+func BindFromRequest(request *http.Request, resource any, scope string) gomerr.Gomerr {
+	rv := reflect.ValueOf(resource)
+	resourceType := rv.Type()
 
 	tc := structs.ToolContextWithScope(scope).
 		With(pathPartsKey, strings.Split(strings.Trim(request.URL.Path, "/"), "/")). // remove any leading or trailing slashes
@@ -75,7 +73,7 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 
 	bodyBytes, err := io.ReadAll(request.Body) // TODO:p3 Support streaming rather than using []byte
 	if err != nil {
-		return nil, gomerr.Internal("Failed to read request body content").Wrap(err)
+		return gomerr.Internal("failed to read request body content").Wrap(err)
 	}
 
 	if hasInBodyBinding[resourceType.Elem().String()] {
@@ -91,20 +89,20 @@ func BindFromRequest(request *http.Request, resourceType reflect.Type, subject a
 			unmarshal, ok := requestConfig.perContentTypeUnmarshalFunctions[contentType]
 			if !ok {
 				if requestConfig.defaultUnmarshalFunction == nil {
-					return nil, gomerr.Unmarshal("Unsupported content-type", contentType, nil)
+					return gomerr.Unmarshal("unsupported content-type", contentType, nil)
 				}
 				unmarshal = requestConfig.defaultUnmarshalFunction
 			}
 
 			if err = unmarshal(bodyBytes, &unmarshaled); err != nil {
-				return nil, gomerr.Unmarshal("Unable to unmarshal data", bodyBytes, unmarshaled).AddAttribute("ContentType", contentType).Wrap(err)
+				return gomerr.Unmarshal("unable to unmarshal data", bodyBytes, unmarshaled).AddAttribute("ContentType", contentType).Wrap(err)
 			}
 		}
 
 		tc.Put(bind.InKey, unmarshaled)
 	}
 
-	return r, structs.ApplyTools(r, tc, DefaultBindFromRequestTool, constraint.DefaultValidationTool)
+	return structs.ApplyTools(resource, tc, DefaultBindFromRequestTool, constraint.DefaultValidationTool)
 }
 
 // requestExtension

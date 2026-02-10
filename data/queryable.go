@@ -2,8 +2,9 @@ package data
 
 type Queryable interface {
 	TypeName() string
-	Items() []interface{}
-	SetItems([]interface{})
+	ItemTemplate() any
+	Results() []any
+	SetResults([]any)
 	NextPageToken() *string
 	SetNextPageToken(*string)
 	MaximumPageSize() int
@@ -25,17 +26,17 @@ const (
 var MaxResultsDefault = 100
 
 type BaseQueryable struct {
-	items      []interface{}
+	results    []any
 	nextToken  *string
 	maxResults *int
 }
 
-func (b *BaseQueryable) Items() []interface{} {
-	return b.items
+func (b *BaseQueryable) Results() []any {
+	return b.results
 }
 
-func (b *BaseQueryable) SetItems(items []interface{}) {
-	b.items = items
+func (b *BaseQueryable) SetResults(items []any) {
+	b.results = items
 }
 
 func (b *BaseQueryable) NextPageToken() *string {

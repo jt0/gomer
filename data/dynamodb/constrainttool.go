@@ -35,8 +35,7 @@ func (ap constraintApplierProvider) Applier(st reflect.Type, sf reflect.StructFi
 	// Parse directive: "unique(Field1,Field2)"
 	matches := constraintsRegexp.FindAllStringSubmatch(directive, -1)
 	if matches == nil {
-		return nil, gomerr.Configuration("invalid db.constraints value: "+directive).
-			AddAttribute("Field", sf.Name)
+		return nil, gomerr.Configuration("invalid db.constraints value: "+directive).AddAttribute("Field", sf.Name)
 	}
 
 	for _, match := range matches {
@@ -69,16 +68,14 @@ func (a uniquenessApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.
 	// Get context from ToolContext
 	ctxVal := tc.Get("ctx")
 	if ctxVal == nil {
-		return gomerr.Configuration("context.Context not found in ToolContext").
-			AddAttribute("Field", a.fieldName)
+		return gomerr.Configuration("context.Context not found in ToolContext").AddAttribute("Field", a.fieldName)
 	}
 	ctx := ctxVal.(context.Context)
 
 	// Get the persistable (sv is the struct value)
 	p, ok := sv.Addr().Interface().(data.Persistable)
 	if !ok {
-		return gomerr.Configuration("struct does not implement data.Persistable").
-			AddAttribute("Type", sv.Type().String())
+		return gomerr.Configuration("struct does not implement data.Persistable").AddAttribute("Type", sv.Type().String())
 	}
 
 	// Check uniqueness using table's query functionality

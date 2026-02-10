@@ -169,7 +169,7 @@ func populateTestData(t *testing.T, store data.Store) {
 // Helper functions for verification
 
 func extractSortKeys(q data.Queryable) []string {
-	items := q.Items()
+	items := q.Results()
 	keys := make([]string, len(items))
 	for i, item := range items {
 		switch v := item.(type) {
@@ -187,7 +187,7 @@ func extractSortKeys(q data.Queryable) []string {
 }
 
 func extractIds(q data.Queryable) []string {
-	items := q.Items()
+	items := q.Results()
 	ids := make([]string, len(items))
 	for i, item := range items {
 		switch v := item.(type) {
@@ -236,7 +236,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			},
 			expectedCount: 5,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				for _, item := range items {
 					entity := item.(*testentities.CompositeKeyEntity)
 					if entity.PartitionKey != "T1" {
@@ -258,7 +258,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			},
 			expectedCount: 1,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				if len(items) != 1 {
 					t.Fatalf("Expected 1 item, got %d", len(items))
 				}
@@ -281,7 +281,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			},
 			expectedCount: 3,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				for _, item := range items {
 					entity := item.(*testentities.MultiPartKeyEntity)
 					if entity.TenantId != "T1" || entity.EntityType != "MP_1" {
@@ -300,7 +300,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			},
 			expectedCount: 3,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				for _, item := range items {
 					entity := item.(*testentities.StaticKeyEntity)
 					if entity.Id != "item123" {
@@ -319,7 +319,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			},
 			expectedCount: 5,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				for _, item := range items {
 					user := item.(*testentities.User)
 					if user.TenantId != "T1" {
@@ -338,7 +338,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			},
 			expectedCount: 1,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				if len(items) != 1 {
 					t.Fatalf("Expected 1 item, got %d", len(items))
 				}
@@ -358,7 +358,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			},
 			expectedCount: 6,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				for _, item := range items {
 					product := item.(*testentities.Product)
 					if product.TenantId != "T1" {
@@ -380,7 +380,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			},
 			expectedCount: 2,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				for _, item := range items {
 					product := item.(*testentities.Product)
 					if product.Category != "Electronics" {
@@ -399,7 +399,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			},
 			expectedCount: 5,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				for _, item := range items {
 					order := item.(*testentities.Order)
 					if order.TenantId != "T1" {
@@ -418,7 +418,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			},
 			expectedCount: 0,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				if len(items) != 0 {
 					t.Errorf("Expected empty results, got %d items", len(items))
 				}
@@ -450,7 +450,7 @@ func TestQuery_BasicQueries(t *testing.T) {
 			assert.Success(t, err)
 
 			// Verify count
-			items := q.Items()
+			items := q.Results()
 			if len(items) != tt.expectedCount {
 				t.Errorf("Expected %d items, got %d", tt.expectedCount, len(items))
 			}
@@ -495,7 +495,7 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 			},
 			expectedCount: 1,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				entity := q.Items()[0].(*testentities.CompositeKeyEntity)
+				entity := q.Results()[0].(*testentities.CompositeKeyEntity)
 				if entity.SortKey != "item1" {
 					t.Errorf("Expected SortKey=item1, got %s", entity.SortKey)
 				}
@@ -560,7 +560,7 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 			},
 			expectedCount: 3, // All USER items
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				for _, item := range q.Items() {
+				for _, item := range q.Results() {
 					entity := item.(*testentities.MultiPartKeyEntity)
 					if entity.EntityType != "USER" {
 						t.Errorf("Expected EntityType=USER, got %s", entity.EntityType)
@@ -590,8 +590,8 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 			},
 			expectedCount: 5, // All items in partition
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				if len(q.Items()) != 5 {
-					t.Errorf("Expected 5 items, got %d", len(q.Items()))
+				if len(q.Results()) != 5 {
+					t.Errorf("Expected 5 items, got %d", len(q.Results()))
 				}
 			},
 		},
@@ -617,8 +617,8 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 			},
 			expectedCount: 3, // All items (empty SK treated as not provided)
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				if len(q.Items()) != 3 {
-					t.Errorf("Expected 3 items, got %d", len(q.Items()))
+				if len(q.Results()) != 3 {
+					t.Errorf("Expected 3 items, got %d", len(q.Results()))
 				}
 			},
 		},
@@ -650,7 +650,7 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 			assert.Success(t, err)
 
 			// Verify count
-			items := q.Items()
+			items := q.Results()
 			if len(items) != tt.expectedCount {
 				t.Errorf("Expected %d items, got %d", tt.expectedCount, len(items))
 			}
@@ -692,7 +692,7 @@ func TestQuery_IndexSelection(t *testing.T) {
 			},
 			expectedCount: 1,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				user := q.Items()[0].(*testentities.User)
+				user := q.Results()[0].(*testentities.User)
 				if user.Email != "user1@example.com" {
 					t.Errorf("Expected Email=user1@example.com, got %s", user.Email)
 				}
@@ -718,7 +718,7 @@ func TestQuery_IndexSelection(t *testing.T) {
 			},
 			expectedCount: 3,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				for _, item := range q.Items() {
+				for _, item := range q.Results() {
 					user := item.(*testentities.User)
 					if user.TenantId != "T1" {
 						t.Errorf("Expected TenantId=T1, got %s", user.TenantId)
@@ -770,7 +770,7 @@ func TestQuery_IndexSelection(t *testing.T) {
 			},
 			expectedCount: 1,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				product := q.Items()[0].(*testentities.Product)
+				product := q.Results()[0].(*testentities.Product)
 				if product.Sku != "SKU001" {
 					t.Errorf("Expected Sku=SKU001, got %s", product.Sku)
 				}
@@ -812,7 +812,7 @@ func TestQuery_IndexSelection(t *testing.T) {
 			assert.Success(t, err)
 
 			// Verify count
-			items := q.Items()
+			items := q.Results()
 			if len(items) != tt.expectedCount {
 				t.Errorf("Expected %d items, got %d", tt.expectedCount, len(items))
 			}
@@ -889,7 +889,7 @@ func TestQuery_WildcardMatching(t *testing.T) {
 			},
 			expectedCount: 1,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				entity := q.Items()[0].(*testentities.CompositeKeyEntity)
+				entity := q.Results()[0].(*testentities.CompositeKeyEntity)
 				if entity.SortKey != "item" {
 					t.Errorf("Expected exact match 'item', got %s", entity.SortKey)
 				}
@@ -933,7 +933,7 @@ func TestQuery_WildcardMatching(t *testing.T) {
 			},
 			expectedCount: 2, // Laptop Pro, Laptop Air
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				for _, item := range q.Items() {
+				for _, item := range q.Results() {
 					product := item.(*testentities.Product)
 					if product.Category != "Electronics" {
 						t.Errorf("Expected Category=Electronics, got %s", product.Category)
@@ -972,7 +972,7 @@ func TestQuery_WildcardMatching(t *testing.T) {
 			assert.Success(t, err)
 
 			// Verify count
-			items := q.Items()
+			items := q.Results()
 			if len(items) != tt.expectedCount {
 				t.Errorf("Expected %d items, got %d", tt.expectedCount, len(items))
 			}
@@ -1019,7 +1019,7 @@ func TestQuery_FilterExpressions(t *testing.T) {
 			},
 			expectedCount: 3, // items 1, 3, 5
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				for _, item := range q.Items() {
+				for _, item := range q.Results() {
 					entity := item.(*testentities.CompositeKeyEntity)
 					if entity.Status != "running" {
 						t.Errorf("Expected Status=running, got %s", entity.Status)
@@ -1060,7 +1060,7 @@ func TestQuery_FilterExpressions(t *testing.T) {
 			},
 			expectedCount: 2, // item1 and item4
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				for _, item := range q.Items() {
+				for _, item := range q.Results() {
 					entity := item.(*testentities.CompositeKeyEntity)
 					if entity.Data != "test" || entity.Status != "running" {
 						t.Errorf("Expected Data=test and Status=running, got %s, %s", entity.Data, entity.Status)
@@ -1094,7 +1094,7 @@ func TestQuery_FilterExpressions(t *testing.T) {
 			assert.Success(t, err)
 
 			// Verify count
-			items := q.Items()
+			items := q.Results()
 			if len(items) != tt.expectedCount {
 				t.Errorf("Expected %d items, got %d", tt.expectedCount, len(items))
 			}
@@ -1169,7 +1169,7 @@ func TestQuery_SortOrder(t *testing.T) {
 				}
 			},
 			verifyFunc: func(t *testing.T, q data.Queryable) {
-				items := q.Items()
+				items := q.Results()
 				if len(items) != 3 {
 					t.Errorf("Expected 3 items, got %d", len(items))
 					return
@@ -1318,7 +1318,7 @@ func TestQuery_WildcardSortOrder(t *testing.T) {
 			err := store.Query(context.Background(), q)
 			assert.Success(t, err)
 
-			items := q.Items()
+			items := q.Results()
 			if len(items) != len(tt.expectedOrder) {
 				t.Fatalf("Expected %d items, got %d", len(tt.expectedOrder), len(items))
 			}

@@ -1,11 +1,11 @@
 package http_test
 
 import (
+	"context"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -17,13 +17,15 @@ import (
 )
 
 var (
-	subject = auth.NewSubject(auth.ReadWriteAllFields)
-	actions = map[interface{}]func() resource.Action{PostCollection: resource.CreateAction}
+	subject       = auth.NewSubject(auth.ReadWriteAllFields)
+	actions       = map[any]func() resource.AnyAction{PostCollection: func() resource.AnyAction { return resource.CreateAction[*Greeting]() }}
+	domain        = resource.NewDomain()
+	ctxWithDomain = context.WithValue(context.TODO(), resource.DomainCtxKey, domain)
 )
 
 //goland:noinspection GoSnakeCaseUsage
 type Greeting struct {
-	resource.BaseInstance `structs:"ignore"`
+	resource.BaseInstance[*Greeting] `structs:"ignore"`
 
 	Style_path       string `in:"path.0"`
 	Recipient_path   string `in:"path.1"`
@@ -69,8 +71,7 @@ func (g Greeting) recipient(location int) string {
 }
 
 func TestBindInTypes(t *testing.T) {
-	d := resource.NewDomain()
-	_, ge := d.Register(&Greeting{}, nil, actions, stores.PanicStore)
+	_, ge := resource.Register[*Greeting](domain, nil, actions, stores.PanicStore)
 	assert.Success(t, ge)
 
 	const (
@@ -91,13 +92,12 @@ func TestBindInTypes(t *testing.T) {
 		{"BindFromBody", Body, &http.Request{URL: &url.URL{Path: "/"}, Body: body("{ \"Style\": \"" + hello + "\", \"Recipient\": \"" + kitty + "\" }")}},
 	}
 
-	greetingsType := reflect.TypeOf(&Greeting{})
-	var r resource.Resource
+	greeting, ge := resource.NewInstance[*Greeting](ctxWithDomain, subject)
+	assert.Success(t, ge)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r, ge = BindFromRequest(tt.request, greetingsType, subject, "some_scope")
+			ge = BindFromRequest(tt.request, greeting, "some_scope")
 			assert.Success(t, ge)
-			greeting := r.(*Greeting)
 			assert.Equals(t, hello, greeting.style(tt.location))
 			assert.Equals(t, kitty, greeting.recipient(tt.location))
 		})

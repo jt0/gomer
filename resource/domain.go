@@ -2,167 +2,135 @@ package resource
 
 import (
 	"reflect"
-	"strings"
-	"sync/atomic"
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 )
 
-type Domain struct {
-	metadata map[reflect.Type]*Metadata
-	roots    []*Metadata
-}
+// Register registers an instance type with the domain.
+// If parent is nil, the resource is registered as a root resource.
+// If parent is provided, the resource is registered as a child of that parent.
+func Register[I Instance[I]](d *Domain, parent *Metadata, actions map[any]func() AnyAction, store data.Store) (*Metadata, gomerr.Gomerr) {
+	instanceType := reflect.TypeFor[I]()
 
-var defaultDomain atomic.Pointer[Domain]
+	// Compute offset of BaseResource within the instance struct
+	baseOffset := findBaseResourceOffset[I]()
 
-type domainCtxKey struct{}
-
-var DomainCtxKey = domainCtxKey{}
-
-func NewDomain() *Domain {
-	domain := &Domain{metadata: make(map[reflect.Type]*Metadata)}
-	defaultDomain.CompareAndSwap(nil, domain) // Set the first domain as the default in case its needed
-	return domain
-}
-
-func (d *Domain) Register(instance Instance, collection Collection, actions map[any]func() Action, dataStore data.Store) (*Metadata, gomerr.Gomerr) {
-	md, ge := d.register(instance, collection, actions, dataStore)
-	if ge != nil {
-		return nil, ge
+	md := &Metadata{
+		instanceType: instanceType,
+		instanceName: instanceType.Elem().Name(),
+		anyActions:   actions,
+		dataStore:    store,
+		parent:       parent,
+		children:     make([]*Metadata, 0),
+		baseOffset:   baseOffset,
 	}
-	d.roots = append(d.roots, md)
-	return md, ge
-}
 
-func (d *Domain) RootResources() []*Metadata {
-	return d.roots
-}
-
-// NewResource return a new instance of the (registered) resourceType. If
-func (d *Domain) NewResource(resourceType reflect.Type, subject auth.Subject) (Resource, gomerr.Gomerr) {
-	if d == nil {
-		if d = defaultDomain.Load(); d == nil {
-			return nil, gomerr.Configuration("no resource domain to instantiate from")
+	// Create closures while we know the type of I.
+	md.NewInstance = func(sub auth.Subject) any {
+		i := reflect.New(reflect.TypeFor[I]().Elem()).Interface().(I)
+		i.initialize(md, sub)
+		return i
+	}
+	md.NewCollection = func(proto any) any {
+		i, ok := proto.(I)
+		if !ok || i.Metadata() != md {
+			panic(gomerr.Configuration("collection must be created with its own instance type").String())
 		}
+		return NewCollection(i)
 	}
 
-	md, ok := d.metadata[resourceType]
-	if !ok {
-		return nil, gomerr.Unprocessable("Unknown Resource type. Was resource.Register() called for it?", resourceType)
-	}
+	d.metadata[instanceType] = md
 
-	resource := reflect.New(resourceType.Elem()).Interface().(Resource)
-	resource.setSelf(resource)
-	resource.setMetadata(md)
-	resource.setSubject(subject)
-
-	return resource, nil
-}
-
-func (d *Domain) register(instance Instance, collection Collection, actions map[any]func() Action, dataStore data.Store) (*Metadata, gomerr.Gomerr) {
-	if instance == nil {
-		return nil, gomerr.Configuration("non-nil instance required")
-	}
-
-	it := reflect.TypeOf(instance)
-	md, _ := d.metadata[it]
-	if md != nil {
-		return md, nil
-	}
-
-	if actions == nil {
-		return nil, gomerr.Configuration("non-nil actions required")
-	}
-
-	unqualifiedInstanceName := it.String()
-	unqualifiedInstanceName = unqualifiedInstanceName[strings.Index(unqualifiedInstanceName, ".")+1:]
-
-	var ct reflect.Type
-	var unqualifiedCollectionName string
-	if collection != nil {
-		ct = reflect.TypeOf(collection)
-		unqualifiedCollectionName = it.String()
-		unqualifiedCollectionName = unqualifiedCollectionName[strings.Index(unqualifiedCollectionName, ".")+1:]
-	}
-
-	md = &Metadata{
-		domain:         d,
-		instanceType:   it,
-		instanceName:   unqualifiedInstanceName,
-		collectionType: ct,
-		collectionName: unqualifiedCollectionName,
-		actions:        actions,
-		dataStore:      dataStore,
-		children:       make([]*Metadata, 0),
-	}
-
-	d.metadata[it] = md
-	if ct != nil {
-		d.metadata[ct] = md
+	if parent == nil {
+		d.roots = append(d.roots, md)
+	} else {
+		parent.children = append(parent.children, md)
 	}
 
 	return md, nil
 }
 
-// type Metadata interface {
-// 	RegisterChild(Instance, Collection, map[any]func() Action, data.Store) (*Metadata, gomerr.Gomerr)
-// 	ResourceType(Category) reflect.Type
-// 	Actions() map[any]func() Action
-// 	Parent() *Metadata
-// 	Children() []*Metadata
-// }
+// findBaseResourceOffset finds the offset of BaseResource[I] within the instance struct.
+// It searches recursively through embedded structs.
+func findBaseResourceOffset[I Instance[I]]() uintptr {
+	instanceType := reflect.TypeFor[I]().Elem() // *Person -> Person
+	baseResourceType := reflect.TypeOf(BaseResource[I]{})
+	return findFieldOffset(instanceType, baseResourceType)
+}
 
+// findFieldOffset recursively searches for a field of the target type and returns its offset.
+func findFieldOffset(structType, targetType reflect.Type) uintptr {
+	for i := 0; i < structType.NumField(); i++ {
+		field := structType.Field(i)
+		if field.Type == targetType {
+			return field.Offset
+		}
+		// Recurse into embedded structs
+		if field.Anonymous && field.Type.Kind() == reflect.Struct {
+			if innerOffset := findFieldOffset(field.Type, targetType); innerOffset != ^uintptr(0) {
+				return field.Offset + innerOffset
+			}
+		}
+	}
+	return ^uintptr(0) // not found
+}
+
+type domainCtxKey struct{}
+
+// DomainCtxKey is the context key for storing/retrieving a Domain.
+var DomainCtxKey = domainCtxKey{}
+
+// Domain holds all registered resource types.
+type Domain struct {
+	metadata map[reflect.Type]*Metadata
+	roots    []*Metadata
+}
+
+// NewDomain creates a new domain for resource registration.
+func NewDomain() *Domain {
+	return &Domain{
+		metadata: make(map[reflect.Type]*Metadata),
+	}
+}
+
+// RootResources returns all root-level registered resources.
+func (d *Domain) RootResources() []*Metadata {
+	return d.roots
+}
+
+// Metadata holds registration information for a resource type. It is not generic because it needs to be stored
+// in collections indexed by reflect.Type.
 type Metadata struct {
-	domain         *Domain
-	instanceType   reflect.Type
-	instanceName   string
-	collectionType reflect.Type
-	collectionName string
-	actions        map[any]func() Action
-	dataStore      data.Store
-	parent         *Metadata
-	children       []*Metadata // Using interface type since we aren't currently using child attributes
+	instanceType reflect.Type
+	instanceName string
+	anyActions   map[any]func() AnyAction // Returns Action[I] for the registered type
+	dataStore    data.Store
+	parent       *Metadata
+	children     []*Metadata
+	baseOffset   uintptr // offset of BaseResource within the instance struct
 
-	// idFields       []field
+	NewInstance   func(sub auth.Subject) any
+	NewCollection func(proto any) any
 }
 
-func (m *Metadata) RegisterChild(instance Instance, collection Collection, actions map[any]func() Action, dataStore data.Store) (*Metadata, gomerr.Gomerr) {
-	if m == nil {
-		return nil, gomerr.Configuration("cannot create child of nil parent")
-	}
-
-	md, ge := m.domain.register(instance, collection, actions, dataStore)
-	if ge != nil {
-		return nil, ge
-	}
-
-	md.parent = m
-	m.children = append(m.children, md)
-
-	return md, ge
+func (m *Metadata) InstanceType() reflect.Type {
+	return m.instanceType
 }
 
-func (m *Metadata) ResourceType(category Category) reflect.Type {
-	switch category {
-	case InstanceCategory:
-		return m.instanceType
-	case CollectionCategory:
-		return m.collectionType
-	default:
-		return nil
-	}
+func (m *Metadata) InstanceName() string {
+	return m.instanceName
 }
 
-func (m *Metadata) Actions() map[any]func() Action {
-	return m.actions
-}
-
-func (m *Metadata) Parent() *Metadata {
-	return m.parent
+func (m *Metadata) ActionFuncs() map[any]func() AnyAction {
+	return m.anyActions
 }
 
 func (m *Metadata) Children() []*Metadata {
 	return m.children
+}
+
+func (m *Metadata) DataStore() data.Store {
+	return m.dataStore
 }

@@ -18,7 +18,8 @@ type mockParentQueryable struct {
 	Children    *mockChildQueryableNQ // Nested Queryable
 }
 
-func (m *mockParentQueryable) TypeName() string { return "Extension" }
+func (m *mockParentQueryable) TypeName() string  { return "Extension" }
+func (m *mockParentQueryable) ItemTemplate() any { return m }
 
 type mockChildQueryableNQ struct {
 	data.BaseQueryable
@@ -27,13 +28,15 @@ type mockChildQueryableNQ struct {
 	Version     string
 }
 
-func (m *mockChildQueryableNQ) TypeName() string { return "ExtensionVersion" }
+func (m *mockChildQueryableNQ) TypeName() string  { return "ExtensionVersion" }
+func (m *mockChildQueryableNQ) ItemTemplate() any { return m }
 
 type mockPermissionQueryableNQ struct {
 	data.BaseQueryable
 }
 
-func (m *mockPermissionQueryableNQ) TypeName() string { return "Permission" }
+func (m *mockPermissionQueryableNQ) TypeName() string  { return "Permission" }
+func (m *mockPermissionQueryableNQ) ItemTemplate() any { return m }
 
 // Tests
 
@@ -281,14 +284,16 @@ type mockChildQueryable struct {
 	ParentId string
 }
 
-func (m *mockChildQueryable) TypeName() string { return "ChildItem" }
+func (m *mockChildQueryable) TypeName() string  { return "ChildItem" }
+func (m *mockChildQueryable) ItemTemplate() any { return m }
 
 type mockOtherQueryable struct {
 	data.BaseQueryable
 	OtherId string
 }
 
-func (m *mockOtherQueryable) TypeName() string { return "OtherItem" }
+func (m *mockOtherQueryable) TypeName() string  { return "OtherItem" }
+func (m *mockOtherQueryable) ItemTemplate() any { return m }
 
 // Test structs
 

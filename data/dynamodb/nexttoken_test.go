@@ -159,7 +159,7 @@ func seedOrders(t *testing.T, store data.Store, tenantId, userId string, count i
 // collectAllPages executes query and follows pagination to retrieve all items
 func collectAllPages(t *testing.T, store data.Store, q data.Queryable) []any {
 	ctx := context.Background()
-	allItems := []interface{}{}
+	var allItems []any
 	pageCount := 0
 	maxPages := 1000 // Safety limit
 
@@ -167,7 +167,7 @@ func collectAllPages(t *testing.T, store data.Store, q data.Queryable) []any {
 		ge := store.Query(ctx, q)
 		assert.Success(t, ge)
 
-		allItems = append(allItems, q.Items()...)
+		allItems = append(allItems, q.Results()...)
 		pageCount++
 
 		if q.NextPageToken() == nil {
@@ -276,7 +276,7 @@ func TestPagination_BasicBehavior(t *testing.T) {
 			assert.Success(t, ge)
 
 			// Verify result count
-			items := q.Items()
+			items := q.Results()
 			assert.Assert(t, len(items) <= tt.expectedItems, "Expected at most %d items, got %d", tt.expectedItems, len(items))
 
 			// For non-filtered queries, we should get exactly the expected count
@@ -409,7 +409,7 @@ func TestPagination_NextTokenEncryption(t *testing.T) {
 		q.SetNextPageToken(&token)
 		ge = store.Query(ctx, q)
 		assert.Success(t, ge)
-		assert.Assert(t, len(q.Items()) > 0, "Should retrieve items on second page")
+		assert.Assert(t, len(q.Results()) > 0, "Should retrieve items on second page")
 	})
 
 	t.Run("encrypted token cannot be tampered", func(t *testing.T) {
@@ -578,7 +578,7 @@ func TestPagination_LimitConfiguration(t *testing.T) {
 			assert.Success(t, ge)
 
 			// Verify result count respects limit
-			items := q.Items()
+			items := q.Results()
 			assert.Assert(t, len(items) <= tt.expectedMaxLimit,
 				"Expected at most %d items, got %d", tt.expectedMaxLimit, len(items))
 
@@ -651,7 +651,7 @@ func TestPagination_EdgeCases(t *testing.T) {
 		assert.Success(t, ge)
 
 		// Verify empty results
-		assert.Equals(t, 0, len(q.Items()), "Expected empty result set")
+		assert.Equals(t, 0, len(q.Results()), "Expected empty result set")
 		assert.Assert(t, q.NextPageToken() == nil, "Expected no NextPageToken")
 	})
 
@@ -664,7 +664,7 @@ func TestPagination_EdgeCases(t *testing.T) {
 		ge := store.Query(ctx, q)
 		assert.Success(t, ge)
 
-		assert.Equals(t, 1, len(q.Items()), "Expected single item")
+		assert.Equals(t, 1, len(q.Results()), "Expected single item")
 		assert.Assert(t, q.NextPageToken() == nil, "Expected no NextPageToken")
 	})
 
@@ -694,14 +694,14 @@ func TestPagination_EdgeCases(t *testing.T) {
 		// First query
 		ge := store.Query(ctx, q)
 		assert.Success(t, ge)
-		firstPageCount := len(q.Items())
-		firstPageFirstId := q.Items()[0].(*ddbtest.User).Id
+		firstPageCount := len(q.Results())
+		firstPageFirstId := q.Results()[0].(*ddbtest.User).Id
 
 		// Reuse same object for second query
 		ge = store.Query(ctx, q)
 		assert.Success(t, ge)
-		secondPageCount := len(q.Items())
-		secondPageFirstId := q.Items()[0].(*ddbtest.User).Id
+		secondPageCount := len(q.Results())
+		secondPageFirstId := q.Results()[0].(*ddbtest.User).Id
 
 		// Should get same results (query resets)
 		assert.Equals(t, firstPageCount, secondPageCount,
@@ -781,7 +781,7 @@ func TestPagination_AcrossIndexes(t *testing.T) {
 		ge := store.Query(ctx, q)
 		assert.Success(t, ge)
 
-		items := q.Items()
+		items := q.Results()
 		assert.Equals(t, 1, len(items), "Should find single user by email via GSI")
 	})
 }
@@ -810,7 +810,7 @@ func TestPagination_TokenSerialization(t *testing.T) {
 		assert.Success(t, ge)
 
 		// Save last item ID from first page
-		lastItemOnPage1 := q1.Items()[len(q1.Items())-1].(*ddbtest.User).Id
+		lastItemOnPage1 := q1.Results()[len(q1.Results())-1].(*ddbtest.User).Id
 
 		// Get second page using token
 		q2 := &ddbtest.Users{TenantId: "T1"}
@@ -820,7 +820,7 @@ func TestPagination_TokenSerialization(t *testing.T) {
 		assert.Success(t, ge)
 
 		// First item on page 2 should be different from last item on page 1
-		firstItemOnPage2 := q2.Items()[0].(*ddbtest.User).Id
+		firstItemOnPage2 := q2.Results()[0].(*ddbtest.User).Id
 		assert.Assert(t, firstItemOnPage2 != lastItemOnPage1,
 			"Pages should not overlap")
 

@@ -102,7 +102,7 @@ func indexFor(t *table, q data.Queryable) (index *index, ascending bool, consist
 	}
 
 	candidates := make([]*candidate, 0, len(t.indexes))
-	qv := reflect.ValueOf(q).Elem()
+	qv := reflect.ValueOf(q.ItemTemplate()).Elem()
 
 	for _, idx := range t.indexes {
 		if consistencyType == Required && !idx.canReadConsistently {

@@ -27,7 +27,8 @@ type CompositeKeyEntities struct {
 	// Active       bool
 }
 
-func (q *CompositeKeyEntities) TypeName() string { return "CompositeKeyEntity" }
+func (q *CompositeKeyEntities) TypeName() string  { return "CompositeKeyEntity" }
+func (q *CompositeKeyEntities) ItemTemplate() any { return q }
 
 // MultiPartKeyEntity - demonstrates composite keys with multiple parts
 type MultiPartKeyEntity struct {
@@ -47,7 +48,8 @@ type MultiPartKeyEntities struct {
 	Id         string
 }
 
-func (q *MultiPartKeyEntities) TypeName() string { return "MultiPartKeyEntity" }
+func (q *MultiPartKeyEntities) TypeName() string  { return "MultiPartKeyEntity" }
+func (q *MultiPartKeyEntities) ItemTemplate() any { return q }
 
 // StaticKeyEntity - demonstrates static key prefixes for single table design
 type StaticKeyEntity struct {
@@ -65,7 +67,8 @@ type StaticKeyEntities struct {
 	Status string // List by id + status
 }
 
-func (q *StaticKeyEntities) TypeName() string { return "StaticKeyEntity" }
+func (q *StaticKeyEntities) TypeName() string  { return "StaticKeyEntity" }
+func (q *StaticKeyEntities) ItemTemplate() any { return q }
 
 // User - concrete domain entity for multi-tenant service
 // Use cases: read by id, list by tenant, lookup by email
@@ -86,7 +89,8 @@ type Users struct {
 	Email    string // Lookup user by email (uses gsi_1)
 }
 
-func (q *Users) TypeName() string { return "User" }
+func (q *Users) TypeName() string  { return "User" }
+func (q *Users) ItemTemplate() any { return q }
 
 // Product - concrete domain entity for multi-tenant e-commerce
 // Use cases: read by id, read by sku, list by tenant, browse by category
@@ -111,7 +115,8 @@ type Products struct {
 	Name     string
 }
 
-func (q *Products) TypeName() string { return "Product" }
+func (q *Products) TypeName() string  { return "Product" }
+func (q *Products) ItemTemplate() any { return q }
 
 // Order - concrete domain entity for multi-tenant e-commerce
 // Use cases: read by id, list by user, list by status
@@ -134,7 +139,8 @@ type Orders struct {
 	Status   string // List orders by status within tenant (uses gsi_2, sorted by date desc)
 }
 
-func (q *Orders) TypeName() string { return "Order" }
+func (q *Orders) TypeName() string  { return "Order" }
+func (q *Orders) ItemTemplate() any { return q }
 
 // NumericKeyEntity - demonstrates numeric key handling
 // WARNING: Zero values (0) treated as "not set", sort order is lexicographic not numeric
@@ -152,7 +158,8 @@ type NumericKeyEntities struct {
 	Id int
 }
 
-func (q *NumericKeyEntities) TypeName() string { return "NumericKeyEntity" }
+func (q *NumericKeyEntities) TypeName() string  { return "NumericKeyEntity" }
+func (q *NumericKeyEntities) ItemTemplate() any { return q }
 
 // EscapedValueEntity - demonstrates separator escaping in keys
 // Separator '#' becomes '$#', escape char '$' becomes '$$'
@@ -171,7 +178,8 @@ type EscapedValueEntities struct {
 	Id string
 }
 
-func (q *EscapedValueEntities) TypeName() string { return "EscapedValueEntity" }
+func (q *EscapedValueEntities) TypeName() string  { return "EscapedValueEntity" }
+func (q *EscapedValueEntities) ItemTemplate() any { return q }
 
 // PointerKeyEntity - demonstrates pointer fields in keys
 type PointerKeyEntity struct {
@@ -187,7 +195,8 @@ type PointerKeyEntities struct {
 	data.BaseQueryable
 }
 
-func (q *PointerKeyEntities) TypeName() string { return "PointerKeyEntity" }
+func (q *PointerKeyEntities) TypeName() string  { return "PointerKeyEntity" }
+func (q *PointerKeyEntities) ItemTemplate() any { return q }
 
 // EmptyValueEntity - demonstrates empty and zero value handling
 // Note: Zero int values (0) are treated as "not set" and become empty segments
@@ -207,7 +216,8 @@ type EmptyValueEntities struct {
 	Id string
 }
 
-func (q *EmptyValueEntities) TypeName() string { return "EmptyValueEntity" }
+func (q *EmptyValueEntities) TypeName() string  { return "EmptyValueEntity" }
+func (q *EmptyValueEntities) ItemTemplate() any { return q }
 
 // TimeSeriesEvent - demonstrates composite sort key with ascending/descending at different levels
 // Used to test wildcard sort order behavior
@@ -230,4 +240,5 @@ type TimeSeriesEvents struct {
 	DayDetail string
 }
 
-func (q *TimeSeriesEvents) TypeName() string { return "TimeSeriesEvent" }
+func (q *TimeSeriesEvents) TypeName() string  { return "TimeSeriesEvent" }
+func (q *TimeSeriesEvents) ItemTemplate() any { return q }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	. "github.com/jt0/gomer/api/http"
+	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/resource"
 )
 
@@ -44,15 +45,8 @@ var successStatusCodes = map[Op]int{
 	OptionsInstance:   http.StatusOK,
 }
 
-var CRUDL = map[any]func() resource.Action{
-	PostCollection: resource.CreateAction,
-	GetInstance:    resource.ReadAction,
-	PatchInstance:  resource.UpdateAction,
-	DeleteInstance: resource.DeleteAction,
-	GetCollection:  resource.ListAction,
-}
-
-var NoActions = map[any]func() resource.Action{}
+// NoActions is an empty action map for resources that don't expose REST endpoints.
+var NoActions = map[any]func() any{}
 
 func BuildRoutes(domain *resource.Domain, middleware ...func(http.Handler) http.Handler) http.Handler {
 	mux := http.NewServeMux()
@@ -60,39 +54,44 @@ func BuildRoutes(domain *resource.Domain, middleware ...func(http.Handler) http.
 		buildRoutes(mux, md, "", nil)
 	}
 
-	// // Add gomerr renderer if provided
-	// if gomerrRenderer != nil {
-	// 	rw.errRenderers = []func(w http.ResponseWriter, err error) bool{
-	// 		gomerrErrRenderer(gomerrRenderer, r),
-	// 	}
-	// }
-
 	return withMiddleware(domain, mux, nil, middleware)
 }
 
 func buildRoutes(mux *http.ServeMux, md *resource.Metadata, parentPath string, ancestors []ancestorContext) {
-	instanceType := md.ResourceType(resource.InstanceCategory)
-	collectionType := md.ResourceType(resource.CollectionCategory)
-
 	// Determine the path name for this resource's instance type
-	instanceTypeName := typeName(instanceType)
-	instancePathName := pathName(instanceType, ancestors)
+	instanceTypeName := typeName(md.InstanceType())
+	instancePathName := pathName(md.InstanceType(), ancestors)
 
-	path := make(map[resource.Category]string, 2)
-	if collectionType == nil {
-		path[resource.InstanceCategory] = parentPath + "/" + strings.ToLower(instancePathName)
-	} else {
-		collectionPathName := pathName(collectionType, ancestors)
-		path[resource.CollectionCategory] = parentPath + "/" + strings.ToLower(collectionPathName)
-		path[resource.InstanceCategory] = path[resource.CollectionCategory] + "/{" + instancePathName + "Id}"
+	// Check if this resource has any collection-level actions
+	actions := md.ActionFuncs()
+	hasCollectionAction := false
+	for key := range actions {
+		if key.(Op).ResourceType() == resource.CollectionCategory {
+			hasCollectionAction = true
+			break
+		}
 	}
 
-	for key, action := range md.Actions() {
+	path := make(map[resource.Category]string, 2)
+	if hasCollectionAction {
+		// Normal CRUD: collections are derived from instance type
+		collectionPathName := instancePathName + "s" // Simple pluralization
+		path[resource.CollectionCategory] = parentPath + "/" + strings.ToLower(collectionPathName)
+		path[resource.InstanceCategory] = path[resource.CollectionCategory] + "/{" + instancePathName + "Id}"
+	} else {
+		// Singleton: use singular path without ID placeholder
+		path[resource.InstanceCategory] = parentPath + "/" + strings.ToLower(instancePathName)
+	}
+
+	for key, actionFunc := range actions {
 		op := key.(Op)
 
-		relativePath, ok := path[op.ResourceType()]
+		// Determine which category this action applies to
+		category := op.ResourceType()
+
+		relativePath, ok := path[category]
 		if !ok {
-			panic("invalid resource type; does not map to a path: " + op.ResourceType())
+			panic("invalid resource type; does not map to a path: " + category)
 		}
 
 		successStatus, ok := successStatusCodes[op]
@@ -102,33 +101,22 @@ func buildRoutes(mux *http.ServeMux, md *resource.Metadata, parentPath string, a
 
 		// Register with method and path pattern
 		pattern := op.Method() + " " + relativePath
-		mux.Handle(pattern, handler(md.ResourceType(action().AppliesToCategory()), action, successStatus))
+		mux.Handle(pattern, handler(md, actionFunc, successStatus))
 	}
 
-	if collectionType != nil { // Cannot have resources other than instances under a collection
-		// Prepend this resource's context to ancestors for children (closest ancestor first)
-		childAncestors := append([]ancestorContext{{
-			typeName: instanceTypeName,
-			pathName: instancePathName,
-		}}, ancestors...)
-		for _, childMetadata := range md.Children() {
-			buildRoutes(mux, childMetadata, path[resource.InstanceCategory], childAncestors)
-		}
+	// Prepend this resource's context to ancestors for children (closest ancestor first)
+	childAncestors := append([]ancestorContext{{
+		typeName: instanceTypeName,
+		pathName: instancePathName,
+	}}, ancestors...)
+	for _, childMetadata := range md.Children() {
+		buildRoutes(mux, childMetadata, path[resource.InstanceCategory], childAncestors)
 	}
 }
 
 // pathName derives a path name for a resource type, applying automatic trimming
 // of redundant prefixes based on the ancestor chain, unless the resource implements
 // PathNamer to provide an explicit override.
-//
-// The trimming algorithm checks ancestors from closest to furthest, and for each
-// ancestor checks if the type name starts with either:
-//  1. The ancestor's full type name (e.g., "ExtensionVersion" trims "ExtensionVersionArtifact" to "Artifact")
-//  2. The ancestor's path name (e.g., "Version" trims "VersionArtifact" to "Artifact")
-//
-// This allows trimming against any ancestor in the hierarchy. For example, with
-// Extension -> ExtensionVersion -> ExtensionArtifact, the "Extension" prefix from
-// the grandparent will be trimmed, producing /extensions/{id}/versions/{id}/artifact.
 func pathName(resourceType reflect.Type, ancestors []ancestorContext) string {
 	name := typeName(resourceType)
 
@@ -173,30 +161,39 @@ func typeName(t reflect.Type) string {
 	return s[dotIndex+1:]
 }
 
-func handler(resourceType reflect.Type, actionFunc func() resource.Action, successStatus int) http.Handler {
+func handler(md *resource.Metadata, actionFunc func() resource.AnyAction, successStatus int) http.Handler {
+	anyAction := actionFunc()
+	if anyAction == nil {
+		panic(gomerr.Configuration("cannot handle a nil action").String())
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw, ok := w.(*ResponseWriter)
 		if !ok {
-			// If not wrapped with ResponseWriter, create one (shouldn't happen in normal flow)
 			rw = &ResponseWriter{}
 			defer rw.writeTo(w)
 			w = rw
 		}
 
-		action := actionFunc()
-		res, ge := BindFromRequest(r, resourceType, Subject(r), action.Name())
+		// Bind request data to new instance
+		res := md.NewInstance(Subject(r))
+		if ge := BindFromRequest(r, res, anyAction.Name()); ge != nil {
+			rw.WriteError(ge)
+			return
+		}
+
+		// If CollectionCategory, we use the bound instance as the prototype for its collection type
+		if anyAction.AppliesToCategory() == resource.CollectionCategory {
+			res = md.NewCollection(res)
+		}
+
+		// Execute action via DoAction on the resource
+		result, ge := anyAction.ExecuteOn(r.Context(), res)
 		if ge != nil {
 			rw.WriteError(ge)
 			return
 		}
 
-		res, ge = res.DoAction(r.Context(), action)
-		if ge != nil {
-			rw.WriteError(ge)
-			return
-		}
-
-		renderResult(res, rw, r, action.Name(), successStatus)
+		renderResult(result, rw, r, anyAction.Name(), successStatus)
 	})
 }
 

@@ -4,90 +4,112 @@ import (
 	"context"
 	"reflect"
 
+	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 )
 
-type Instance interface {
-	Resource
-	data.Persistable
+// NewInstance creates a new instance of type I, initialized with metadata and subject.
+// Retrieves the Domain from context automatically.
+func NewInstance[I Instance[I]](ctx context.Context, sub auth.Subject) (I, gomerr.Gomerr) {
+	var zero I
+	if d, _ := ctx.Value(DomainCtxKey).(*Domain); d == nil {
+		return zero, gomerr.Configuration("no domain in context")
+	} else if md := d.metadata[reflect.TypeFor[I]()]; md == nil {
+		return zero, gomerr.Unprocessable("unknown instance type", reflect.TypeFor[I]())
+	} else {
+		return md.NewInstance(sub).(I), nil
+	}
+}
+
+// Instance extends Resource for individual domain entities.
+// Instances have an identity (Id) and support CRUD operations.
+type Instance[I Resource[I]] interface {
+	Resource[I]
+	data.Persistable // TypeName() string, NewQueryable() data.Queryable
 	Id() string
+	PreCreate(context.Context) gomerr.Gomerr
+	PostCreate(context.Context) gomerr.Gomerr
+	PreRead(context.Context) gomerr.Gomerr
+	PostRead(context.Context) gomerr.Gomerr
+	PreUpdate(context.Context, I) gomerr.Gomerr
+	PostUpdate(context.Context, I) gomerr.Gomerr
+	PreDelete(context.Context) gomerr.Gomerr
+	PostDelete(context.Context) gomerr.Gomerr
 }
 
-func SaveInstance(ctx context.Context, i Instance) gomerr.Gomerr {
-	// TODO: Consider alt form w/ Updatable.Update() that separates resource from data
-	// if ge := u.Update(u); ge != nil {
-	// 	return ge
-	// }
-
-	if ge := i.metadata().dataStore.Update(ctx, i, nil); ge != nil {
-		return ge
-	}
-
-	return nil
+// BaseInstance provides the default implementation for Instance[I].
+// Embed this in concrete instance types.
+type BaseInstance[I Instance[I]] struct {
+	BaseResource[I]
 }
 
-type BaseInstance struct {
-	BaseResource
-
-	// persistedValues map[string]interface{}
+func (b *BaseInstance[I]) TypeName() string {
+	return b.md.instanceName
 }
 
-func (i BaseInstance) TypeName() string {
-	return i.md.instanceName
-}
-
-func (i BaseInstance) NewQueryable() data.Queryable {
-	ct := i.metadata().collectionType
-	if ct == nil {
-		return nil
-	}
-
-	collection := reflect.New(ct.Elem()).Interface().(Collection)
-	collection.setSelf(collection)
-	collection.setMetadata(i.md)
-	collection.setSubject(i.Subject(context.TODO()))
-
-	return collection
-}
-
-func (i BaseInstance) Id() string {
-	instanceId, ge := Id(reflect.ValueOf(i.self).Elem())
+func (b *BaseInstance[I]) Id() string {
+	id, ge := Id(reflect.ValueOf(b.self).Elem())
 	if ge != nil {
-		println("Unable to get id value for instance:\n", ge.Error())
+		return ""
 	}
-
-	return instanceId
+	return id
 }
 
-func (BaseInstance) PreCreate(context.Context) gomerr.Gomerr {
+// NewQueryable creates a Collection for querying instances of this type.
+// Implements data.Persistable.
+func (b *BaseInstance[I]) NewQueryable() data.Queryable {
+	return b.md.NewCollection(b.md.NewInstance(b.sub)).(data.Queryable)
+}
+
+// Action lifecycle hooks - override these in concrete types as needed.
+
+func (*BaseInstance[I]) PreCreate(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PostCreate(context.Context) gomerr.Gomerr {
+func (*BaseInstance[I]) PostCreate(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PreRead(context.Context) gomerr.Gomerr {
+func (*BaseInstance[I]) PreRead(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PostRead(context.Context) gomerr.Gomerr {
+func (*BaseInstance[I]) PostRead(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PreUpdate(context.Context, Resource) gomerr.Gomerr {
+func (*BaseInstance[I]) PreUpdate(context.Context, I) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PostUpdate(context.Context, Resource) gomerr.Gomerr {
+func (*BaseInstance[I]) PostUpdate(context.Context, I) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PreDelete(context.Context) gomerr.Gomerr {
+func (*BaseInstance[I]) PreDelete(context.Context) gomerr.Gomerr {
 	return nil
 }
 
-func (BaseInstance) PostDelete(context.Context) gomerr.Gomerr {
+func (*BaseInstance[I]) PostDelete(context.Context) gomerr.Gomerr {
 	return nil
+}
+
+// CRUD convenience methods
+
+func (b *BaseInstance[I]) Create(ctx context.Context) (I, gomerr.Gomerr) {
+	return b.DoAction(ctx, CreateAction[I]())
+}
+
+func (b *BaseInstance[I]) Read(ctx context.Context) (I, gomerr.Gomerr) {
+	return b.DoAction(ctx, ReadAction[I]())
+}
+
+func (b *BaseInstance[I]) Update(ctx context.Context) (I, gomerr.Gomerr) {
+	return b.DoAction(ctx, UpdateAction[I]())
+}
+
+func (b *BaseInstance[I]) Delete(ctx context.Context) (I, gomerr.Gomerr) {
+	return b.DoAction(ctx, DeleteAction[I]())
 }

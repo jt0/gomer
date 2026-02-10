@@ -27,7 +27,7 @@ var _ = resource.NewIdTool(structs.StructTagDirectiveProvider{"id"})
 
 func TestCopyFromStruct(t *testing.T) {
 	source := &One{Base{"base_id", "secret_id"}, "wrapper_id"}
-	tc := structs.EnsureContext().Put(resource.SourceValue, source)
+	tc := structs.EnsureContext().With(resource.SourceValue, source)
 
 	destination := &One{}
 	ge := structs.ApplyTools(destination, tc, resource.DefaultIdFieldTool)
@@ -37,7 +37,7 @@ func TestCopyFromStruct(t *testing.T) {
 
 func TestCopyFromAnonymous(t *testing.T) {
 	source := &Two{One{Base{"base_id", "secret_id"}, "wrapper_id"}}
-	tc := structs.EnsureContext().Put(resource.SourceValue, source)
+	tc := structs.EnsureContext().With(resource.SourceValue, source)
 
 	destination := &Two{}
 	ge := structs.ApplyTools(destination, tc, resource.DefaultIdFieldTool)

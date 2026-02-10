@@ -8,381 +8,386 @@ import (
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data/dataerr"
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/limit"
 	"github.com/jt0/gomer/structs"
 )
 
-// IdTool contains the configured tool to copy ids. It's initialized to id.DefaultIdFieldTool, but can be replaced
-// if preferred.
-var IdTool = NewIdTool(structs.StructTagDirectiveProvider{"id"})
+// IdTool is an alias for DefaultIdFieldTool for backward compatibility.
+var IdTool = DefaultIdFieldTool
 
 func init() {
 	// This sets up default aliases for each of the Actions defined here. An application can add other alias values or
 	// can clear any out by calling ScopeAlias with the undesired alias and an empty string scope value.
-	structs.ScopeAlias("create", CreateAction().Name())
-	structs.ScopeAlias("read", ReadAction().Name())
-	structs.ScopeAlias("update", UpdateAction().Name())
-	structs.ScopeAlias("delete", DeleteAction().Name())
-	structs.ScopeAlias("list", ListAction().Name())
+	structs.ScopeAlias("create", "resource.CreateAction")
+	structs.ScopeAlias("read", "resource.ReadAction")
+	structs.ScopeAlias("update", "resource.UpdateAction")
+	structs.ScopeAlias("delete", "resource.DeleteAction")
+	structs.ScopeAlias("list", "resource.ListAction")
 }
 
-type Creatable interface {
-	Instance
-	PreCreate(context.Context) gomerr.Gomerr
-	PostCreate(context.Context) gomerr.Gomerr
+type AnyAction interface {
+	Name() string
+	AppliesToCategory() Category
+	FieldAccessPermissions() auth.AccessPermissions
+	ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr)
 }
 
-type OnCreateFailer interface {
-	OnCreateFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
+// Action defines an operation that can be performed on a resource.
+type Action[T any] interface {
+	AnyAction
+	Pre(context.Context, T) gomerr.Gomerr
+	Do(context.Context, T) gomerr.Gomerr
+	OnDoSuccess(context.Context, T) (T, gomerr.Gomerr)
+	OnDoFailure(context.Context, T, gomerr.Gomerr) gomerr.Gomerr
 }
 
-func CreateAction() Action {
-	return &createAction{}
+// CreateAction returns an action for creating instances.
+func CreateAction[I Instance[I]]() Action[I] {
+	return &createAction[I]{}
 }
 
-type createAction struct {
-	limiter limit.Limiter
-}
+type createAction[I Instance[I]] struct{}
 
-func (*createAction) Name() string {
+func (*createAction[I]) Name() string {
 	return "resource.CreateAction"
 }
 
-func (*createAction) AppliesToCategory() Category {
+func (*createAction[I]) AppliesToCategory() Category {
 	return InstanceCategory
 }
 
-func (*createAction) FieldAccessPermissions() auth.AccessPermissions {
+func (*createAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.CreatePermission
 }
 
-func (*createAction) Pre(ctx context.Context, r Resource) gomerr.Gomerr {
-	creatable, ok := r.(Creatable)
-	if !ok {
-		return gomerr.Unprocessable("Type does not implement resource.Creatable", r)
-	}
-
-	return creatable.PreCreate(ctx)
+func (*createAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
+	return instance.PreCreate(ctx)
 }
 
-func (a *createAction) Do(ctx context.Context, r Resource) (ge gomerr.Gomerr) {
-	a.limiter, ge = applyLimitAction(ctx, checkAndIncrement, r)
-	if ge != nil {
-		return ge
-	}
-
-	return r.metadata().dataStore.Create(ctx, r.(Creatable))
+func (*createAction[I]) Do(ctx context.Context, instance I) gomerr.Gomerr {
+	return instance.Metadata().dataStore.Create(ctx, instance)
 }
 
-func (a *createAction) OnDoSuccess(ctx context.Context, r Resource) (Resource, gomerr.Gomerr) {
-	defer saveLimiterIfDirty(ctx, a.limiter)
-
-	return r, r.(Creatable).PostCreate(ctx)
+func (*createAction[I]) OnDoSuccess(ctx context.Context, instance I) (I, gomerr.Gomerr) {
+	return instance, instance.PostCreate(ctx)
 }
 
-func (*createAction) OnDoFailure(ctx context.Context, r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
-	if failer, ok := r.(OnCreateFailer); ok {
-		return failer.OnCreateFailure(ctx, ge)
-	}
-
+func (*createAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
 	return ge
 }
 
-type Readable interface {
-	Instance
-	PreRead(ctx context.Context) gomerr.Gomerr
-	PostRead(ctx context.Context) gomerr.Gomerr
+func (a *createAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr) {
+	return resource.(Resource[T]).DoAction(ctx, a)
 }
 
-type OnReadFailer interface {
-	OnReadFailure(ctx context.Context, ge gomerr.Gomerr) gomerr.Gomerr
+// ReadAction returns an action for reading instances.
+func ReadAction[I Instance[I]]() Action[I] {
+	return &readAction[I]{}
 }
 
-func ReadAction() Action {
-	return readAction{}
-}
+type readAction[I Instance[I]] struct{}
 
-type readAction struct{}
-
-func (readAction) Name() string {
+func (*readAction[I]) Name() string {
 	return "resource.ReadAction"
 }
 
-func (readAction) AppliesToCategory() Category {
+func (*readAction[I]) AppliesToCategory() Category {
 	return InstanceCategory
 }
 
-func (readAction) FieldAccessPermissions() auth.AccessPermissions {
+func (*readAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.ReadPermission
 }
 
-func (readAction) Pre(ctx context.Context, r Resource) gomerr.Gomerr {
-	readable, ok := r.(Readable)
-	if !ok {
-		return gomerr.Unprocessable("Type does not implement resource.Readable", r)
-	}
-
-	return readable.PreRead(ctx)
-}
-
-func (readAction) Do(ctx context.Context, r Resource) (ge gomerr.Gomerr) {
-	return r.metadata().dataStore.Read(ctx, r.(Readable))
-}
-
-func (readAction) OnDoSuccess(ctx context.Context, r Resource) (Resource, gomerr.Gomerr) {
-	return r, r.(Readable).PostRead(ctx)
-}
-
-func (readAction) OnDoFailure(ctx context.Context, r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
-	if failer, ok := r.(OnReadFailer); ok {
-		return failer.OnReadFailure(ctx, ge)
-	}
-
-	return convertPersistableNotFoundIfApplicable(r.(Readable), ge)
-}
-
-type Updatable interface {
-	Instance
-	PreUpdate(ctx context.Context, update Resource) gomerr.Gomerr
-	PostUpdate(ctx context.Context, update Resource) gomerr.Gomerr
-}
-
-type OnUpdateFailer interface {
-	OnUpdateFailure(ctx context.Context, ge gomerr.Gomerr) gomerr.Gomerr
-}
-
-func UpdateAction() Action {
-	return &updateAction{}
-}
-
-type updateAction struct {
-	actual Updatable
-}
-
-func (*updateAction) Name() string {
-	return "resource.UpdateAction"
-}
-
-func (*updateAction) AppliesToCategory() Category {
-	return InstanceCategory
-}
-
-func (*updateAction) FieldAccessPermissions() auth.AccessPermissions {
-	return auth.UpdatePermission
-}
-
-func (a *updateAction) Pre(ctx context.Context, update Resource) gomerr.Gomerr {
-	d, _ := ctx.Value(DomainCtxKey).(*Domain)
-	r, ge := d.NewResource(reflect.TypeOf(update), update.Subject(ctx))
-	if ge != nil {
-		return ge
-	}
-	current, ok := r.(Updatable)
-	if !ok {
-		return gomerr.Unprocessable("Type does not implement resource.Updatable", update)
-	}
-
-	// Get the id fields from the update
-	tc := structs.EnsureContext().With(SourceValue, reflect.ValueOf(update).Elem())
-	if ge = structs.ApplyTools(current, tc, IdTool); ge != nil {
+func (*readAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
+	if ge := instance.PreRead(ctx); ge != nil {
 		return ge
 	}
 
-	// Populate other fields with data from the underlying store
-	if ge = current.metadata().dataStore.Read(ctx, current); ge != nil {
-		return ge
+	// Prepare any Collection fields for nested queries
+	domain, _ := ctx.Value(DomainCtxKey).(*Domain)
+	if domain == nil {
+		return nil // No domain, skip auto-population
 	}
 
-	a.actual = current
-
-	return current.PreUpdate(ctx, update)
-}
-
-func (a *updateAction) Do(ctx context.Context, update Resource) (ge gomerr.Gomerr) {
-	return update.metadata().dataStore.Update(ctx, a.actual, update.(Updatable))
-}
-
-func (a *updateAction) OnDoSuccess(ctx context.Context, update Resource) (Resource, gomerr.Gomerr) {
-	return a.actual, a.actual.PostUpdate(ctx, update)
-}
-
-func (a *updateAction) OnDoFailure(ctx context.Context, update Resource, ge gomerr.Gomerr) gomerr.Gomerr {
-	if failer, ok := a.actual.(OnUpdateFailer); ok {
-		return failer.OnUpdateFailure(ctx, ge)
+	iv := reflect.ValueOf(instance)
+	if iv.Kind() == reflect.Pointer {
+		iv = iv.Elem()
+	}
+	if iv.Kind() != reflect.Struct {
+		return nil
 	}
 
-	return convertPersistableNotFoundIfApplicable(update.(Updatable), ge)
-}
-
-type Deletable interface {
-	Instance
-	PreDelete(ctx context.Context) gomerr.Gomerr
-	PostDelete(ctx context.Context) gomerr.Gomerr
-}
-
-type OnDeleteFailer interface {
-	OnDeleteFailure(ctx context.Context, ge gomerr.Gomerr) gomerr.Gomerr
-}
-
-func DeleteAction() Action {
-	return &deleteAction{}
-}
-
-type deleteAction struct {
-	limiter limit.Limiter
-}
-
-func (*deleteAction) Name() string {
-	return "resource.DeleteAction"
-}
-
-func (*deleteAction) AppliesToCategory() Category {
-	return InstanceCategory
-}
-
-func (*deleteAction) FieldAccessPermissions() auth.AccessPermissions {
-	return auth.NoPermissions
-}
-
-func (*deleteAction) Pre(ctx context.Context, r Resource) gomerr.Gomerr {
-	deletable, ok := r.(Deletable)
-	if !ok {
-		return gomerr.Unprocessable("Type does not implement resource.Deletable", r)
-	}
-
-	return deletable.PreDelete(ctx)
-}
-
-func (a *deleteAction) Do(ctx context.Context, r Resource) (ge gomerr.Gomerr) {
-	a.limiter, ge = applyLimitAction(ctx, decrement, r)
-	if ge != nil {
-		return ge
-	}
-
-	return r.metadata().dataStore.Delete(ctx, r.(Deletable))
-}
-
-func (a *deleteAction) OnDoSuccess(ctx context.Context, r Resource) (Resource, gomerr.Gomerr) {
-	defer saveLimiterIfDirty(ctx, a.limiter)
-
-	// If we made it this far, we know r is a Deletable
-	return r, r.(Deletable).PostDelete(ctx)
-}
-
-func (*deleteAction) OnDoFailure(ctx context.Context, r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
-	if failer, ok := r.(OnDeleteFailer); ok {
-		return failer.OnDeleteFailure(ctx, ge)
-	}
-
-	return convertPersistableNotFoundIfApplicable(r.(Deletable), ge)
-}
-
-type Listable interface {
-	Collection
-	PreList(ctx context.Context) gomerr.Gomerr
-	PostList(ctx context.Context) gomerr.Gomerr
-}
-
-type Collectible interface {
-	OnCollect(ctx context.Context, r Resource) gomerr.Gomerr
-}
-
-type OnListFailer interface {
-	OnListFailure(ctx context.Context, ge gomerr.Gomerr) gomerr.Gomerr
-}
-
-func ListAction() Action {
-	return listAction{}
-}
-
-type listAction struct{}
-
-func (listAction) Name() string {
-	return "resource.ListAction"
-}
-
-func (listAction) AppliesToCategory() Category {
-	return CollectionCategory
-}
-
-func (listAction) FieldAccessPermissions() auth.AccessPermissions {
-	return auth.WritePermissions // 'Write' because we're creating a query, not creating a resource per se
-}
-
-func (listAction) Pre(ctx context.Context, r Resource) gomerr.Gomerr {
-	listable, ok := r.(Listable)
-	if !ok {
-		return gomerr.Unprocessable("Type does not implement resource.Listable", r)
-	}
-
-	return listable.PreList(ctx)
-}
-
-func (listAction) Do(ctx context.Context, r Resource) gomerr.Gomerr {
-	if ge := r.metadata().dataStore.Query(ctx, r.(Listable)); ge != nil {
-		return ge
-	}
-
-	for _, elem := range r.(Listable).Items() {
-		item := elem.(Resource)
-		item.setSelf(item)
-		item.setMetadata(r.metadata())
-		item.setSubject(r.Subject(ctx))
-
-		if collectible, ok := item.(Collectible); ok {
-			if ge := collectible.OnCollect(ctx, r); ge != nil {
-				return ge
-			}
+	it := iv.Type()
+	for i := range it.NumField() {
+		field := it.Field(i)
+		if !field.IsExported() {
+			continue
 		}
+
+		// Looking for *Collection[T] fields that are nil
+		if field.Type.Kind() != reflect.Pointer {
+			continue
+		}
+
+		fv := iv.Field(i)
+		if !fv.IsNil() {
+			continue // Already set (possibly by PreRead)
+		}
+
+		// Check if it's a Collection by looking for "proto" field in the pointed-to type
+		elemType := field.Type.Elem()
+		if elemType.Kind() != reflect.Struct {
+			continue
+		}
+		protoField, hasProto := elemType.FieldByName("proto")
+		if !hasProto {
+			continue
+		}
+
+		// Get the element type from the proto field (e.g., *ProfileExtension)
+		protoType := protoField.Type
+		if protoType.Kind() != reflect.Pointer {
+			continue
+		}
+
+		// Look up metadata for the element type
+		md := domain.metadata[protoType]
+		if md == nil {
+			continue
+		}
+
+		// Create proto instance and collection
+		proto := md.NewInstance(instance.Subject())
+		collection := md.NewCollection(proto)
+
+		// Set the collection on the field
+		fv.Set(reflect.ValueOf(collection))
 	}
 
 	return nil
 }
 
-func (listAction) OnDoSuccess(ctx context.Context, r Resource) (Resource, gomerr.Gomerr) {
-	return r, r.(Listable).PostList(ctx)
+func (*readAction[I]) Do(ctx context.Context, instance I) gomerr.Gomerr {
+	return instance.Metadata().dataStore.Read(ctx, instance)
 }
 
-func (listAction) OnDoFailure(ctx context.Context, r Resource, ge gomerr.Gomerr) gomerr.Gomerr {
-	if failer, ok := r.(OnListFailer); ok {
-		return failer.OnListFailure(ctx, ge)
-	}
+func (*readAction[I]) OnDoSuccess(ctx context.Context, instance I) (I, gomerr.Gomerr) {
+	return instance, instance.PostRead(ctx)
+}
 
+func (*readAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
 	return ge
 }
 
-type NoOpAction struct{}
-
-func (NoOpAction) Name() string {
-	return "resource.NoOpAction"
+func (a *readAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr) {
+	return resource.(Resource[T]).DoAction(ctx, a)
 }
 
-func (NoOpAction) FieldAccessPermissions() auth.AccessPermissions {
+// UpdateAction returns an action for updating instances.
+func UpdateAction[I Instance[I]]() Action[I] {
+	return &updateAction[I]{}
+}
+
+type updateAction[I Instance[I]] struct {
+	current I // The current state, read from store
+}
+
+func (*updateAction[I]) Name() string {
+	return "resource.UpdateAction"
+}
+
+func (*updateAction[I]) AppliesToCategory() Category {
+	return InstanceCategory
+}
+
+func (*updateAction[I]) FieldAccessPermissions() auth.AccessPermissions {
+	return auth.UpdatePermission
+}
+
+func (a *updateAction[I]) Pre(ctx context.Context, update I) gomerr.Gomerr {
+	md := update.Metadata()
+
+	// Create a new instance to hold current state
+	current := md.NewInstance(update.Subject()).(I)
+
+	// Copy ID fields from update to current
+	tc := structs.EnsureContext().With(SourceValue, reflect.ValueOf(update).Elem())
+	if ge := structs.ApplyTools(current, tc, IdTool); ge != nil {
+		return ge
+	}
+
+	// Read current state from store
+	if ge := md.dataStore.Read(ctx, current); ge != nil {
+		return ge
+	}
+
+	a.current = current
+
+	// Call PreUpdate hook
+	return current.PreUpdate(ctx, update)
+}
+
+func (a *updateAction[I]) Do(ctx context.Context, update I) gomerr.Gomerr {
+	return update.Metadata().dataStore.Update(ctx, a.current, update)
+}
+
+func (a *updateAction[I]) OnDoSuccess(ctx context.Context, update I) (I, gomerr.Gomerr) {
+	return a.current, a.current.PostUpdate(ctx, update)
+}
+
+func (a *updateAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
+}
+
+func (a *updateAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr) {
+	return resource.(Resource[T]).DoAction(ctx, a)
+}
+
+// DeleteAction returns an action for deleting instances.
+func DeleteAction[I Instance[I]]() Action[I] {
+	return &deleteAction[I]{}
+}
+
+type deleteAction[I Instance[I]] struct{}
+
+func (*deleteAction[I]) Name() string {
+	return "resource.DeleteAction"
+}
+
+func (*deleteAction[I]) AppliesToCategory() Category {
+	return InstanceCategory
+}
+
+func (*deleteAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.NoPermissions
 }
 
-func (NoOpAction) Pre(_ context.Context, _ Resource) gomerr.Gomerr {
+func (*deleteAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
+	return instance.PreDelete(ctx)
+}
+
+func (*deleteAction[I]) Do(ctx context.Context, instance I) gomerr.Gomerr {
+	return instance.Metadata().dataStore.Delete(ctx, instance)
+}
+
+func (*deleteAction[I]) OnDoSuccess(ctx context.Context, instance I) (I, gomerr.Gomerr) {
+	return instance, instance.PostDelete(ctx)
+}
+
+func (*deleteAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
+}
+
+func (a *deleteAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr) {
+	return resource.(Resource[T]).DoAction(ctx, a)
+}
+
+// ListAction returns an action for listing instances via a collection.
+func ListAction[I Instance[I]]() Action[*Collection[I]] {
+	return &listAction[I]{}
+}
+
+type listAction[I Instance[I]] struct{}
+
+func (*listAction[I]) Name() string {
+	return "resource.ListAction"
+}
+
+func (*listAction[I]) AppliesToCategory() Category {
+	return CollectionCategory
+}
+
+func (*listAction[I]) FieldAccessPermissions() auth.AccessPermissions {
+	return auth.WritePermissions
+}
+
+func (*listAction[I]) Pre(ctx context.Context, collection *Collection[I]) gomerr.Gomerr {
+	return collection.PreList(ctx)
+}
+
+func (*listAction[I]) Do(ctx context.Context, collection *Collection[I]) gomerr.Gomerr {
+	return collection.Query(ctx)
+}
+
+func (*listAction[I]) OnDoSuccess(ctx context.Context, collection *Collection[I]) (*Collection[I], gomerr.Gomerr) {
+	return collection, collection.PostList(ctx)
+}
+
+func (*listAction[I]) OnDoFailure(_ context.Context, _ *Collection[I], ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
+}
+
+func (a *listAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr) {
+	return resource.(Resource[*Collection[T]]).DoAction(ctx, a)
+}
+
+// OnCreateFailer is implemented by instances that want custom failure handling for create.
+type OnCreateFailer[I Instance[I]] interface {
+	OnCreateFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
+}
+
+// OnReadFailer is implemented by instances that want custom failure handling for read.
+type OnReadFailer[I Instance[I]] interface {
+	OnReadFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
+}
+
+// OnUpdateFailer is implemented by instances that want custom failure handling for update.
+type OnUpdateFailer[I Instance[I]] interface {
+	OnUpdateFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
+}
+
+// OnDeleteFailer is implemented by instances that want custom failure handling for delete.
+type OnDeleteFailer[I Instance[I]] interface {
+	OnDeleteFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
+}
+
+// OnListFailer is implemented by collections that want custom failure handling for list.
+type OnListFailer[I Instance[I]] interface {
+	OnListFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
+}
+
+// Collectible is implemented by instances that want to be notified when collected.
+type Collectible interface {
+	OnCollect(ctx context.Context, r any) gomerr.Gomerr
+}
+
+// NoOpAction is an action that does nothing.
+type NoOpAction[T any] struct{}
+
+func (NoOpAction[T]) Name() string {
+	return "resource.NoOpAction"
+}
+
+func (NoOpAction[T]) AppliesToCategory() Category {
+	return InstanceCategory
+}
+
+func (NoOpAction[T]) FieldAccessPermissions() auth.AccessPermissions {
+	return auth.NoPermissions
+}
+
+func (NoOpAction[T]) Pre(_ context.Context, _ T) gomerr.Gomerr {
 	return nil
 }
 
-func (NoOpAction) Do(_ context.Context, _ Resource) gomerr.Gomerr {
+func (NoOpAction[T]) Do(_ context.Context, _ T) gomerr.Gomerr {
 	return nil
 }
 
-func (NoOpAction) OnDoSuccess(_ context.Context, r Resource) (Resource, gomerr.Gomerr) {
+func (NoOpAction[T]) OnDoSuccess(_ context.Context, r T) (T, gomerr.Gomerr) {
 	return r, nil
 }
 
-func (NoOpAction) OnDoFailure(_ context.Context, _ Resource, ge gomerr.Gomerr) gomerr.Gomerr {
+func (NoOpAction[T]) OnDoFailure(_ context.Context, _ T, ge gomerr.Gomerr) gomerr.Gomerr {
 	return ge
 }
 
 var persistableNotFound = &dataerr.PersistableNotFoundError{}
 
-func convertPersistableNotFoundIfApplicable(i Instance, ge gomerr.Gomerr) gomerr.Gomerr {
+func convertPersistableNotFoundIfApplicable[I Instance[I]](i I, ge gomerr.Gomerr) gomerr.Gomerr {
 	if !errors.Is(ge, persistableNotFound) {
 		return ge
 	}
 
-	return gomerr.NotFound(i.metadata().instanceName, i.Id()).Wrap(ge)
+	return gomerr.NotFound(i.Metadata().instanceName, i.Id()).Wrap(ge)
 }
