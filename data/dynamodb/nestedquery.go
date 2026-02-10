@@ -172,7 +172,7 @@ func (t *table) querySingleType(ctx context.Context, q data.Queryable) gomerr.Go
 		items[i] = resolvedItem
 	}
 
-	q.SetItems(items)
+	q.SetResults(items)
 	q.SetNextPageToken(nt)
 
 	return nil
@@ -303,12 +303,12 @@ func (t *table) routeQueryResults(ctx context.Context, q data.Queryable, nested 
 	}
 
 	// Set items on parent Queryable
-	q.SetItems(parentItems)
+	q.SetResults(parentItems)
 
 	// Set items on nested Queryables
 	for _, n := range nested {
 		items := nestedItems[n.queryable.TypeName()]
-		n.queryable.SetItems(items)
+		n.queryable.SetResults(items)
 	}
 
 	// Handle pagination token
@@ -635,4 +635,108 @@ func nestedQueryables(a any) []nestedQueryableInfo { // TODO: tighten parameter 
 	}
 
 	return result
+}
+
+// prepareNestedQueryables finds nested Queryable fields and copies overlapping key fields
+// from the parent to each nested queryable's proto. Collection fields should already be
+// created by the resource layer; this function populates their key fields for querying.
+func (t *table) prepareNestedQueryables(p data.Persistable) []nestedQueryableInfo {
+	pv, ge := flect.IndirectValue(p, false)
+	if ge != nil {
+		return nil
+	}
+
+	if pv.Kind() == reflect.Pointer {
+		if pv.IsNil() {
+			return nil
+		}
+		pv = pv.Elem()
+	}
+
+	if pv.Kind() != reflect.Struct {
+		return nil
+	}
+
+	parentType := p.TypeName()
+
+	// First, get all nested queryables using the existing function
+	nested := nestedQueryables(p)
+
+	// For each nested queryable, copy overlapping key fields from parent to proto
+	for _, n := range nested {
+		nestedType := n.queryable.TypeName()
+		overlappingFields := t.findOverlappingKeyFields(parentType, nestedType)
+
+		// Get the proto from the queryable via ItemTemplate
+		proto := n.queryable.ItemTemplate()
+		if proto == nil {
+			continue
+		}
+
+		protoValue := reflect.ValueOf(proto)
+		if protoValue.Kind() == reflect.Pointer {
+			protoValue = protoValue.Elem()
+		}
+
+		// Copy overlapping field values from parent to proto
+		for _, fieldName := range overlappingFields {
+			parentField := pv.FieldByName(fieldName)
+			protoField := protoValue.FieldByName(fieldName)
+			if parentField.IsValid() && protoField.IsValid() && protoField.CanSet() {
+				protoField.Set(parentField)
+			}
+		}
+	}
+
+	return nested
+}
+
+// findOverlappingKeyFields finds key field names that exist in both parent and nested types.
+// Only returns dynamic field names (not static values like "'P'").
+func (t *table) findOverlappingKeyFields(parentType, nestedType string) []string {
+	parentFields := make(map[string]bool)
+	nestedFields := make(map[string]bool)
+
+	// Collect key field names for both types from all indexes
+	for _, idx := range t.indexes {
+		if idx.pk != nil {
+			for _, kf := range idx.pk.keyFieldsByPersistable[parentType] {
+				if !isStaticKeyField(kf.name) {
+					parentFields[kf.name] = true
+				}
+			}
+			for _, kf := range idx.pk.keyFieldsByPersistable[nestedType] {
+				if !isStaticKeyField(kf.name) {
+					nestedFields[kf.name] = true
+				}
+			}
+		}
+		if idx.sk != nil {
+			for _, kf := range idx.sk.keyFieldsByPersistable[parentType] {
+				if !isStaticKeyField(kf.name) {
+					parentFields[kf.name] = true
+				}
+			}
+			for _, kf := range idx.sk.keyFieldsByPersistable[nestedType] {
+				if !isStaticKeyField(kf.name) {
+					nestedFields[kf.name] = true
+				}
+			}
+		}
+	}
+
+	// Find intersection
+	var overlap []string
+	for field := range parentFields {
+		if nestedFields[field] {
+			overlap = append(overlap, field)
+		}
+	}
+
+	return overlap
+}
+
+// isStaticKeyField returns true if the key field name is a static value (e.g., "'P'").
+func isStaticKeyField(name string) bool {
+	return len(name) >= 2 && name[0] == '\'' && name[len(name)-1] == '\''
 }

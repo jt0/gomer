@@ -427,6 +427,13 @@ func (t *table) Read(ctx context.Context, p data.Persistable) (ge gomerr.Gomerr)
 		return ge
 	}
 
+	// Check for nested Queryables (including auto-populated) and execute queries for each
+	for _, nested := range t.prepareNestedQueryables(p) {
+		if ge = t.querySingleType(ctx, nested.queryable); ge != nil {
+			return ge
+		}
+	}
+
 	return nil
 }
 
@@ -532,7 +539,7 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 		items[i] = resolvedItem
 	}
 
-	q.SetItems(items)
+	q.SetResults(items)
 	q.SetNextPageToken(nt)
 
 	return nil
@@ -553,7 +560,7 @@ func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, f
 	}
 
 	// Copy field values from persistable to queryable
-	qv := reflect.ValueOf(q).Elem()
+	qv := reflect.ValueOf(q.ItemTemplate()).Elem()
 	pv := reflect.ValueOf(p).Elem()
 	for _, field := range fields {
 		qfv := qv.FieldByName(field)
@@ -620,7 +627,7 @@ func (t *table) buildQueryInput(ctx context.Context, q data.Queryable) (*dynamod
 	expressionAttributeValues := make(map[string]types.AttributeValue, 2)
 
 	// TODO: any reason Elem() would be incorrect?
-	qElem := reflect.ValueOf(q).Elem()
+	qElem := reflect.ValueOf(q.ItemTemplate()).Elem()
 
 	keyConditionExpression := safeName(idx.pk.name, expressionAttributeNames) + "=:pk"
 	expressionAttributeValues[":pk"] = idx.pk.attributeValue(qElem, q.TypeName(), t.valueSeparatorChar, 0) // Non-null because indexFor succeeded
@@ -691,7 +698,7 @@ func ptrOrNil[T any](t T) *T {
 }
 
 func (t *table) filterExpression(q data.Queryable, idx *index, expressionAttributeNames map[string]string, expressionAttributeValues map[string]types.AttributeValue) (string, gomerr.Gomerr) {
-	qv, ge := flect.IndirectValue(q, false)
+	qv, ge := flect.IndirectValue(q.ItemTemplate(), false)
 	if ge != nil {
 		return "", ge
 	}
