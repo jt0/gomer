@@ -27,7 +27,7 @@ func NotEquals(value any) Constraint {
 
 func OneOf(values ...any) Constraint {
 	if len(values) == 0 {
-		panic(gomerr.Configuration("oneOf constraint defined without values"))
+		return ConfigurationError("oneOf constraint defined without values")
 	}
 	valuesType := reflect.TypeOf(values[0])
 

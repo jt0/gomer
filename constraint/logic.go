@@ -16,7 +16,7 @@ const (
 func And(constraints ...Constraint) Constraint {
 	switch len(constraints) {
 	case 0:
-		panic("'and' requires at least one constraint")
+		return ConfigurationError("'and' requires at least one constraint")
 	case 1:
 		return constraints[0]
 	}
@@ -43,7 +43,7 @@ func And(constraints ...Constraint) Constraint {
 func Or(constraints ...Constraint) Constraint {
 	switch len(constraints) {
 	case 0:
-		panic("'or' requires at least one constraint")
+		return ConfigurationError("'or' requires at least one constraint")
 	case 1:
 		return constraints[0]
 	}

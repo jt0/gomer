@@ -160,7 +160,7 @@ func dynamicIfNeeded(newConstraint Constraint, constraints ...Constraint) Constr
 		if dc, ok := c.(*dynamicConstraint); ok {
 			for k, v := range dc.dynamicValues {
 				if dv, exists := collectedDynamicValues[k]; exists && dv != v {
-					panic("duplicate key for dynamic attributes: " + k) // can these be merged somehow?
+					return ConfigurationError("duplicate key for dynamic attributes: " + k)
 				}
 				collectedDynamicValues[k] = v
 			}

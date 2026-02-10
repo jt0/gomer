@@ -25,7 +25,7 @@ func IntCompare(comparisonType ComparisonType, compareTo *int64) Constraint {
 	comparisonType = strings.ToLower(comparisonType)
 	comparator, ok := intComparators[comparisonType]
 	if !ok {
-		panic("unrecognized comparison type: " + comparisonType)
+		return ConfigurationError("unrecognized comparison type: " + comparisonType)
 	}
 
 	return New("int_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
@@ -80,7 +80,7 @@ func UintCompare(comparisonType ComparisonType, compareTo *uint64) Constraint {
 	comparisonType = strings.ToLower(comparisonType)
 	comparator, ok := uintComparators[comparisonType]
 	if !ok {
-		panic("unrecognized comparison type: " + comparisonType)
+		return ConfigurationError("unrecognized comparison type: " + comparisonType)
 	}
 
 	return New("uint_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
@@ -134,7 +134,7 @@ func FloatCompare(comparisonType ComparisonType, compareTo *float64) Constraint 
 	comparisonType = strings.ToLower(comparisonType)
 	comparator, exists := floatComparators[comparisonType]
 	if !exists {
-		panic("unrecognized comparison type: " + comparisonType)
+		return ConfigurationError("unrecognized comparison type: " + comparisonType)
 	}
 
 	return New("float_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
@@ -187,7 +187,7 @@ func TimeCompare(comparisonType ComparisonType, compareTo *time.Time) Constraint
 	comparisonType = strings.ToLower(comparisonType)
 	comparator, ok := timeComparators[comparisonType]
 	if !ok {
-		panic("unrecognized comparison type: " + comparisonType)
+		return ConfigurationError("unrecognized comparison type: " + comparisonType)
 	}
 
 	return New("time_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {

@@ -23,7 +23,7 @@ func EndsWith(suffix *string) Constraint {
 func Regexp(r string) Constraint {
 	re, err := regexp.Compile(r)
 	if err != nil {
-		panic(gomerr.Configuration("'" + r + "' is not a valid regexp pattern: " + err.Error()))
+		return ConfigurationError("'" + r + "' is not a valid regexp pattern: " + err.Error())
 	}
 	return stringTest("regexp", r, func(s string) bool {
 		return re.MatchString(s)
