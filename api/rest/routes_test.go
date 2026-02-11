@@ -1,51 +1,24 @@
 package rest
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/jt0/gomer/_test/assert"
 )
 
-// Test types for pathName tests
-type Extension struct{}
-type Extensions struct{}
-type ExtensionVersion struct{}
-type ExtensionVersions struct{}
-type ExtensionVersionArtifact struct{}
-type ExtensionArtifact struct{}
-type VersionArtifact struct{}
-type FooBat struct{}
-type Foo struct{}
-type Bar struct{}
-
-// CustomPathResource implements PathNamer to provide an explicit path name
-type CustomPathResource struct{}
-
-func (CustomPathResource) PathName() string {
-	return "custom"
-}
-
-// EmptyPathResource implements PathNamer but returns empty string
-type EmptyPathResource struct{}
-
-func (EmptyPathResource) PathName() string {
-	return ""
-}
-
 func TestPathName_NoAncestors(t *testing.T) {
 	tests := []struct {
-		name         string
-		resourceType reflect.Type
-		expected     string
+		name     string
+		input    string
+		expected string
 	}{
-		{"simple type", reflect.TypeOf(&Extension{}), "Extension"},
-		{"plural type", reflect.TypeOf(&Extensions{}), "Extensions"},
+		{"simple type", "Extension", "Extension"},
+		{"plural type", "Extensions", "Extensions"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := pathName(tt.resourceType, nil)
+			result := pathName(tt.input, nil)
 			assert.Equals(t, tt.expected, result)
 		})
 	}
@@ -57,17 +30,17 @@ func TestPathName_TrimsParentTypeName(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		resourceType reflect.Type
-		expected     string
+		name     string
+		input    string
+		expected string
 	}{
-		{"ExtensionVersion trims Extension", reflect.TypeOf(&ExtensionVersion{}), "Version"},
-		{"ExtensionVersions trims Extension", reflect.TypeOf(&ExtensionVersions{}), "Versions"},
+		{"ExtensionVersion trims Extension", "ExtensionVersion", "Version"},
+		{"ExtensionVersions trims Extension", "ExtensionVersions", "Versions"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := pathName(tt.resourceType, ancestors)
+			result := pathName(tt.input, ancestors)
 			assert.Equals(t, tt.expected, result)
 		})
 	}
@@ -80,19 +53,19 @@ func TestPathName_TrimsParentPathName(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		resourceType reflect.Type
-		expected     string
+		name     string
+		input    string
+		expected string
 	}{
 		// ExtensionVersionArtifact matches parent type name "ExtensionVersion" → "Artifact"
-		{"ExtensionVersionArtifact trims ExtensionVersion", reflect.TypeOf(&ExtensionVersionArtifact{}), "Artifact"},
+		{"ExtensionVersionArtifact trims ExtensionVersion", "ExtensionVersionArtifact", "Artifact"},
 		// VersionArtifact matches parent path name "Version" → "Artifact"
-		{"VersionArtifact trims Version", reflect.TypeOf(&VersionArtifact{}), "Artifact"},
+		{"VersionArtifact trims Version", "VersionArtifact", "Artifact"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := pathName(tt.resourceType, ancestors)
+			result := pathName(tt.input, ancestors)
 			assert.Equals(t, tt.expected, result)
 		})
 	}
@@ -106,7 +79,7 @@ func TestPathName_TrimsGrandparentPrefix(t *testing.T) {
 		{typeName: "Extension", pathName: "Extension"},      // grandparent
 	}
 
-	result := pathName(reflect.TypeOf(&ExtensionArtifact{}), ancestors)
+	result := pathName("ExtensionArtifact", ancestors)
 	assert.Equals(t, "Artifact", result)
 }
 
@@ -118,7 +91,7 @@ func TestPathName_CloserAncestorTakesPrecedence(t *testing.T) {
 	}
 
 	// ExtensionVersionArtifact matches parent "ExtensionVersion", not grandparent "Extension"
-	result := pathName(reflect.TypeOf(&ExtensionVersionArtifact{}), ancestors)
+	result := pathName("ExtensionVersionArtifact", ancestors)
 	assert.Equals(t, "Artifact", result)
 }
 
@@ -130,7 +103,7 @@ func TestPathName_NoMatchingPrefix(t *testing.T) {
 		{typeName: "Foo", pathName: "Foo"},
 	}
 
-	result := pathName(reflect.TypeOf(&FooBat{}), ancestors)
+	result := pathName("FooBat", ancestors)
 	assert.Equals(t, "Bat", result) // Now trims against grandparent "Foo"
 }
 
@@ -141,29 +114,8 @@ func TestPathName_NoMatchingPrefixAtAll(t *testing.T) {
 		{typeName: "Other", pathName: "Other"},
 	}
 
-	result := pathName(reflect.TypeOf(&Extension{}), ancestors)
+	result := pathName("Extension", ancestors)
 	assert.Equals(t, "Extension", result)
-}
-
-func TestPathName_ExplicitOverride(t *testing.T) {
-	ancestors := []ancestorContext{
-		{typeName: "Extension", pathName: "Extension"},
-	}
-
-	// Even with a matching ancestor, explicit PathName() should be used
-	result := pathName(reflect.TypeOf(&CustomPathResource{}), ancestors)
-	assert.Equals(t, "custom", result)
-}
-
-func TestPathName_EmptyOverrideUsesAutomatic(t *testing.T) {
-	// EmptyPathResource returns "" from PathName(), so automatic trimming should apply
-	// Since "EmptyPathResource" starts with "Empty", it gets trimmed to "PathResource"
-	ancestors := []ancestorContext{
-		{typeName: "Empty", pathName: "Empty"},
-	}
-
-	result := pathName(reflect.TypeOf(&EmptyPathResource{}), ancestors)
-	assert.Equals(t, "PathResource", result)
 }
 
 func TestPathName_CaseInsensitive(t *testing.T) {
@@ -172,7 +124,7 @@ func TestPathName_CaseInsensitive(t *testing.T) {
 	}
 
 	// Type name is "ExtensionVersion" but ancestor is "extension" (lowercase)
-	result := pathName(reflect.TypeOf(&ExtensionVersion{}), ancestors)
+	result := pathName("ExtensionVersion", ancestors)
 	assert.Equals(t, "Version", result)
 }
 
@@ -184,7 +136,7 @@ func TestPathName_TypeNameTakesPrecedence(t *testing.T) {
 	}
 
 	// ExtensionVersionArtifact starts with "ExtensionVersion" (ancestor type), so it uses that
-	result := pathName(reflect.TypeOf(&ExtensionVersionArtifact{}), ancestors)
+	result := pathName("ExtensionVersionArtifact", ancestors)
 	assert.Equals(t, "Artifact", result)
 }
 
@@ -195,21 +147,19 @@ func TestPathName_RequiresLongerName(t *testing.T) {
 	}
 
 	// Extension does NOT start with ExtensionVersionArtifact, and is shorter anyway
-	result := pathName(reflect.TypeOf(&Extension{}), ancestors)
+	result := pathName("Extension", ancestors)
 	assert.Equals(t, "Extension", result)
 }
 
 func TestPathName_DeepHierarchy(t *testing.T) {
 	// Simulate: Tenant -> TenantWorkspace -> WorkspaceProject -> TenantAuditLog
 	// TenantAuditLog should trim "Tenant" from great-grandparent
-	type TenantAuditLog struct{}
-
 	ancestors := []ancestorContext{
 		{typeName: "WorkspaceProject", pathName: "Project"},
 		{typeName: "TenantWorkspace", pathName: "Workspace"},
 		{typeName: "Tenant", pathName: "Tenant"},
 	}
 
-	result := pathName(reflect.TypeOf(&TenantAuditLog{}), ancestors)
+	result := pathName("TenantAuditLog", ancestors)
 	assert.Equals(t, "AuditLog", result)
 }

@@ -64,7 +64,7 @@ func (*createAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
 }
 
 func (*createAction[I]) Do(ctx context.Context, instance I) gomerr.Gomerr {
-	return instance.Metadata().dataStore.Create(ctx, instance)
+	return instance.registeredType().store.Create(ctx, instance)
 }
 
 func (*createAction[I]) OnDoSuccess(ctx context.Context, instance I) (I, gomerr.Gomerr) {
@@ -104,9 +104,9 @@ func (*readAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
 	}
 
 	// Prepare any Collection fields for nested queries
-	domain, _ := ctx.Value(DomainCtxKey).(*Domain)
-	if domain == nil {
-		return nil // No domain, skip auto-population
+	registry, _ := ctx.Value(RegistryCtxKey).(*Registry)
+	if registry == nil {
+		return nil // No registry in context, skip auto-population
 	}
 
 	iv := reflect.ValueOf(instance)
@@ -150,15 +150,15 @@ func (*readAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
 			continue
 		}
 
-		// Look up metadata for the element type
-		md := domain.metadata[protoType]
-		if md == nil {
+		// Look up registeredType for the element type
+		rt := registry.registeredTypes[protoType]
+		if rt == nil {
 			continue
 		}
 
 		// Create proto instance and collection
-		proto := md.NewInstance(instance.Subject())
-		collection := md.NewCollection(proto)
+		proto := rt.newInstance(instance.Subject())
+		collection := rt.newCollection(proto)
 
 		// Set the collection on the field
 		fv.Set(reflect.ValueOf(collection))
@@ -168,7 +168,7 @@ func (*readAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
 }
 
 func (*readAction[I]) Do(ctx context.Context, instance I) gomerr.Gomerr {
-	return instance.Metadata().dataStore.Read(ctx, instance)
+	return instance.registeredType().store.Read(ctx, instance)
 }
 
 func (*readAction[I]) OnDoSuccess(ctx context.Context, instance I) (I, gomerr.Gomerr) {
@@ -205,10 +205,10 @@ func (*updateAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 }
 
 func (a *updateAction[I]) Pre(ctx context.Context, update I) gomerr.Gomerr {
-	md := update.Metadata()
+	rt := update.registeredType()
 
 	// Create a new instance to hold current state
-	current := md.NewInstance(update.Subject()).(I)
+	current := rt.newInstance(update.Subject()).(I)
 
 	// Copy ID fields from update to current
 	tc := structs.EnsureContext().With(SourceValue, reflect.ValueOf(update).Elem())
@@ -217,7 +217,7 @@ func (a *updateAction[I]) Pre(ctx context.Context, update I) gomerr.Gomerr {
 	}
 
 	// Read current state from store
-	if ge := md.dataStore.Read(ctx, current); ge != nil {
+	if ge := rt.store.Read(ctx, current); ge != nil {
 		return ge
 	}
 
@@ -228,7 +228,7 @@ func (a *updateAction[I]) Pre(ctx context.Context, update I) gomerr.Gomerr {
 }
 
 func (a *updateAction[I]) Do(ctx context.Context, update I) gomerr.Gomerr {
-	return update.Metadata().dataStore.Update(ctx, a.current, update)
+	return update.registeredType().store.Update(ctx, a.current, update)
 }
 
 func (a *updateAction[I]) OnDoSuccess(ctx context.Context, update I) (I, gomerr.Gomerr) {
@@ -267,7 +267,7 @@ func (*deleteAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
 }
 
 func (*deleteAction[I]) Do(ctx context.Context, instance I) gomerr.Gomerr {
-	return instance.Metadata().dataStore.Delete(ctx, instance)
+	return instance.registeredType().store.Delete(ctx, instance)
 }
 
 func (*deleteAction[I]) OnDoSuccess(ctx context.Context, instance I) (I, gomerr.Gomerr) {
@@ -389,5 +389,5 @@ func convertPersistableNotFoundIfApplicable[I Instance[I]](i I, ge gomerr.Gomerr
 		return ge
 	}
 
-	return gomerr.NotFound(i.Metadata().instanceName, i.Id()).Wrap(ge)
+	return gomerr.NotFound(i.registeredType().instanceName, i.Id()).Wrap(ge)
 }

@@ -17,10 +17,10 @@ import (
 )
 
 var (
-	subject       = auth.NewSubject(auth.ReadWriteAllFields)
-	actions       = map[any]func() resource.AnyAction{PostCollection: func() resource.AnyAction { return resource.CreateAction[*Greeting]() }}
-	domain        = resource.NewDomain()
-	ctxWithDomain = context.WithValue(context.TODO(), resource.DomainCtxKey, domain)
+	subject         = auth.NewSubject(auth.ReadWriteAllFields)
+	actions         = map[any]func() resource.AnyAction{PostCollection: func() resource.AnyAction { return resource.CreateAction[*Greeting]() }}
+	registry        = resource.NewRegistry()
+	ctxWithRegistry = context.WithValue(context.TODO(), resource.RegistryCtxKey, registry)
 )
 
 //goland:noinspection GoSnakeCaseUsage
@@ -71,8 +71,7 @@ func (g Greeting) recipient(location int) string {
 }
 
 func TestBindInTypes(t *testing.T) {
-	_, ge := resource.Register[*Greeting](domain, nil, actions, stores.PanicStore)
-	assert.Success(t, ge)
+	resource.Register[*Greeting](registry, resource.WithActions(actions), resource.WithStore(stores.PanicStore))
 
 	const (
 		hello = "hello"
@@ -92,7 +91,7 @@ func TestBindInTypes(t *testing.T) {
 		{"BindFromBody", Body, &http.Request{URL: &url.URL{Path: "/"}, Body: body("{ \"Style\": \"" + hello + "\", \"Recipient\": \"" + kitty + "\" }")}},
 	}
 
-	greeting, ge := resource.NewInstance[*Greeting](ctxWithDomain, subject)
+	greeting, ge := resource.NewInstance[*Greeting](ctxWithRegistry, subject)
 	assert.Success(t, ge)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

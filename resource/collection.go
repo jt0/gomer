@@ -27,17 +27,16 @@ type Collection[I Instance[I]] struct {
 	consistencyType dynamodb.ConsistencyType
 }
 
-func (c *Collection[I]) Metadata() *Metadata {
-	return c.proto.Metadata()
+func (c *Collection[I]) registeredType() *registeredType {
+	return c.proto.registeredType()
 }
 
 func (c *Collection[I]) Subject() auth.Subject {
 	return c.proto.Subject()
 }
 
-func (c *Collection[I]) initialize(md *Metadata, sub auth.Subject) {
-	// TODO:?
-	c.proto.initialize(md, sub)
+func (c *Collection[I]) initialize(rt *registeredType, sub auth.Subject) {
+	c.proto.initialize(rt, sub)
 }
 
 func (c *Collection[I]) DoAction(ctx context.Context, action Action[*Collection[I]]) (*Collection[I], gomerr.Gomerr) {
@@ -53,7 +52,7 @@ func (c *Collection[I]) DoAction(ctx context.Context, action Action[*Collection[
 }
 
 func (c *Collection[I]) Query(ctx context.Context) gomerr.Gomerr {
-	return c.proto.Metadata().dataStore.Query(ctx, c)
+	return c.proto.registeredType().store.Query(ctx, c)
 }
 
 func (c *Collection[I]) TypeName() string {
@@ -78,7 +77,7 @@ func (c *Collection[I]) SetResults(items []any) {
 	c.Items = make([]I, len(items))
 	for i, item := range items {
 		typedItem := item.(I)
-		typedItem.initialize(c.proto.Metadata(), c.proto.Subject())
+		typedItem.initialize(c.proto.registeredType(), c.proto.Subject())
 		c.Items[i] = typedItem
 	}
 }

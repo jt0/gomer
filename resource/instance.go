@@ -9,21 +9,20 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-// NewInstance creates a new instance of type I, initialized with metadata and subject.
-// Retrieves the Domain from context automatically.
+// NewInstance creates a new instance of type I.
+// Retrieves the Registry from context automatically.
 func NewInstance[I Instance[I]](ctx context.Context, sub auth.Subject) (I, gomerr.Gomerr) {
 	var zero I
-	if d, _ := ctx.Value(DomainCtxKey).(*Domain); d == nil {
-		return zero, gomerr.Configuration("no domain in context")
-	} else if md := d.metadata[reflect.TypeFor[I]()]; md == nil {
+	if r, _ := ctx.Value(RegistryCtxKey).(*Registry); r == nil {
+		return zero, gomerr.Configuration("no registry in context")
+	} else if rt := r.registeredTypes[reflect.TypeFor[I]()]; rt == nil {
 		return zero, gomerr.Unprocessable("unknown instance type", reflect.TypeFor[I]())
 	} else {
-		return md.NewInstance(sub).(I), nil
+		return rt.newInstance(sub).(I), nil
 	}
 }
 
-// Instance extends Resource for individual domain entities.
-// Instances have an identity (Id) and support CRUD operations.
+// Instance extends Resource for individual entities. Instances have an identity (Id) and support CRUD operations.
 type Instance[I Resource[I]] interface {
 	Resource[I]
 	data.Persistable // TypeName() string, NewQueryable() data.Queryable
@@ -38,14 +37,13 @@ type Instance[I Resource[I]] interface {
 	PostDelete(context.Context) gomerr.Gomerr
 }
 
-// BaseInstance provides the default implementation for Instance[I].
-// Embed this in concrete instance types.
+// BaseInstance provides the default implementation for Instance[I]. Embed this in concrete instance types.
 type BaseInstance[I Instance[I]] struct {
 	BaseResource[I]
 }
 
 func (b *BaseInstance[I]) TypeName() string {
-	return b.md.instanceName
+	return b.rt.instanceName
 }
 
 func (b *BaseInstance[I]) Id() string {
@@ -59,7 +57,7 @@ func (b *BaseInstance[I]) Id() string {
 // NewQueryable creates a Collection for querying instances of this type.
 // Implements data.Persistable.
 func (b *BaseInstance[I]) NewQueryable() data.Queryable {
-	return b.md.NewCollection(b.md.NewInstance(b.sub)).(data.Queryable)
+	return b.rt.newCollection(b.rt.newInstance(b.sub)).(data.Queryable)
 }
 
 // Action lifecycle hooks - override these in concrete types as needed.

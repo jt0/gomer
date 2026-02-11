@@ -26,10 +26,7 @@ type Person struct {
 var personActions = map[any]func() resource.AnyAction{PostCollection: func() resource.AnyAction { return resource.CreateAction[*Person]() }}
 
 func init() {
-	_, ge := resource.Register[*Person](domain, nil, personActions, stores.PanicStore)
-	if ge != nil {
-		panic(ge)
-	}
+	resource.Register[*Person](registry, resource.WithActions(personActions), resource.WithStore(stores.PanicStore))
 }
 
 func TestConfigure_PascalCaseFields(t *testing.T) {
@@ -40,7 +37,7 @@ func TestConfigure_PascalCaseFields(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"FirstName": "Alice", "LastName": "Wonder"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -56,7 +53,7 @@ func TestConfigure_CamelCaseFields(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Bruce", "lastName": "Wayne"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -73,7 +70,7 @@ func TestConfigure_PascalCaseFields_CamelCaseInput(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Betty", "lastName": "Crocker"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -90,7 +87,7 @@ func TestConfigure_MultipleOptions(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "James", "middleName": "Earl", "lastName": "Jones"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -108,7 +105,7 @@ func TestNewBindingConfiguration_SetAsDefault(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Plato"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -124,7 +121,7 @@ func TestConfigure_CamelCaseFields_DefaultNaming(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Charlie", "lastName": "Brown"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -144,7 +141,7 @@ func TestConfigure_RequestOption(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Edgar", "middleName": "Allan", "lastName": "Poe"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -164,7 +161,7 @@ func TestConfigure_ResponseOption(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Madonna"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithDomain, subject)
+	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 

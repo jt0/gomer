@@ -11,23 +11,19 @@ import (
 // Resource is the base interface for all domain resources. The type parameter T
 // is the concrete type implementing the interface (F-bounded polymorphism).
 type Resource[T any] interface {
-	Metadata() *Metadata
 	Subject() auth.Subject
 	DoAction(context.Context, Action[T]) (T, gomerr.Gomerr)
 
-	initialize(md *Metadata, sub auth.Subject)
+	registeredType() *registeredType
+	initialize(rt *registeredType, sub auth.Subject)
 }
 
 // BaseResource provides the default implementation for Resource[T].
 // Embed this in concrete resource types.
 type BaseResource[T Resource[T]] struct {
 	self T
-	md   *Metadata
+	rt   *registeredType
 	sub  auth.Subject
-}
-
-func (b *BaseResource[T]) Metadata() *Metadata {
-	return b.md
 }
 
 func (b *BaseResource[T]) Subject() auth.Subject {
@@ -48,11 +44,15 @@ func (b *BaseResource[T]) DoAction(ctx context.Context, action Action[T]) (T, go
 	return action.OnDoSuccess(ctx, b.self)
 }
 
-func (b *BaseResource[T]) initialize(md *Metadata, sub auth.Subject) {
-	// Compute self from receiver using offset stored in Metadata
-	containerPtr := unsafe.Pointer(uintptr(unsafe.Pointer(b)) - md.baseOffset)
+func (b *BaseResource[T]) registeredType() *registeredType {
+	return b.rt
+}
+
+func (b *BaseResource[T]) initialize(rt *registeredType, sub auth.Subject) {
+	// Compute self from receiver using offset stored in type info
+	containerPtr := unsafe.Pointer(uintptr(unsafe.Pointer(b)) - rt.baseOffset)
 	b.self = *(*T)(unsafe.Pointer(&containerPtr))
-	b.md = md
+	b.rt = rt
 	b.sub = sub
 }
 

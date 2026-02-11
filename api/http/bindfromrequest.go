@@ -60,8 +60,7 @@ func SetBindFromRequestConfiguration(requestConfiguration BindFromRequestConfigu
 	return DefaultBindFromRequestTool
 }
 
-// BindFromRequest binds request data to an already-created resource.
-// The resource should be created via Metadata.NewInstance or Metadata.NewCollection before calling this.
+// BindFromRequest binds request data to the provided resource.
 func BindFromRequest(request *http.Request, resource any, scope string) gomerr.Gomerr {
 	rv := reflect.ValueOf(resource)
 	resourceType := rv.Type()

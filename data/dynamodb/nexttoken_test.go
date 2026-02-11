@@ -44,7 +44,7 @@ func (m *mockCipher) Decrypt(ctx context.Context, ciphertext []byte, ec map[stri
 
 // createTestCipher creates a cipher for testing pagination.
 // Uses a simple XOR cipher that is sufficient for testing token encryption/decryption.
-func createTestCipher(t *testing.T, key []byte) crypto.Cipher {
+func createTestCipher(_ *testing.T, key []byte) crypto.Cipher {
 	keyByte := byte(42) // Default key
 	if len(key) > 0 {
 		keyByte = key[0]
@@ -412,75 +412,10 @@ func TestPagination_NextTokenEncryption(t *testing.T) {
 		assert.Assert(t, len(q.Results()) > 0, "Should retrieve items on second page")
 	})
 
-	t.Run("encrypted token cannot be tampered", func(t *testing.T) {
-		t.Skip("Tests not validated")
-
-		cipher := createTestCipher(t, []byte("test-key"))
-		store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
-		defer cleanupPaginationTable(t, client)
-
-		// Seed data that requires pagination
-		seedTestData(t, store, "T1", 15)
-
-		// Query to get a valid token
-		q := &ddbtest.Users{TenantId: "T1"}
-		q.SetMaximumPageSize(5)
-		ge := store.Query(ctx, q)
-		assert.Success(t, ge)
-
-		token := *q.NextPageToken()
-
-		// Tamper with the token by flipping a character in the middle
-		tampered := token[:len(token)/2] + "X" + token[len(token)/2+1:]
-
-		// Attempt to use tampered token
-		q2 := &ddbtest.Users{TenantId: "T1"}
-		q2.SetMaximumPageSize(5)
-		q2.SetNextPageToken(&tampered)
-		ge = store.Query(ctx, q2)
-
-		// Expect MalformedValue error
-		assert.Assert(t, ge != nil, "Expected error with tampered token")
-		assert.ErrorType(t, ge, gomerr.MalformedValue("", nil))
-	})
-
-	t.Run("encrypted token with different cipher fails", func(t *testing.T) {
-		t.Skip("Tests not validated")
-
-		cipher1 := createTestCipher(t, []byte("key1"))
-		store1, client := setupPaginationStore(t, cipher1, &ddbtest.User{})
-		defer cleanupPaginationTable(t, client)
-
-		// Seed data
-		seedTestData(t, store1, "T1", 15)
-
-		// Query with Store1 to get token
-		q1 := &ddbtest.Users{TenantId: "T1"}
-		q1.SetMaximumPageSize(5)
-		ge := store1.Query(ctx, q1)
-		assert.Success(t, ge)
-
-		token := *q1.NextPageToken()
-
-		// Create Store2 with different cipher
-		cipher2 := createTestCipher(t, []byte("key2"))
-		store2, ge := ddb.Store(paginationTestTableName, &ddb.Configuration{
-			DynamoDb:          client,
-			NextTokenCipher:   cipher2,
-			MaxResultsDefault: 100,
-		}, &ddbtest.User{})
-		assert.Success(t, ge)
-
-		// Attempt to use Store1's token with Store2
-		q2 := &ddbtest.Users{TenantId: "T1"}
-		q2.SetMaximumPageSize(5)
-		q2.SetNextPageToken(&token)
-		ge = store2.Query(ctx, q2)
-
-		// Expect MalformedValue error (decryption failure)
-		assert.Assert(t, ge != nil, "Expected error with cross-cipher token")
-		assert.ErrorType(t, ge, gomerr.MalformedValue("", nil))
-	})
+	// Note: Token tampering and cross-cipher tests removed.
+	// The mock XOR cipher doesn't provide authentication, so tampering produces
+	// garbage that may or may not be valid JSON/base64. Testing authenticated
+	// encryption behavior belongs in cipher tests with a real AEAD cipher.
 }
 
 // Test Section 4: Limit Configuration Tests
@@ -592,45 +527,10 @@ func TestPagination_LimitConfiguration(t *testing.T) {
 }
 
 // Test Section 5: NextToken Expiration Tests
-
-func TestPagination_TokenExpiration(t *testing.T) {
-	// Note: Full time-based expiration testing requires time mocking.
-	// These tests focus on version mismatch which is easier to trigger.
-
-	t.Run("valid token not expired", func(t *testing.T) {
-		t.Skip("Tests not validated")
-
-		cipher := createTestCipher(t, []byte("test-key"))
-		store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
-		defer cleanupPaginationTable(t, client)
-
-		ctx := context.Background()
-
-		// Seed data
-		seedTestData(t, store, "T1", 15)
-
-		// Query to get fresh token
-		q := &ddbtest.Users{TenantId: "T1"}
-		q.SetMaximumPageSize(5)
-		ge := store.Query(ctx, q)
-		assert.Success(t, ge)
-
-		token := *q.NextPageToken()
-
-		// Use token immediately (should be valid)
-		q2 := &ddbtest.Users{TenantId: "T1"}
-		q2.SetMaximumPageSize(5)
-		q2.SetNextPageToken(&token)
-		ge = store.Query(ctx, q2)
-		assert.Success(t, ge)
-	})
-
-	// Note: Testing actual time-based expiration would require:
-	// 1. Time mocking library to advance clock 25+ hours
-	// 2. Or a test helper in dynamodb package (not dynamodb_test) to create expired tokens
-	// 3. Or long-running integration tests
-	// For now, this is documented as a limitation and expiration is verified manually.
-}
+//
+// Note: Time-based expiration testing requires time mocking or long-running tests.
+// Fresh token usage is already covered by multi-page pagination tests above.
+// Expiration behavior is verified manually or through integration tests.
 
 // Test Section 6: Edge Case Tests
 
@@ -682,33 +582,9 @@ func TestPagination_EdgeCases(t *testing.T) {
 		assert.ErrorType(t, ge, gomerr.MalformedValue("", nil))
 	})
 
-	t.Run("reuse same query object", func(t *testing.T) {
-		t.Skip("Tests not validated")
-
-		cleanupPaginationTable(t, client)
-		seedTestData(t, store, "T1", 15)
-
-		q := &ddbtest.Users{TenantId: "T1"}
-		q.SetMaximumPageSize(5)
-
-		// First query
-		ge := store.Query(ctx, q)
-		assert.Success(t, ge)
-		firstPageCount := len(q.Results())
-		firstPageFirstId := q.Results()[0].(*ddbtest.User).Id
-
-		// Reuse same object for second query
-		ge = store.Query(ctx, q)
-		assert.Success(t, ge)
-		secondPageCount := len(q.Results())
-		secondPageFirstId := q.Results()[0].(*ddbtest.User).Id
-
-		// Should get same results (query resets)
-		assert.Equals(t, firstPageCount, secondPageCount,
-			"Reused query should return same page size")
-		assert.Equals(t, firstPageFirstId, secondPageFirstId,
-			"Reused query should return same items")
-	})
+	// Note: Reusing a query object preserves its NextPageToken state, allowing
+	// continued pagination by calling Query again. To restart from page 1,
+	// explicitly call SetNextPageToken(nil).
 }
 
 // Test Section 7: Pagination Across Indexes
@@ -732,8 +608,6 @@ func TestPagination_AcrossIndexes(t *testing.T) {
 	})
 
 	t.Run("LSI pagination with descending order", func(t *testing.T) {
-		t.Skip("Tests not validated")
-
 		store, client := setupPaginationStore(t, cipher, &ddbtest.Order{})
 		defer cleanupPaginationTable(t, client)
 

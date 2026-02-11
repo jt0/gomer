@@ -12,7 +12,7 @@ import (
 )
 
 // withMiddleware wraps a ServeMux with middleware and sets up the ResponseWriter buffering
-func withMiddleware(domain *resource.Domain, mux *http.ServeMux, gomerrRenderer func(gomerr.Gomerr) StatusCoder, middleware []func(http.Handler) http.Handler) http.Handler {
+func withMiddleware(registry *resource.Registry, mux *http.ServeMux, gomerrRenderer func(gomerr.Gomerr) StatusCoder, middleware []func(http.Handler) http.Handler) http.Handler {
 	// Outermost middleware that initializes ResponseWriter and finalizes response.
 	outer := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -24,8 +24,8 @@ func withMiddleware(domain *resource.Domain, mux *http.ServeMux, gomerrRenderer 
 				rw.errRenderers = []ErrRenderer{gomerrErrRenderer(gomerrRenderer, r)}
 			}
 
-			// Call middleware chain with response writer and domain
-			next.ServeHTTP(rw, r.WithContext(context.WithValue(r.Context(), resource.DomainCtxKey, domain)))
+			// Call middleware chain with response writer and registry
+			next.ServeHTTP(rw, r.WithContext(context.WithValue(r.Context(), resource.RegistryCtxKey, registry)))
 
 			// Write buffered response to actual ResponseWriter
 			rw.writeTo(w)
