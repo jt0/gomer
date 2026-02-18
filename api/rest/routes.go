@@ -115,7 +115,6 @@ func buildRoutes(mux *http.ServeMux, rt resource.RegisteredType, parentPath stri
 
 		// Register with method and path pattern
 		pattern := op.Method() + " " + relativePath
-		println("new route:", pattern)
 		mux.Handle(pattern, handler(rt, actionFunc, successStatus))
 	}
 
