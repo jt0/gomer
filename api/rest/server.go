@@ -167,6 +167,7 @@ func defaultErrorRenderer(w http.ResponseWriter, err error) {
 	// TODO: add flag to output details only if running in non-prod
 
 	if ge, ok := err.(gomerr.Gomerr); ok {
+		println(ge.String())
 		w.Write([]byte(ge.String()))
 		return
 	}

@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	. "github.com/jt0/gomer/api/http"
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/resource"
+	"github.com/jt0/gomer/structs"
 )
 
 // ancestorContext holds information about an ancestor resource for path name derivation.
@@ -78,6 +80,10 @@ func noRouteHandler() http.Handler {
 }
 
 func buildRoutes(mux *http.ServeMux, rt resource.RegisteredType, parentPath string, ancestors []ancestorContext) {
+	if ge := structs.Preprocess(rt.NewInstance(nil), DefaultBindFromRequestTool, constraint.DefaultValidationTool); ge != nil {
+		panic(ge.String())
+	}
+
 	// Determine the path name for this resource's instance type
 	instancePathName := pathName(rt.InstanceName(), ancestors)
 
