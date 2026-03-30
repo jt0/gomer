@@ -49,7 +49,7 @@ type outApplierProvider struct {
 }
 
 func (ap outApplierProvider) Applier(st reflect.Type, sf reflect.StructField, directive string, scope string) (structs.Applier, gomerr.Gomerr) {
-	if directive == skipField || (directive == "" && ap.emptyDirective == skipField) {
+	if directive == skipField {
 		return nil, nil
 	}
 
@@ -72,7 +72,7 @@ func (ap outApplierProvider) Applier(st reflect.Type, sf reflect.StructField, di
 		return applier, ge
 	}
 
-	if directive == includeField || directive == "" { // b.emptyDirectiveHandling must be 'includeField' otherwise would have returned above
+	if directive == includeField || directive == "" {
 		return outApplier{(*ap.toCase)(sf.Name), omitIfEmpty, ap.tool}, nil
 	} else if firstChar := directive[0]; firstChar == '=' {
 		return structs.ValueApplier{directive[1:]}, nil // don't include the '='

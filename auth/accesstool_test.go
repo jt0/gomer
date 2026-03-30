@@ -103,6 +103,6 @@ type testDirectivesProvider struct {
 	directive string
 }
 
-func (t testDirectivesProvider) Get(reflect.Type, reflect.StructField) string {
-	return t.directive
+func (t testDirectivesProvider) Get(reflect.StructField) (string, bool) {
+	return t.directive, true
 }

@@ -55,6 +55,10 @@ func NewAccessTool(dp structs.DirectiveProvider) *structs.Tool {
 
 type accessApplierProvider struct{}
 
+func (accessApplierProvider) DefaultDirective() string {
+	return ""
+}
+
 func (ap accessApplierProvider) Applier(_ reflect.Type, sf reflect.StructField, directive string, _ string) (structs.Applier, gomerr.Gomerr) {
 	perPrincipalPermissions := make([]map[string]string, 0)
 	for _, match := range accessRegexp.FindAllStringSubmatch(directive, -1) {

@@ -12,9 +12,6 @@ type BindDirectiveConfiguration struct {
 	IncludeField string
 	BindBody     string
 
-	// Defines how a field's binding be handled if no directive is specified. Default is to skip.
-	EmptyDirectiveHandling EmptyDirectiveHandlingType
-
 	OmitEmptyDirective    string
 	IncludeEmptyDirective string
 
@@ -32,19 +29,11 @@ func NewBindDirectiveConfiguration() BindDirectiveConfiguration {
 		SkipField:                 DefaultSkipFieldDirective,
 		IncludeField:              DefaultBindToFieldNameDirective,
 		BindBody:                  DefaultBodyBindingDirective,
-		EmptyDirectiveHandling:    DefaultEmptyDirectiveHandling,
 		OmitEmptyDirective:        DefaultOmitEmptyDirective,
 		IncludeEmptyDirective:     DefaultIncludeEmptyDirective,
 		EmptyValueHandlingDefault: DefaultEmptyValueHandlingDefault,
 	}
 }
-
-type EmptyDirectiveHandlingType int
-
-const (
-	SkipField EmptyDirectiveHandlingType = iota
-	BindToFieldName
-)
 
 type EmptyValueHandlingType int
 
@@ -62,7 +51,6 @@ const (
 	DefaultSkipFieldDirective        = "-"
 	DefaultBindToFieldNameDirective  = "+"
 	DefaultBodyBindingDirective      = "body"
-	DefaultEmptyDirectiveHandling    = SkipField
 	DefaultOmitEmptyDirective        = "omitempty"
 	DefaultIncludeEmptyDirective     = "includeempty"
 	DefaultEmptyValueHandlingDefault = OmitEmpty

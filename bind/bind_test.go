@@ -9,7 +9,7 @@ import (
 
 func TestCopyWithOptions(t *testing.T) {
 	b1 := bind.NewConfiguration()
-	b2 := bind.CopyConfigurationWithOptions(b1, bind.IncludeEmpty, bind.EmptyDirectiveIncludesField)
+	b2 := bind.CopyConfigurationWithOptions(b1, bind.IncludeEmpty)
 
 	assert.NotEquals(t, b1, b2)
 }

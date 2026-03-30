@@ -72,23 +72,37 @@ func (t *Tool) ApplierProvider() ApplierProvider {
 }
 
 func (t *Tool) applierFor(st reflect.Type, sf reflect.StructField) (Applier, gomerr.Gomerr) {
-	return applyScopes(t.applierProvider, st, sf, t.directiveProvider.Get(st, sf))
+	directive, ok := t.directiveProvider.Get(sf)
+	if !ok {
+		if h, handles := t.applierProvider.(MissingDirectiveHandler); handles {
+			directive = h.DefaultDirective()
+		} else {
+			return nil, nil
+		}
+	}
+	return applyScopes(t.applierProvider, st, sf, directive)
 }
 
 type ApplierProvider interface {
 	Applier(structType reflect.Type, structField reflect.StructField, directive string, scope string) (Applier, gomerr.Gomerr)
 }
 
+// MissingDirectiveHandler can be implemented by an ApplierProvider to indicate that fields without
+// the struct tag should still be processed. The returned string is used as the default directive.
+type MissingDirectiveHandler interface {
+	DefaultDirective() string
+}
+
 type DirectiveProvider interface {
-	Get(structType reflect.Type, structField reflect.StructField) string
+	Get(structField reflect.StructField) (string, bool)
 }
 
 type StructTagDirectiveProvider struct {
 	TagKey string
 }
 
-func (s StructTagDirectiveProvider) Get(_ reflect.Type, structField reflect.StructField) string {
-	return structField.Tag.Get(s.TagKey)
+func (s StructTagDirectiveProvider) Get(structField reflect.StructField) (string, bool) {
+	return structField.Tag.Lookup(s.TagKey)
 }
 
 var (

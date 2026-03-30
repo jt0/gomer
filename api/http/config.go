@@ -103,14 +103,6 @@ var (
 
 	// IncludeEmptyValues configures binding to include empty/zero values in output.
 	IncludeEmptyValues BindingOption = wrapBindOption(bind.IncludeEmpty)
-
-	// SkipEmptyDirective configures fields without binding directives to be skipped.
-	// This is the default behavior.
-	SkipEmptyDirective BindingOption = wrapBindOption(bind.EmptyDirectiveSkipsField)
-
-	// IncludeEmptyDirective configures fields without binding directives to be included
-	// using the field name.
-	IncludeEmptyDirective BindingOption = wrapBindOption(bind.EmptyDirectiveIncludesField)
 )
 
 // wrapBindOption converts a bind.Configuration option to a BindingOption.

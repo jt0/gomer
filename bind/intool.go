@@ -42,16 +42,19 @@ type inApplierProvider struct {
 }
 
 func (ap inApplierProvider) Applier(st reflect.Type, sf reflect.StructField, directive string, scope string) (structs.Applier, gomerr.Gomerr) {
-	if directive == skipField || (directive == "" && ap.emptyDirective == skipField) {
+	if directive == skipField {
 		return nil, nil
 	}
+
+	//goland:noinspection GoBoolExpressions
+	omitIfEmpty := ap.emptyValue == omitEmpty
 
 	if applier, ge := structs.Composite(directive, ap.tool, st, sf); applier != nil || ge != nil {
 		return applier, ge
 	}
 
-	if directive == includeField || directive == "" { // b.emptyDirective must be 'includeField' otherwise would have returned above
-		return inApplier{(*ap.toCase)(sf.Name), ap.tool}, nil
+	if directive == includeField || directive == "" {
+		return inApplier{source: (*ap.toCase)(sf.Name), omitIfEmpty: omitIfEmpty, tool: ap.tool}, nil
 	} else if firstChar := directive[0]; firstChar == '=' {
 		return structs.ValueApplier{directive[1:]}, nil // don't include the '='
 	} else if firstChar == '$' {
@@ -64,12 +67,13 @@ func (ap inApplierProvider) Applier(st reflect.Type, sf reflect.StructField, dir
 		}
 	}
 
-	return inApplier{directive, ap.tool}, nil
+	return inApplier{source: directive, omitIfEmpty: omitIfEmpty, tool: ap.tool}, nil
 }
 
 type inApplier struct {
-	source string
-	tool   *structs.Tool
+	source      string
+	omitIfEmpty bool
+	tool        *structs.Tool
 }
 
 var (
@@ -94,6 +98,10 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 		return nil
 	}
 	value := mv.Interface()
+
+	if a.omitIfEmpty && reflect.ValueOf(value).IsZero() {
+		return nil
+	}
 
 	switch fvt := fv.Type(); fv.Kind() {
 	case reflect.Struct:

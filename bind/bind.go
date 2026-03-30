@@ -31,9 +31,6 @@ var (
 )
 
 type Configuration struct {
-	// Empty directive default
-	emptyDirective string
-
 	// Empty field value default
 	emptyValue string
 
@@ -57,9 +54,8 @@ func (bc *Configuration) withOptions(options ...func(*Configuration)) Configurat
 
 func NewConfiguration(options ...func(*Configuration)) Configuration {
 	bc := &Configuration{
-		emptyDirective: skipField,
-		emptyValue:     omitEmpty,
-		toCase:         &PascalCaseFn,
+		emptyValue: omitEmpty,
+		toCase:     &PascalCaseFn,
 		// strictMode: false,  // true if should fail on extra input values, false otherwise
 	}
 
@@ -68,14 +64,6 @@ func NewConfiguration(options ...func(*Configuration)) Configuration {
 
 func CopyConfigurationWithOptions(b Configuration, options ...func(*Configuration)) Configuration {
 	return (&b).withOptions(options...)
-}
-
-func EmptyDirectiveSkipsField(c *Configuration) {
-	c.emptyDirective = skipField
-}
-
-func EmptyDirectiveIncludesField(c *Configuration) {
-	c.emptyDirective = includeField
 }
 
 func OmitEmpty(c *Configuration) {
