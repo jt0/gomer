@@ -496,7 +496,6 @@ func TestUpdate(t *testing.T) {
 			name:         "update composite key entity",
 			entityType:   &testentities.CompositeKeyEntity{},
 			setupEntity:  &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1", Data: "original", Active: true},
-			updateEntity: &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1", Data: "updated", Active: true},
 			updateParam:  &testentities.CompositeKeyEntity{Data: "updated"},
 			verifyFunc: func(t *testing.T, store data.Store) {
 				read := &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1"}
@@ -508,7 +507,6 @@ func TestUpdate(t *testing.T) {
 			name:         "update multi-part key entity",
 			entityType:   &testentities.MultiPartKeyEntity{},
 			setupEntity:  &testentities.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1", Payload: "original"},
-			updateEntity: &testentities.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1", Payload: "updated"},
 			updateParam:  &testentities.MultiPartKeyEntity{Payload: "updated"},
 			verifyFunc: func(t *testing.T, store data.Store) {
 				read := &testentities.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1"}
@@ -531,13 +529,28 @@ func TestUpdate(t *testing.T) {
 			name:         "update partial fields only",
 			entityType:   &testentities.CompositeKeyEntity{},
 			setupEntity:  &testentities.CompositeKeyEntity{PartitionKey: "pk2", SortKey: "sk2", Data: "original", Active: true},
-			updateEntity: &testentities.CompositeKeyEntity{PartitionKey: "pk2", SortKey: "sk2", Data: "partial-update", Active: true},
 			updateParam:  &testentities.CompositeKeyEntity{Data: "partial-update"},
 			verifyFunc: func(t *testing.T, store data.Store) {
 				read := &testentities.CompositeKeyEntity{PartitionKey: "pk2", SortKey: "sk2"}
 				assert.Success(t, store.Read(context.Background(), read))
 				assert.Equals(t, "partial-update", read.Data)
 				assert.Equals(t, true, read.Active)
+			},
+		},
+		{
+			name:       "update nested struct partial fields",
+			entityType: &testentities.CompositeKeyEntity{},
+			setupEntity: &testentities.CompositeKeyEntity{PartitionKey: "pk3", SortKey: "sk3", Data: "original", Active: true,
+				Nested: &testentities.Nested{Foo: "a", Bar: "a"}},
+			updateParam: &testentities.CompositeKeyEntity{Data: "partial-update",
+				Nested: &testentities.Nested{Foo: "b"}},
+			verifyFunc: func(t *testing.T, store data.Store) {
+				read := &testentities.CompositeKeyEntity{PartitionKey: "pk3", SortKey: "sk3"}
+				assert.Success(t, store.Read(context.Background(), read))
+				assert.Equals(t, "partial-update", read.Data)
+				assert.Equals(t, true, read.Active)
+				assert.Equals(t, "b", read.Nested.Foo)
+				assert.Equals(t, "a", read.Nested.Bar)
 			},
 		},
 		{
@@ -567,7 +580,11 @@ func TestUpdate(t *testing.T) {
 			}
 
 			// Execute update
-			ge := store.Update(ctx, tt.updateEntity, tt.updateParam)
+			readEntity := tt.updateEntity
+			if readEntity == nil {
+				readEntity = tt.setupEntity
+			}
+			ge := store.Update(ctx, readEntity, tt.updateParam)
 
 			if tt.expectError {
 				if ge == nil {

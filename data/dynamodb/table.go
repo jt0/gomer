@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -262,49 +263,63 @@ func (t *table) Update(ctx context.Context, p data.Persistable, update data.Pers
 	if update != nil {
 		uv := reflect.ValueOf(update).Elem()
 		pv := reflect.ValueOf(p).Elem()
-
-		for i := 0; i < uv.NumField(); i++ {
-			uField := uv.Field(i)
-			// TODO:p0 Support structs. Will want to recurse through and not bother w/ CanSet() checks until we know
-			//         we're dealing w/ a scalar.
-			if !uField.CanSet() || uField.Kind() == reflect.Struct || (uField.Kind() == reflect.Ptr && uField.Elem().Kind() == reflect.Struct) {
-				continue
-			}
-
-			pField := pv.Field(i)
-			fieldName := uv.Type().Field(i).Name
-
-			if reflect.DeepEqual(uField.Interface(), pField.Interface()) {
-				uField.Set(reflect.Zero(uField.Type()))
-			} else if uField.Kind() == reflect.Ptr {
-				if uField.IsNil() {
-					continue
-				}
-				if !pField.IsNil() && reflect.DeepEqual(uField.Elem().Interface(), pField.Elem().Interface()) {
-					uField.Set(reflect.Zero(uField.Type()))
-				} else {
-					pField.Set(uField)
-					// Check if this field participates in any constraint
-					if pt.constraintFields[fieldName] {
-						validateConstraints = true
-					}
-				}
-			} else {
-				if uField.IsZero() {
-					continue
-				}
-				pField.Set(uField)
-				// Check if this field participates in any constraint
-				if pt.constraintFields[fieldName] {
-					validateConstraints = true
-				}
-			}
-		}
+		validateConstraints = mergeFields(uv, pv, pt)
 	}
 
 	ge = t.put(ctx, p, validateConstraints, false)
 
 	return
+}
+
+func mergeFields(uv, pv reflect.Value, pt *persistableType) bool {
+	validateConstraints := false
+
+	for i := 0; i < uv.NumField(); i++ {
+		uField := uv.Field(i)
+		if !uField.CanSet() {
+			continue
+		}
+
+		pField := pv.Field(i)
+		fieldName := uv.Type().Field(i).Name
+		if uField.Kind() == reflect.Struct {
+			mergeFields(uField, pField, nil)
+			continue
+		}
+
+		if reflect.DeepEqual(uField.Interface(), pField.Interface()) {
+			uField.Set(reflect.Zero(uField.Type()))
+		} else if uField.Kind() == reflect.Ptr {
+			if uField.IsNil() {
+				continue
+			}
+			if uField.Elem().Kind() == reflect.Struct {
+				if pField.IsNil() {
+					pField.Set(reflect.New(uField.Elem().Type()))
+				}
+				mergeFields(uField.Elem(), pField.Elem(), nil)
+				continue
+			}
+			if !pField.IsNil() && reflect.DeepEqual(uField.Elem().Interface(), pField.Elem().Interface()) {
+				uField.Set(reflect.Zero(uField.Type()))
+			} else {
+				pField.Set(uField)
+				if pt != nil && pt.constraintFields[fieldName] {
+					validateConstraints = true
+				}
+			}
+		} else {
+			if uField.IsZero() {
+				continue
+			}
+			pField.Set(uField)
+			if pt != nil && pt.constraintFields[fieldName] {
+				validateConstraints = true
+			}
+		}
+	}
+
+	return validateConstraints
 }
 
 func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints bool, ensureUniqueId bool) gomerr.Gomerr {
@@ -384,47 +399,88 @@ func (t *table) Read(ctx context.Context, p data.Persistable) (ge gomerr.Gomerr)
 	}()
 
 	key := make(map[string]types.AttributeValue, 2)
-	ge = t.populateKeyValues(key, p, t.valueSeparatorChar, true)
-	if ge != nil {
+	if ge = t.populateKeyValues(key, p, t.valueSeparatorChar, true); ge != nil {
 		return ge
 	}
 
-	input := &dynamodb.GetItemInput{
-		Key:            key,
-		ConsistentRead: consistentRead(t.consistencyType(p), true),
-		TableName:      t.tableName,
+	useQuery := false
+	if len(t.pk.keyFieldsByPersistable[p.TypeName()]) > 1 {
+		if pk, ok := key[t.pk.name].(*types.AttributeValueMemberS); ok && pk.Value[len(pk.Value)-1] == t.valueSeparatorChar {
+			useQuery = true
+		}
 	}
-	output, err := t.ddb.GetItem(ctx, input)
-	if err != nil {
-		var notFoundErr *types.ResourceNotFoundException
-		if errors.As(err, &notFoundErr) {
-			return dataerr.PersistableNotFound(p.TypeName(), key).Wrap(err)
+	if t.sk != nil && len(t.sk.keyFieldsByPersistable[p.TypeName()]) > 1 {
+		if sk, ok := key[t.sk.name].(*types.AttributeValueMemberS); ok && sk.Value[len(sk.Value)-1] == t.valueSeparatorChar {
+			useQuery = true
+		}
+	}
+
+	if useQuery {
+		pt, ok := t.persistableTypes[p.TypeName()]
+		if !ok {
+			return gomerr.Configuration("no persistable type for " + p.TypeName())
 		}
 
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) {
-			switch apiErr.ErrorCode() {
-			case "RequestLimitExceeded", "ProvisionedThroughputExceededException":
-				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(err)
+		fields := make([]string, 0, len(pt.keyFields))
+		for field := range pt.keyFields {
+			fields = append(fields, field)
+		}
+
+		q, qge := toQueryable(p, fields)
+		if qge != nil {
+			return qge
+		}
+
+		if ge = t.Query(ctx, q); ge != nil {
+			return ge
+		}
+
+		results := q.Results()
+		if len(results) == 0 {
+			return dataerr.PersistableNotFound(p.TypeName(), key)
+		} else if len(results) > 1 {
+			return gomerr.Conflict(p.TypeName(), "multiple matches found").AddAttribute("queryable", q)
+		}
+
+		copyFields(reflect.ValueOf(p).Elem(), reflect.ValueOf(results[0]).Elem())
+	} else {
+		input := &dynamodb.GetItemInput{
+			Key:            key,
+			ConsistentRead: consistentRead(t.consistencyType(p), true),
+			TableName:      t.tableName,
+		}
+		output, err := t.ddb.GetItem(ctx, input)
+		if err != nil {
+			var notFoundErr *types.ResourceNotFoundException
+			if errors.As(err, &notFoundErr) {
+				return dataerr.PersistableNotFound(p.TypeName(), key).Wrap(err)
 			}
+
+			var apiErr smithy.APIError
+			if errors.As(err, &apiErr) {
+				switch apiErr.ErrorCode() {
+				case "RequestLimitExceeded", "ProvisionedThroughputExceededException":
+					return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(err)
+				}
+			}
+
+			return gomerr.Dependency("DynamoDB", input).Wrap(err)
 		}
 
-		return gomerr.Dependency("DynamoDB", input).Wrap(err)
-	}
+		if output.Item == nil {
+			return dataerr.PersistableNotFound(p.TypeName(), key)
+		}
 
-	if output.Item == nil {
-		return dataerr.PersistableNotFound(p.TypeName(), key)
-	}
+		err = attributevalue.UnmarshalMap(output.Item, p)
+		if err != nil {
+			return gomerr.Unmarshal(p.TypeName(), output.Item, p).Wrap(err)
+		}
 
-	err = attributevalue.UnmarshalMap(output.Item, p)
-	if err != nil {
-		return gomerr.Unmarshal(p.TypeName(), output.Item, p).Wrap(err)
-	}
-
-	// Populate key fields from composite keys
-	pt := t.persistableTypes[p.TypeName()]
-	if ge = pt.populateKeyFieldsFromAttributes(p, output.Item, t.indexes, t.valueSeparatorChar, t.validateKeyFieldConsistency); ge != nil {
-		return ge
+		// Populate key fields from composite keys
+		pt := t.persistableTypes[p.TypeName()]
+		if ge = pt.populateKeyFieldsFromAttributes(p, output.Item, t.indexes, t.valueSeparatorChar, t.validateKeyFieldConsistency); ge != nil {
+			return ge
+		}
 	}
 
 	// Check for nested Queryables (including auto-populated) and execute queries for each
@@ -435,6 +491,41 @@ func (t *table) Read(ctx context.Context, p data.Persistable) (ge gomerr.Gomerr)
 	}
 
 	return nil
+}
+
+var queryableType = reflect.TypeFor[data.Queryable]()
+var timeType = reflect.TypeFor[time.Time]()
+
+// copyFields copies field values from src to dst, skipping fields that implement Queryable or are tagged with
+// `structs:"ignore"`. It recurses into struct and pointer-to-struct fields to handle embedded types that may
+// contain skippable fields. Slices, maps, and interfaces are copied as-is without inspecting their contents.
+func copyFields(dst, src reflect.Value) {
+	for i := 0; i < dst.NumField(); i++ {
+		f := dst.Type().Field(i)
+		df := dst.Field(i)
+		sf := src.FieldByName(f.Name)
+
+		if !f.IsExported() || sf.IsZero() || f.Tag.Get("structs") == "ignore" || f.Type.Implements(queryableType) {
+			continue
+		}
+
+		switch f.Type.Kind() {
+		case reflect.Struct:
+			if f.Type == timeType {
+				df.Set(sf)
+			} else {
+				copyFields(df, sf)
+			}
+		case reflect.Ptr:
+			if f.Type.Elem().Kind() == reflect.Struct && !df.IsNil() && !sf.IsNil() && f.Type.Elem() != timeType {
+				copyFields(df.Elem(), sf.Elem())
+			} else {
+				df.Set(sf)
+			}
+		default:
+			df.Set(sf)
+		}
+	}
 }
 
 func (t *table) Delete(ctx context.Context, p data.Persistable) (ge gomerr.Gomerr) {
@@ -549,27 +640,9 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 // This is called from the constraint tool during put() operations.
 func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, fields []string) gomerr.Gomerr {
 	// Create queryable from persistable
-	q := p.NewQueryable()
-	if q == nil {
-		return gomerr.Configuration("unable to create queryable for uniqueness check").AddAttribute("Type", p.TypeName())
-	}
-
-	// Set consistency preference
-	if ct, ok := q.(ConsistencyTyper); ok {
-		ct.SetConsistencyType(Preferred)
-	}
-
-	// Copy field values from persistable to queryable
-	qv := reflect.ValueOf(q.ItemTemplate()).Elem()
-	pv := reflect.ValueOf(p).Elem()
-	for _, field := range fields {
-		qfv := qv.FieldByName(field)
-		pfv := pv.FieldByName(field)
-		if qfv.IsValid() && pfv.IsValid() {
-			if ge := flect.SetValue(qfv, pfv); ge != nil {
-				return gomerr.Configuration("unable to populate uniqueness").Wrap(ge)
-			}
-		}
+	q, ge := toQueryable(p, fields)
+	if ge != nil {
+		return ge
 	}
 
 	// Build query
@@ -589,7 +662,7 @@ func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, f
 
 		// If any results found, uniqueness violated
 		if len(output.Items) > 0 {
-			existing := reflect.New(pv.Type()).Interface().(data.Persistable)
+			existing := reflect.New(reflect.ValueOf(p).Elem().Type()).Interface().(data.Persistable)
 			pt := t.persistableTypes[p.TypeName()]
 
 			if err := attributevalue.UnmarshalMap(output.Items[0], existing); err != nil {
@@ -609,6 +682,32 @@ func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, f
 	}
 
 	return gomerr.Unprocessable("too many database checks to verify uniqueness constraint", p)
+}
+
+func toQueryable(p data.Persistable, fields []string) (data.Queryable, gomerr.Gomerr) {
+	q := p.NewQueryable()
+	if q == nil {
+		return nil, gomerr.Configuration("unable to create queryable for uniqueness check").AddAttribute("Type", p.TypeName())
+	}
+
+	// Set consistency preference
+	if ct, ok := q.(ConsistencyTyper); ok {
+		ct.SetConsistencyType(Preferred)
+	}
+
+	// Copy field values from persistable to queryable
+	qv := reflect.ValueOf(q.ItemTemplate()).Elem()
+	pv := reflect.ValueOf(p).Elem()
+	for _, field := range fields {
+		qfv := qv.FieldByName(field)
+		pfv := pv.FieldByName(field)
+		if qfv.IsValid() && pfv.IsValid() {
+			if ge := flect.SetValue(qfv, pfv); ge != nil {
+				return nil, gomerr.Configuration("unable to populate uniqueness").Wrap(ge)
+			}
+		}
+	}
+	return q, nil
 }
 
 type UniqueConstraint struct {

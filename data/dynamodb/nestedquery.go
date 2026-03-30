@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
 	"github.com/jt0/gomer/flect"
 
 	"github.com/jt0/gomer/data"
@@ -567,7 +568,6 @@ func nestedQueryables(a any) []nestedQueryableInfo { // TODO: tighten parameter 
 	}
 
 	t := v.Type()
-	queryableType := reflect.TypeOf((*data.Queryable)(nil)).Elem()
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
@@ -578,16 +578,10 @@ func nestedQueryables(a any) []nestedQueryableInfo { // TODO: tighten parameter 
 			continue
 		}
 
-		// Handle embedded anonymous structs recursively
-		if field.Anonymous && field.Type.Kind() == reflect.Struct {
-			embedded := nestedQueryables(fv)
-			result = append(result, embedded...)
-			continue
-		}
-
-		// Handle embedded pointer to struct
-		if field.Anonymous && field.Type.Kind() == reflect.Pointer && field.Type.Elem().Kind() == reflect.Struct {
-			if !fv.IsNil() {
+		// Handle embedded anonymous structs
+		if field.Anonymous {
+			if field.Type.Kind() == reflect.Struct ||
+				(field.Type.Kind() == reflect.Pointer && field.Type.Elem().Kind() == reflect.Struct && !fv.IsNil()) {
 				embedded := nestedQueryables(fv)
 				result = append(result, embedded...)
 			}
@@ -602,9 +596,7 @@ func nestedQueryables(a any) []nestedQueryableInfo { // TODO: tighten parameter 
 		}
 
 		// Check both direct and pointer implementation
-		implementsQueryable := fieldType.Implements(queryableType) ||
-			reflect.PointerTo(fieldType).Implements(queryableType)
-		if !implementsQueryable {
+		if !fieldType.Implements(queryableType) && !reflect.PointerTo(fieldType).Implements(queryableType) {
 			continue
 		}
 

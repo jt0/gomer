@@ -13,6 +13,12 @@ type CompositeKeyEntity struct {
 	Data         string
 	Status       string
 	Active       bool
+	Nested       *Nested
+}
+
+type Nested struct {
+	Foo string
+	Bar string
 }
 
 func (c *CompositeKeyEntity) TypeName() string             { return "CompositeKeyEntity" }
