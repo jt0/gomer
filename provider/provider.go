@@ -10,9 +10,9 @@ type Provider[T any] interface {
 	Provide(context.Context) (T, error)
 }
 
-// SingletonProvider offers thread-safe initialization of a value. When Provide is called, the result of calling Once
+// Singleton offers thread-safe initialization of a value. When Provide is called, the result of calling Once
 // is cached permanently.
-type SingletonProvider[T any] struct {
+type Singleton[T any] struct {
 	Once func(context.Context) (T, error)
 
 	once sync.Once
@@ -20,7 +20,7 @@ type SingletonProvider[T any] struct {
 	err  error
 }
 
-func (s *SingletonProvider[T]) Provide(ctx context.Context) (T, error) {
+func (s *Singleton[T]) Provide(ctx context.Context) (T, error) {
 	s.once.Do(func() {
 		s.t, s.err = s.Once(ctx)
 	})
