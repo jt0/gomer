@@ -19,7 +19,7 @@ func RegisterStashFieldFunction(name, sourceKey string, include InclusionPredica
 		sdv := reflect.ValueOf(stashData)
 		// TODO:p3 sources other than maps, such as a struct or slice.
 		if sdv.Kind() != reflect.Map {
-			return nil, gomerr.Unprocessable("Expected data map", sdv.Type().String())
+			return nil, gomerr.Unprocessable("expected data map", sdv.Type().String())
 		}
 
 		out := make(map[string]any)

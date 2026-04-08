@@ -37,7 +37,7 @@ func b64DecodeFunction(encoding *b64.Encoding) structs.ToolFunction {
 		decoded := make([]byte, encoding.DecodedLen(len(bytes)))
 		n, err := encoding.Decode(decoded, bytes)
 		if err != nil {
-			return nil, gomerr.Unprocessable("Unable to base64 decode the given data", bytes).Wrap(err)
+			return nil, gomerr.Unprocessable("unable to base64 decode the given data", bytes).Wrap(err)
 		}
 
 		return decoded[:n], nil
@@ -52,7 +52,7 @@ func b64EncodeFunction(encoding *b64.Encoding) structs.ToolFunction {
 
 		bytes, ok := fv.Interface().([]byte)
 		if !ok {
-			return nil, gomerr.Unprocessable("Field type must be '[]byte'", fv.Type().String())
+			return nil, gomerr.Unprocessable("field type must be '[]byte'", fv.Type().String())
 		}
 
 		return encoding.EncodeToString(bytes), nil

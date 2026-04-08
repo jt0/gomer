@@ -18,7 +18,7 @@ func (f ToolFunction) Apply(sv reflect.Value, fv reflect.Value, tc ToolContext) 
 	}
 
 	if ge = flect.SetValue(fv, value); ge != nil {
-		return gomerr.Configuration("Unable to set field to function result").AddAttribute("FunctionResult", value).Wrap(ge)
+		return gomerr.Configuration("unable to set field to function result").AddAttribute("result", value).Wrap(ge)
 	}
 
 	return nil
@@ -40,11 +40,11 @@ func RegisterToolFunctions(functions map[string]ToolFunction) gomerr.Gomerr {
 
 func RegisterToolFunction(name string, function ToolFunction) gomerr.Gomerr {
 	if len(name) < 2 {
-		return gomerr.Configuration("Field function names must start with a '$' symbol and be between 2 and 64 characters long")
+		return gomerr.Configuration("field function names must start with a '$' symbol and be between 2 and 64 characters long")
 	} else if name[0] != '$' || len(name) > 64 {
-		return gomerr.Configuration("Field function names must start with a '$' symbol and be between 2 and 64 characters long")
+		return gomerr.Configuration("field function names must start with a '$' symbol and be between 2 and 64 characters long")
 	} else if name[1] == '_' && !strings.HasPrefix(reflect.TypeOf(function).PkgPath(), "github.com/jt0/gomer") {
-		return gomerr.Configuration("Field function names cannot start with '$_'")
+		return gomerr.Configuration("field function names cannot start with '$_'")
 	}
 
 	putToolFunction(name, function)

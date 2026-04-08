@@ -63,7 +63,7 @@ func BuildRoutes(registry *resource.Registry, middleware ...func(http.Handler) h
 	// Register catchall handler for unmatched routes
 	mux.Handle("/", noRouteHandler())
 
-	return withMiddleware(registry, mux, nil, middleware)
+	return withMiddleware(registry, mux, middleware)
 }
 
 // noRouteHandler returns a handler for requests that don't match any registered route.
@@ -75,7 +75,7 @@ func noRouteHandler() http.Handler {
 			defer rw.writeTo(w)
 		}
 
-		rw.WriteError(gomerr.NotFound("Route", r.Method+" "+r.URL.Path))
+		rw.WriteError(gomerr.NotFound("route", r.Method+" "+r.URL.Path))
 	})
 }
 

@@ -65,7 +65,7 @@ func (c *constraint) updateTarget(validationTarget string, ge gomerr.Gomerr) gom
 	nse := gomerr.ErrorAs[*NotSatisfiedError](ge)
 	if nse != nil {
 		target = nse.Target
-	} else if ta, ok := ge.AttributeLookup("Target"); ok {
+	} else if ta, ok := ge.AttributeLookup("target"); ok {
 		target = ta.(string)
 	} // else target == ""
 
@@ -82,7 +82,7 @@ func (c *constraint) updateTarget(validationTarget string, ge gomerr.Gomerr) gom
 	}
 
 	if nse == nil {
-		return ge.ReplaceAttribute("Target", target)
+		return ge.ReplaceAttribute("target", target)
 	}
 
 	nse.Target = target

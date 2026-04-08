@@ -45,7 +45,7 @@ func resolver(pt reflect.Type) func(any) (any, gomerr.Gomerr) {
 	return func(i any) (any, gomerr.Gomerr) {
 		m, ok := i.(map[string]types.AttributeValue)
 		if !ok {
-			return nil, gomerr.Internal("dynamodb item is not a map[string]types.AttributeValue").AddAttribute("Actual", i)
+			return nil, gomerr.Internal("dynamodb item is not a map[string]types.AttributeValue").AddAttribute("actual", i)
 		}
 
 		resolved := reflect.New(pt).Interface().(data.Persistable)
@@ -94,7 +94,7 @@ func (pt *persistableType) processConstraintsTag(fieldName string, tag string, e
 
 	constraints := constraintsRegexp.FindAllStringSubmatch(tag, -1)
 	if constraints == nil {
-		return append(errors, gomerr.Configuration("invalid `db.constraints` value: "+tag).AddAttribute("Field", fieldName))
+		return append(errors, gomerr.Configuration("invalid `db.constraints` value: "+tag).AddAttribute("field", fieldName))
 	}
 
 	for _, c := range constraints {
@@ -126,12 +126,12 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 	for _, keyStatement := range strings.Split(strings.ReplaceAll(tag, " ", ""), ",") {
 		groups := ddbKeyStatementRegexp.FindStringSubmatch(keyStatement)
 		if groups == nil {
-			return append(errors, gomerr.Configuration("invalid `db.keys` value: "+keyStatement).AddAttribute("Field", fieldName))
+			return append(errors, gomerr.Configuration("invalid `db.keys` value: "+keyStatement).AddAttribute("field", fieldName))
 		}
 
 		idx, ok := indexes[groups[3]]
 		if !ok {
-			return append(errors, gomerr.Configuration(fmt.Sprintf("undefined index: %s", groups[3])).AddAttribute("Field", fieldName))
+			return append(errors, gomerr.Configuration(fmt.Sprintf("undefined index: %s", groups[3])).AddAttribute("field", fieldName))
 		}
 
 		var key *keyAttribute
@@ -313,7 +313,7 @@ func (pt *persistableType) populateKeyFieldsFromAttributes(p data.Persistable, a
 
 				// Convert string to appropriate type and set using flect
 				if ge := flect.SetValue(field, valueToSet); ge != nil {
-					return gomerr.Unmarshal(pt.name, av, p).AddAttribute("Field", kf.name).AddAttribute("Value", segmentValue).Wrap(ge)
+					return gomerr.Unmarshal(pt.name, av, p).AddAttribute("field", kf.name).AddAttribute("value", segmentValue).Wrap(ge)
 				}
 
 				populated[kf.name] = &populatedFieldInfo{value: segmentValue, keyName: keyAttr.name}

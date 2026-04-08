@@ -13,7 +13,7 @@ func TestPathName_NoAncestors(t *testing.T) {
 		expected string
 	}{
 		{"simple type", "Extension", "Extension"},
-		{"plural type", "Droplets", "Droplets"},
+		{"plural type", "Associations", "Associations"},
 	}
 
 	for _, tt := range tests {

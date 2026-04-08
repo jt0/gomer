@@ -79,7 +79,7 @@ func BindToResponse(result reflect.Value, header http.Header, scope string, acce
 	marshal, ok := responseConfig.perContentTypeMarshalFunctions[contentType]
 	if !ok {
 		if responseConfig.defaultMarshalFunction == nil {
-			// TODO: Previously returned error: gomerr.Marshal("Unsupported Accepts content type", contentType)
+			// TODO: Previously returned error: gomerr.Marshal("unsupported Accepts content type", contentType)
 			// Consider logging or otherwise handling this error
 			return nil, http.StatusNotAcceptable
 		}
@@ -94,7 +94,7 @@ func BindToResponse(result reflect.Value, header http.Header, scope string, acce
 
 	bytes, err := marshal(outMap)
 	if err != nil {
-		// TODO: Previously returned error: gomerr.Marshal("Unable to marshal data", outMap).AddAttribute("ContentType", contentType).Wrap(err)
+		// TODO: Previously returned error: gomerr.Marshal("unable to marshal data", outMap).AddAttribute("contentType", contentType).Wrap(err)
 		// Consider logging or otherwise handling this error (includes contentType and err details)
 		return nil, http.StatusInternalServerError
 	}
@@ -118,7 +118,7 @@ func (bindToResponseExtension) Applier(structType reflect.Type, structField refl
 		return bindResponseHeaderApplier{headerName}, nil
 	} else if directive == responseConfig.BindBody {
 		if structField.Type != byteSliceType {
-			return nil, gomerr.Configuration("Body field must be of type []byte, not: " + structField.Type.String())
+			return nil, gomerr.Configuration("body field must be of type []byte, not: " + structField.Type.String())
 		}
 		return bodyOutApplier{}, nil
 	}
@@ -184,7 +184,7 @@ func (b bindResponseHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc s
 		if marshaler, ok := val.(Marshaler); ok {
 			marshaled, err := marshaler.Marshal()
 			if err != nil {
-				return gomerr.Marshal("FieldValue", fv).Wrap(err)
+				return gomerr.Marshal("value", fv).Wrap(err)
 			}
 			headerVal = string(marshaled)
 		} else if stringer, ok := val.(fmt.Stringer); ok {

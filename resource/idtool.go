@@ -1,8 +1,8 @@
 package resource
 
 import (
-	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/jt0/gomer/gomerr"
@@ -40,7 +40,7 @@ func (idTool) Applier(st reflect.Type, sf reflect.StructField, directive string,
 		directive = parts[0]
 		typeName = parts[1]
 	} else {
-		return nil, gomerr.Configuration(fmt.Sprintf("Only one explicit type name may be specified, found %d in %s", len(parts)-1, directive))
+		return nil, gomerr.Configuration("only one explicit type name may be specified, found " + strconv.Itoa(len(parts)-1) + " in " + directive)
 	}
 
 	applier := copyIdsApplier{hidden: make(map[string]bool)}
@@ -69,7 +69,7 @@ func (idTool) Applier(st reflect.Type, sf reflect.StructField, directive string,
 
 	if sa, exists := structIdFields[typeName]; exists {
 		if !reflect.DeepEqual(*sa, applier) {
-			return nil, gomerr.Configuration("Already have an id attribute specified for this struct: " + sa.idFields[0])
+			return nil, gomerr.Configuration("already have an id attribute specified for this struct: " + sa.idFields[0])
 		}
 	} else {
 		structIdFields[typeName] = &applier
@@ -90,7 +90,7 @@ type copyIdsApplier struct {
 func (a copyIdsApplier) Apply(sv reflect.Value, _ reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	sourceValue, ok := tc.Lookup(SourceValue)
 	if !ok {
-		return gomerr.Configuration("Missing source for ids to copy")
+		return gomerr.Configuration("missing source for ids to copy")
 	}
 
 	source, ok := sourceValue.(reflect.Value)
@@ -104,7 +104,7 @@ func (a copyIdsApplier) Apply(sv reflect.Value, _ reflect.Value, tc structs.Tool
 	for _, idField := range a.idFields {
 		svf := sv.FieldByName(idField)
 		if !svf.IsValid() || !svf.CanSet() {
-			return gomerr.Unprocessable("Field is invalid: ", idField)
+			return gomerr.Unprocessable("field is invalid: ", idField)
 		}
 		svf.Set(source.FieldByName(idField))
 	}
@@ -120,13 +120,13 @@ func Id(sv reflect.Value) (string, gomerr.Gomerr) {
 
 		idfa, ok = structIdFields[sv.Type().String()]
 		if !ok {
-			return "", gomerr.Unprocessable("Unprocessed type or no field marked as an 'id'", sv.Type().String())
+			return "", gomerr.Unprocessable("unprocessed type or no field marked as an 'id'", sv.Type().String())
 		}
 	}
 
 	fv := sv.FieldByName(idfa.idFields[0])
 	if !fv.IsValid() {
-		return "", gomerr.Unprocessable("Provided struct's 'id' field is not valid", idfa.idFields[0])
+		return "", gomerr.Unprocessable("provided struct's 'id' field is not valid", idfa.idFields[0])
 	}
 
 	if idfa.hidden[idfa.idFields[0]] {
@@ -136,9 +136,9 @@ func Id(sv reflect.Value) (string, gomerr.Gomerr) {
 	switch t := fv.Interface().(type) {
 	case string:
 		return t, nil
-	case fmt.Stringer:
+	case interface{ String() string }:
 		return t.String(), nil
 	default:
-		return "", gomerr.Unprocessable("Id value does not provide a string representation", t)
+		return "", gomerr.Unprocessable("id value does not provide a string representation", t)
 	}
 }

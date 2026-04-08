@@ -2,13 +2,14 @@ package gomerr
 
 type ConflictError struct {
 	Gomerr
-	With    any
+	With    string
+	Id      string
 	Problem string
 	Source  any
 }
 
-func Conflict(with any, problem string) *ConflictError {
-	return Build(new(ConflictError), with, problem).(*ConflictError)
+func Conflict(with, id, problem string) *ConflictError {
+	return Build(new(ConflictError), with, id, problem).(*ConflictError)
 }
 
 func (c *ConflictError) WithSource(source any) *ConflictError {

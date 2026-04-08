@@ -99,7 +99,7 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 	// Validate separator is in printable range and can have an escape character
 	if t.valueSeparatorChar <= 32 || t.valueSeparatorChar >= 126 {
 		return nil, gomerr.Configuration("ValueSeparatorChar must be > 32 (space) and < 126 (tilde)").
-			AddAttribute("ValueSeparatorChar", t.valueSeparatorChar)
+			AddAttribute("char", t.valueSeparatorChar)
 	}
 
 	// Escape character is the next ASCII character after the separator
@@ -141,7 +141,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 	if err != nil {
 		var notFoundErr *types.ResourceNotFoundException
 		if errors.As(err, &notFoundErr) {
-			return gomerr.Unprocessable("Table", *t.tableName).Wrap(err)
+			return gomerr.Unprocessable("table", *t.tableName).Wrap(err)
 		}
 
 		return gomerr.Dependency("DynamoDB", input).Wrap(err)
@@ -223,7 +223,7 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 	t.constraintTool = NewConstraintTool(t)
 	for _, p := range persistables {
 		if ge := structs.Preprocess(p, t.constraintTool); ge != nil {
-			return ge.AddAttribute("TypeName", p.TypeName())
+			return ge.AddAttribute("typeName", p.TypeName())
 		}
 	}
 
@@ -369,7 +369,7 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 		var condCheckErr *types.ConditionalCheckFailedException
 		if errors.As(err, &condCheckErr) {
 			if ensureUniqueId {
-				return gomerr.Internal("Unique id check failed, retry with a new id value").Wrap(err)
+				return gomerr.Internal("unique id check failed, retry with a new id value").Wrap(err)
 			} else {
 				return gomerr.Dependency("DynamoDB", input).Wrap(err)
 			}
@@ -439,7 +439,7 @@ func (t *table) Read(ctx context.Context, p data.Persistable) (ge gomerr.Gomerr)
 		if len(results) == 0 {
 			return dataerr.PersistableNotFound(p.TypeName(), key)
 		} else if len(results) > 1 {
-			return gomerr.Conflict(p.TypeName(), "multiple matches found").AddAttribute("queryable", q)
+			return gomerr.Conflict(p.TypeName(), "", "multiple_matches")
 		}
 
 		copyFields(reflect.ValueOf(p).Elem(), reflect.ValueOf(results[0]).Elem())
@@ -607,7 +607,7 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 
 	nt, ge := t.nextTokenizer.tokenize(ctx, q, output.LastEvaluatedKey)
 	if ge != nil {
-		return gomerr.Internal("Unable to generate nextToken").Wrap(ge)
+		return gomerr.Internal("unable to generate nextToken").Wrap(ge)
 	}
 
 	items := make([]any, len(output.Items))
@@ -662,15 +662,25 @@ func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, f
 
 		// If any results found, uniqueness violated
 		if len(output.Items) > 0 {
-			existing := reflect.New(reflect.ValueOf(p).Elem().Type()).Interface().(data.Persistable)
+			output.Items = output.Items[:1] // only want the first
+			item := output.Items[0]
 			pt := t.persistableTypes[p.TypeName()]
 
-			if err := attributevalue.UnmarshalMap(output.Items[0], existing); err != nil {
-				return gomerr.Configuration("unable to unmarshal existing record").Wrap(err)
-			} else if ge = pt.populateKeyFieldsFromAttributes(existing, output.Items[0], t.indexes, t.valueSeparatorChar, false); ge != nil {
+			var existing any
+			if existing, ge = pt.resolver(item); ge != nil {
 				return ge
 			}
-			return constraint.NotSatisfied(p).AddAttribute("Existing", existing)
+
+			// Populate key fields from composite keys
+			if pe, ok := existing.(data.Persistable); ok {
+				if ge = pt.populateKeyFieldsFromAttributes(pe, item, t.indexes, t.valueSeparatorChar, t.validateKeyFieldConsistency); ge != nil {
+					return ge
+				}
+			}
+
+			q.SetResults([]any{existing})
+
+			return constraint.NotSatisfied(p).AddAttribute("existing", existing)
 		}
 
 		// No more pages, confirmed unique
@@ -687,7 +697,7 @@ func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, f
 func toQueryable(p data.Persistable, fields []string) (data.Queryable, gomerr.Gomerr) {
 	q := p.NewQueryable()
 	if q == nil {
-		return nil, gomerr.Configuration("unable to create queryable for uniqueness check").AddAttribute("Type", p.TypeName())
+		return nil, gomerr.Configuration("unable to create queryable for uniqueness check").AddAttribute("type", p.TypeName())
 	}
 
 	// Set consistency preference
@@ -851,9 +861,9 @@ func (t *table) runQuery(ctx context.Context, input *dynamodb.QueryInput) (*dyna
 		var notFoundErr *types.ResourceNotFoundException
 		if errors.As(err, &notFoundErr) {
 			if input.IndexName != nil {
-				return nil, gomerr.Unprocessable("Table Index", *input.IndexName).Wrap(err)
+				return nil, gomerr.Unprocessable("table Index", *input.IndexName).Wrap(err)
 			} else {
-				return nil, gomerr.Unprocessable("Table", *t.tableName).Wrap(err)
+				return nil, gomerr.Unprocessable("table", *t.tableName).Wrap(err)
 			}
 		}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strconv"
 
 	. "github.com/jt0/gomer/api/http"
@@ -12,17 +13,12 @@ import (
 )
 
 // withMiddleware wraps a ServeMux with middleware and sets up the ResponseWriter buffering
-func withMiddleware(registry *resource.Registry, mux *http.ServeMux, gomerrRenderer func(gomerr.Gomerr) StatusCoder, middleware []func(http.Handler) http.Handler) http.Handler {
+func withMiddleware(registry *resource.Registry, mux *http.ServeMux, middleware []func(http.Handler) http.Handler) http.Handler {
 	// Outermost middleware that initializes ResponseWriter and finalizes response.
 	outer := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Initialize buffered response writer
 			rw := &ResponseWriter{}
-
-			// Add gomerr renderer if provided
-			if gomerrRenderer != nil {
-				rw.errRenderers = []ErrRenderer{gomerrErrRenderer(gomerrRenderer, r)}
-			}
 
 			// Call middleware chain with response writer and registry
 			next.ServeHTTP(rw, r.WithContext(context.WithValue(r.Context(), resource.RegistryCtxKey, registry)))
@@ -36,14 +32,27 @@ func withMiddleware(registry *resource.Registry, mux *http.ServeMux, gomerrRende
 	return chain(append([]func(http.Handler) http.Handler{outer}, middleware...)...)(mux)
 }
 
-func gomerrErrRenderer(gomerrRenderer func(gomerr.Gomerr) StatusCoder, r *http.Request) ErrRenderer {
-	return func(w http.ResponseWriter, err error) bool {
-		if ge := gomerr.ErrorAs[gomerr.Gomerr](err); ge != nil {
-			rendered := gomerrRenderer(ge)
-			renderResult(rendered, w, r, "", rendered.StatusCode())
-			return true
-		}
-		return false
+// RenderErrorMiddleware returns middleware that renders gomerr errors using the provided renderer function.
+// The renderer maps gomerr types to StatusCoder implementations (e.g., AWS exception structs) which are
+// then serialized to the response using BindToResponse.
+func RenderErrorMiddleware(renderer func(gomerr.Gomerr) StatusCoder) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+
+			rw, ok := w.(*ResponseWriter)
+			if !ok || rw.err == nil {
+				return
+			}
+
+			if ge := gomerr.ErrorAs[gomerr.Gomerr](rw.err); ge != nil {
+				rendered := renderer(ge)
+				bytes, statusCode := BindToResponse(reflect.ValueOf(rendered), rw.Header(), "", r.Header.Get("Accept-Language"), rendered.StatusCode())
+				rw.statusCode = statusCode
+				rw.body = bytes
+				rw.err = nil
+			}
+		})
 	}
 }
 
@@ -72,7 +81,7 @@ func Serve(handler http.Handler, optFns ...func(*Options)) {
 	}
 
 	// log.Info("Serving on: {}", o.Port)
-	println("Serving on:", "localhost:"+strconv.Itoa(int(o.Port)))
+	println("serving on", "localhost:"+strconv.Itoa(int(o.Port)))
 	err := http.ListenAndServe("localhost:"+strconv.Itoa(int(o.Port)), handler)
 
 	var shutdownInfo string
@@ -81,7 +90,7 @@ func Serve(handler http.Handler, optFns ...func(*Options)) {
 	} else {
 		shutdownInfo = " cleanly"
 	}
-	// log.Error("Server shutdown{}", shutdownInfo)
+	// log.Error("server shutdown{}", shutdownInfo)
 	println("server shutdown", shutdownInfo)
 }
 
@@ -101,15 +110,12 @@ func Port(p string) func(*Options) {
 	}
 }
 
-type ErrRenderer = func(w http.ResponseWriter, err error) bool
-
 // ResponseWriter buffers the response and supports error rendering
 type ResponseWriter struct {
-	statusCode   int
-	header       http.Header
-	body         []byte
-	err          error
-	errRenderers []ErrRenderer
+	statusCode int
+	header     http.Header
+	body       []byte
+	err        error
 }
 
 func (rw *ResponseWriter) Header() http.Header {
@@ -128,35 +134,27 @@ func (rw *ResponseWriter) WriteHeader(statusCode int) {
 	rw.statusCode = statusCode
 }
 
-func (rw *ResponseWriter) WriteError(err error, optionalRenderers ...ErrRenderer) {
-	if len(optionalRenderers) > 0 {
-		rw.errRenderers = append(rw.errRenderers, optionalRenderers...)
-	}
+func (rw *ResponseWriter) WriteError(err error) {
 	rw.err = err
 }
 
 func (rw *ResponseWriter) writeTo(w http.ResponseWriter) {
-	// Check for errors and render if present
+	// If an error remains unhandled by middleware, use the default renderer
 	if rw.err != nil {
-		for _, render := range rw.errRenderers {
-			if render(w, rw.err) {
-				return
-			}
-		}
-		// Default error rendering
 		defaultErrorRenderer(w, rw.err)
 		return
 	}
 
-	// Write buffered response
 	if len(rw.header) > 0 {
 		for h, hv := range rw.header {
 			w.Header()[h] = hv
 		}
 	}
+
 	if rw.statusCode != 0 {
 		w.WriteHeader(rw.statusCode)
 	}
+
 	w.Write(rw.body)
 }
 
@@ -166,14 +164,14 @@ func defaultErrorRenderer(w http.ResponseWriter, err error) {
 
 	// TODO: add flag to output details only if running in non-prod
 
-	if ge, ok := err.(gomerr.Gomerr); ok {
+	if ge := gomerr.ErrorAs[gomerr.Gomerr](err); ge != nil {
 		println(ge.String())
-		w.Write([]byte(ge.String()))
+		w.Write([]byte(ge.Error()))
 		return
 	}
 
 	var m map[string]any
-	if me := json.Unmarshal([]byte(err.Error()), m); me != nil {
+	if me := json.Unmarshal([]byte(err.Error()), &m); me != nil {
 		escaped, _ := json.Marshal(err.Error())
 		w.Write([]byte("{\"error\": " + string(escaped) + "}"))
 	} else {

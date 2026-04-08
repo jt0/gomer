@@ -29,8 +29,8 @@ func And(constraints ...Constraint) Constraint {
 						nse.Constraint = operand
 					}
 				} else {
-					if _, ok = ge.AttributeLookup("Constraint"); !ok {
-						ge = ge.AddAttribute("Constraint", operand)
+					if _, ok = ge.AttributeLookup("constraint"); !ok {
+						ge = ge.AddAttribute("constraint", operand)
 					}
 				}
 				return ge
@@ -68,8 +68,8 @@ func Or(constraints ...Constraint) Constraint {
 					nse.Constraint = operand
 				}
 			} else {
-				if _, ok = ge.AttributeLookup("Constraint"); !ok {
-					ge = ge.AddAttribute("Constraint", operand)
+				if _, ok = ge.AttributeLookup("constraint"); !ok {
+					ge = ge.AddAttribute("constraint", operand)
 				}
 			}
 

@@ -16,6 +16,7 @@ const (
 
 // Built-in, field-scoped AccessPrincipals. Additional principals can be specified by calling
 // RegisterFieldAccessPrincipals
+//
 //goland:noinspection GoUnusedGlobalVariable
 var (
 	ReadWriteAllFields = AccessPrincipal{ReadWriteAll, fieldAccessPrincipal}
@@ -51,9 +52,8 @@ func RegisterFieldAccessPrincipals(accessPrincipals ...AccessPrincipal) {
 // AccessPrincipal registration can either be done per scope, or a single function can be provided. In the latter
 // case, the logic will need to be updated to deal w/ mixed scopes per call.
 const (
-	fieldAccessScope accessScope = "Field"
-
-	fieldAccessPrincipal = fieldAccessScope + "AccessPrincipal"
+	fieldAccessScope     accessScope = "field"
+	fieldAccessPrincipal             = fieldAccessScope + "AccessPrincipal"
 )
 
 type accessScope = PrincipalType

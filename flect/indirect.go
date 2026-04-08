@@ -63,9 +63,9 @@ func IndirectValue(v any, mustSet bool) (reflect.Value, gomerr.Gomerr) {
 
 	vv = reflect.Indirect(vv)
 	if !vv.IsValid() {
-		return vv, gomerr.Unprocessable("Value is not valid", v)
+		return vv, gomerr.Unprocessable("value is not valid", v)
 	} else if mustSet && !vv.CanSet() {
-		return vv, gomerr.Unprocessable("Value is not settable", v)
+		return vv, gomerr.Unprocessable("value is not settable", v)
 	}
 	return vv, nil
 }

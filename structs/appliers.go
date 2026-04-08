@@ -23,7 +23,7 @@ func (a StructApplier) Apply(sv reflect.Value, fv reflect.Value, _ ToolContext) 
 	}
 
 	if ge = flect.SetValue(fv, value); ge != nil {
-		return gomerr.Configuration("Unable to set value").AddAttributes("Source", a.Source, "Value", value).Wrap(ge)
+		return gomerr.Configuration("unable to set value").AddAttributes("source", a.Source, "value", value).Wrap(ge)
 	}
 
 	return nil
@@ -35,14 +35,14 @@ func ValueFromStruct(sv reflect.Value, fv reflect.Value, source string) (any, go
 	}
 
 	if len(source) < 3 || source[0:2] != "$." {
-		return nil, gomerr.Configuration("Unexpected source format (expected field/function name with '$.' prefix): " + source)
+		return nil, gomerr.Configuration("unexpected source format (expected field/function name with '$.' prefix): " + source)
 	}
 
 	source = source[2:]
 	if source[len(source)-1] == ')' {
 		m := sv.MethodByName(source[0:strings.IndexByte(source, '(')])
 		if !m.IsValid() {
-			return nil, gomerr.Configuration("Source method not found").AddAttribute("Source", source)
+			return nil, gomerr.Configuration("source method not found").AddAttribute("source", source)
 		}
 
 		var in []reflect.Value
@@ -56,7 +56,7 @@ func ValueFromStruct(sv reflect.Value, fv reflect.Value, source string) (any, go
 
 	f := sv.FieldByName(source)
 	if !f.IsValid() {
-		return nil, gomerr.Configuration("Source field not found").AddAttribute("Source", source)
+		return nil, gomerr.Configuration("source field not found").AddAttribute("source", source)
 	}
 
 	if f.Kind() == reflect.Ptr && f.IsNil() && source == "Attributes" {
@@ -86,7 +86,7 @@ func (a ValueApplier) Apply(_ reflect.Value, fv reflect.Value, _ ToolContext) go
 		staticValue = a.StaticValue
 	}
 	if ge := flect.SetValue(fv, staticValue); ge != nil {
-		return gomerr.Configuration("Unable to set field to value").AddAttribute("Value", a.StaticValue).Wrap(ge)
+		return gomerr.Configuration("unable to set field to value").AddAttribute("value", a.StaticValue).Wrap(ge)
 	}
 
 	return nil

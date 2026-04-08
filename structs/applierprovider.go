@@ -25,7 +25,7 @@ func ExpressionApplierProvider(_ reflect.Type, sf reflect.StructField, directive
 	} else {
 		tf := GetToolFunction(directive) // include the '$'
 		if tf == nil {
-			return nil, gomerr.Configuration("Field function not found: " + directive)
+			return nil, gomerr.Configuration("field function not found: " + directive)
 		}
 		return tf, nil
 	}
@@ -92,7 +92,7 @@ func applyScopes(ap ApplierProvider, structType reflect.Type, structField reflec
 
 		applier, ge := ap.Applier(structType, structField, scopedDirective, scope)
 		if ge != nil {
-			return nil, ge.AddAttribute("Scope", scope)
+			return nil, ge.AddAttribute("scope", scope)
 		} else if applier != nil {
 			appliers[scope] = applier
 		} else if scope != anyScope {
@@ -150,7 +150,7 @@ func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructF
 	if lhs := directive[:tIndex]; len(lhs) > 0 {
 		left, leftGe = applyScopes(tool.applierProvider, st, sf, lhs)
 		if _, ok := leftGe.(*gomerr.ConfigurationError); leftGe != nil && !ok {
-			leftGe = gomerr.Configuration(fmt.Sprintf("Unable to process directive: %s", directive)).Wrap(leftGe)
+			leftGe = gomerr.Configuration("unable to process directive: " + directive).Wrap(leftGe)
 		}
 	}
 	var right Applier
@@ -158,7 +158,7 @@ func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructF
 	if rhs := directive[tIndex+1:]; len(rhs) > 0 {
 		right, rightGe = applyScopes(tool.applierProvider, st, sf, rhs)
 		if _, ok := rightGe.(*gomerr.ConfigurationError); rightGe != nil && !ok {
-			rightGe = gomerr.Configuration(fmt.Sprintf("Unable to process directive: %s", directive)).Wrap(rightGe)
+			rightGe = gomerr.Configuration(fmt.Sprintf("unable to process directive: %s", directive)).Wrap(rightGe)
 		}
 	}
 	if ge := gomerr.Batch(leftGe, rightGe); ge != nil || (left == nil && right == nil) {

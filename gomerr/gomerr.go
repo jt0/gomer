@@ -166,7 +166,7 @@ func (g *gomerr) DeleteAttribute(key string) Gomerr {
 
 func (g *gomerr) AddAttributes(keysAndValues ...any) Gomerr {
 	if len(keysAndValues)%2 != 0 {
-		return Configuration("AddAttributes() requires an even number of arguments for keysAndValues").AddAttributes("Input", keysAndValues, "TargetedError", g)
+		return Configuration("AddAttributes() requires an even number of arguments for keysAndValues").AddAttributes("input", keysAndValues, "target", g)
 	}
 
 	for i := 0; i < len(keysAndValues); i += 2 {

@@ -15,13 +15,13 @@ import (
 func ApplyTools(v any, tc ToolContext, tools ...*Tool) gomerr.Gomerr {
 	vv, ge := flect.IndirectValue(v, false)
 	if ge != nil {
-		return gomerr.Unprocessable("Unable to apply tools to invalid value", v).Wrap(ge)
+		return gomerr.Unprocessable("unable to apply tools to invalid value", v).Wrap(ge)
 	}
 
 	vt := vv.Type()
 	vts := vt.String()
 	if vt.Kind() != reflect.Struct {
-		return gomerr.Configuration("Can only apply tools to struct (or pointer to struct) types").AddAttribute("Type", vts)
+		return gomerr.Configuration("can only apply tools to struct (or pointer to struct) types").AddAttribute("type", vts)
 	}
 
 	ps, ok := preparedStructs[vts]
@@ -41,7 +41,7 @@ func Preprocess(v any, tools ...*Tool) gomerr.Gomerr {
 	vt := flect.IndirectType(v)
 	ps, errors := process(vt, tools...)
 	if ps == nil {
-		return gomerr.Configuration("Invalid type: must be a struct or pointer to struct").AddAttribute("Type", vt.String())
+		return gomerr.Configuration("invalid type: must be a struct or pointer to struct").AddAttribute("type", vt.String())
 	}
 	return gomerr.Batcher(errors)
 }
@@ -243,19 +243,19 @@ func (ps *preparedStruct) applyTools(sv reflect.Value, tc ToolContext, tools ...
 			fv := sv.FieldByName(f.name) // fv should always be valid
 			if ge := applier.Apply(sv, fv, tc); ge != nil {
 				var fieldName string
-				if keyAttr, exists := ge.AttributeLookup("Key"); !exists {
+				if keyAttr, exists := ge.AttributeLookup("key"); !exists {
 					fieldName = f.name
 				} else if key := keyAttr.(string); len(key) > 0 {
 					fieldName = f.name + "." + key
-					_ = ge.DeleteAttribute("Key")
+					_ = ge.DeleteAttribute("key")
 				} else {
 					fieldName = f.name
 				}
 
-				if fieldAttr, exists := ge.AttributeLookup("Field"); exists {
-					_ = ge.ReplaceAttribute("Field", fieldName+"."+fieldAttr.(string))
+				if fieldAttr, exists := ge.AttributeLookup("field"); exists {
+					_ = ge.ReplaceAttribute("field", fieldName+"."+fieldAttr.(string))
 				} else {
-					_ = ge.AddAttribute("Field", fieldName)
+					_ = ge.AddAttribute("field", fieldName)
 				}
 
 				errors = append(errors, ge)

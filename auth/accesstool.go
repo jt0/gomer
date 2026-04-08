@@ -78,9 +78,9 @@ func (ap accessApplierProvider) Applier(_ reflect.Type, sf reflect.StructField, 
 	// If a field has defined no access permissions (by it being absent or via the empty string), we bypass the error
 	// and the resulting (empty) fieldPermissions will deny access to all registered principals.
 	if ppPermissionsCount > 0 && ppPermissionsCount != len(fieldAccessPrincipalIndexes) {
-		return nil, gomerr.Configuration("Incorrect number of 'access' AccessPermissions").
-			AddAttribute("Expected", len(fieldAccessPrincipalIndexes)).
-			AddAttribute("Actual", len(perPrincipalPermissions))
+		return nil, gomerr.Configuration("incorrect number of 'access' AccessPermissions").
+			AddAttribute("expected", len(fieldAccessPrincipalIndexes)).
+			AddAttribute("actual", len(perPrincipalPermissions))
 	}
 
 	var fieldPermissions principalPermissions
@@ -110,7 +110,7 @@ func (ap accessApplierProvider) Applier(_ reflect.Type, sf reflect.StructField, 
 		}
 
 		if i > 0 && provides || provided && writable(principalAccess) {
-			return nil, gomerr.Configuration("To provide Principal permissions (other than the leftmost) cannot specify 'p'." +
+			return nil, gomerr.Configuration("to provide Principal permissions (other than the leftmost) cannot specify 'p'." +
 				" If 'p' was correctly specified, all other principals must indicate '-' for their write permissions.")
 		}
 
@@ -164,7 +164,7 @@ type remover struct {
 func (r remover) do(fv reflect.Value, aa accessApplier, _ structs.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
-			ge = gomerr.Unprocessable("Unable to remove non-writable field", r)
+			ge = gomerr.Unprocessable("unable to remove non-writable field", r)
 		}
 	}()
 
@@ -183,7 +183,7 @@ type copyProvided reflect.Value
 func (cf copyProvided) do(fv reflect.Value, aa accessApplier, _ structs.ToolContext) (ge gomerr.Gomerr) {
 	defer func() {
 		if r := recover(); r != nil {
-			ge = gomerr.Unprocessable("Unable to copy field", r)
+			ge = gomerr.Unprocessable("unable to copy field", r)
 		}
 	}()
 

@@ -62,7 +62,7 @@ func (ap outApplierProvider) Applier(st reflect.Type, sf reflect.StructField, di
 		case includeEmpty:
 			omitIfEmpty = false
 		default:
-			return nil, gomerr.Configuration("Unrecognized directive flag: " + flag)
+			return nil, gomerr.Configuration("unrecognized directive flag: " + flag)
 		}
 
 		directive = directive[:cIndex]
@@ -82,7 +82,7 @@ func (ap outApplierProvider) Applier(st reflect.Type, sf reflect.StructField, di
 		} else {
 			tf := structs.GetToolFunction(directive) // include the '$'
 			if tf == nil {
-				return nil, gomerr.Configuration("Function not found: " + directive)
+				return nil, gomerr.Configuration("function not found: " + directive)
 			}
 			return tf, nil
 		}
@@ -145,7 +145,7 @@ func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolCont
 			sliceMap := make(map[string]any, 1)
 			tc.Put(OutKey, sliceMap)
 			if ge := a.Apply(reflect.Value{}, fv.Index(i), tc); ge != nil {
-				return ge.AddAttribute("Index", i)
+				return ge.AddAttribute("index", i)
 			}
 			if v, ok := sliceMap[a.toName]; ok && v != nil {
 				sliceOutput = append(sliceOutput, v)
@@ -159,7 +159,7 @@ func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolCont
 		tc.Put(OutKey, outData)
 	case reflect.Map:
 		if fv.Type().Key().Kind() != reflect.String {
-			return gomerr.Configuration("Unable to produce a map without string ")
+			return gomerr.Configuration("unable to produce a map without string ")
 		}
 		mapOutput := make(map[string]any, fv.Len())
 
@@ -168,7 +168,7 @@ func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolCont
 			dummyMap := make(map[string]any)
 			tc.Put(OutKey, dummyMap)
 			if ge := a.Apply(reflect.Value{}, iter.Value(), tc); ge != nil {
-				return ge.AddAttribute("Key", iter.Key().Interface())
+				return ge.AddAttribute("key", iter.Key().Interface())
 			}
 			if v, ok := dummyMap[a.toName]; ok && v != nil {
 				mapOutput[iter.Key().Interface().(string)] = v

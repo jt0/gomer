@@ -90,7 +90,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 
 	imv := reflect.ValueOf(inData)
 	if imv.Kind() != reflect.Map {
-		return gomerr.Unprocessable("Expected data map", inData).AddAttribute("Source", a.source)
+		return gomerr.Unprocessable("expected data map", inData).AddAttribute("source", a.source)
 	}
 
 	mv := imv.MapIndex(reflect.ValueOf(a.source))
@@ -111,7 +111,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 		if stringValue, ok := value.(string); ok && fvt == timeType {
 			t, err := time.Parse(time.RFC3339Nano, stringValue)
 			if err != nil {
-				return gomerr.BadValue(gomerr.GenericBadValueType, a.source, stringValue).AddAttribute("Expected", "RFC3339-formatted string")
+				return gomerr.BadValue(gomerr.GenericBadValueType, a.source, stringValue).AddAttribute("expected", "RFC3339-formatted string")
 			}
 			fv.Set(reflect.ValueOf(t)) // TODO: use flect.SetValue instead?
 			return nil
@@ -120,13 +120,13 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 		}
 
 		if vt.Kind() != reflect.Map {
-			return gomerr.Unprocessable("Expected data map", value).AddAttribute("Source", a.source)
+			return gomerr.Unprocessable("expected data map", value).AddAttribute("source", a.source)
 		}
 
 		tc.Put(InKey, value)
 		defer tc.Put(InKey, inData)
 		if ge := structs.ApplyTools(fv, tc, a.tool); ge != nil {
-			return ge.AddAttribute("Source", a.source)
+			return ge.AddAttribute("source", a.source)
 		}
 	case reflect.Slice:
 		// []byte types are a special case
@@ -134,7 +134,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 		if fvt == byteSliceType {
 			if _, ok := value.(string); ok {
 				if ge := flect.SetValue(fv, value); ge != nil {
-					return ge.AddAttributes("Source", a.source)
+					return ge.AddAttributes("source", a.source)
 				}
 				return nil
 			} // TODO:p2 treat the rest as raw input data - but may have already been exploded depending on how the rest of the data has been handled
@@ -154,7 +154,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 			a.source = index
 			tc.Put(InKey, map[string]any{a.source: sliceData[i]})
 			if ge := a.Apply(sv, fv.Index(i), tc); ge != nil {
-				return ge.AddAttribute("Source", sliceSource).AddAttribute("Key", index)
+				return ge.AddAttribute("source", sliceSource).AddAttribute("key", index)
 			}
 		}
 	case reflect.Map:
@@ -169,7 +169,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 			tc.Put(InKey, map[string]any{a.source: iter.Value().Interface()})
 			mapElem := reflect.New(fvt.Elem()).Elem()
 			if ge := a.Apply(sv, mapElem, tc); ge != nil {
-				return ge.AddAttribute("Source", mapSource).AddAttribute("Key", key)
+				return ge.AddAttribute("source", mapSource).AddAttribute("key", key)
 			}
 			fv.SetMapIndex(iter.Key(), mapElem)
 		}
@@ -186,7 +186,7 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 		fallthrough
 	default:
 		if ge := flect.SetValue(fv, value); ge != nil {
-			return ge.AddAttributes("Source", a.source)
+			return ge.AddAttributes("source", a.source)
 		}
 	}
 

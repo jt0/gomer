@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/structs"
@@ -27,7 +28,7 @@ type constraintApplierProvider struct {
 // constraintsRegexp matches: unique, unique(), unique(Field1), unique(Field1,Field2)
 var constraintsRegexp = regexp.MustCompile(`(unique)(\(([\w,]+)\))?`)
 
-func (ap constraintApplierProvider) Applier(st reflect.Type, sf reflect.StructField, directive string, scope string) (structs.Applier, gomerr.Gomerr) {
+func (ap constraintApplierProvider) Applier(_ reflect.Type, sf reflect.StructField, directive string, _ string) (structs.Applier, gomerr.Gomerr) {
 	if directive == "" {
 		return nil, nil
 	}
@@ -35,7 +36,7 @@ func (ap constraintApplierProvider) Applier(st reflect.Type, sf reflect.StructFi
 	// Parse directive: "unique(Field1,Field2)"
 	matches := constraintsRegexp.FindAllStringSubmatch(directive, -1)
 	if matches == nil {
-		return nil, gomerr.Configuration("invalid db.constraints value: "+directive).AddAttribute("Field", sf.Name)
+		return nil, gomerr.Configuration("invalid db.constraints value: "+directive).AddAttribute("field", sf.Name)
 	}
 
 	for _, match := range matches {
@@ -47,10 +48,12 @@ func (ap constraintApplierProvider) Applier(st reflect.Type, sf reflect.StructFi
 				fieldTuple = append(fieldTuple, additionalFields...)
 			}
 
+			t := ap.table
 			return uniquenessApplier{
-				table:      ap.table,
-				fieldName:  sf.Name,
-				fieldTuple: fieldTuple,
+				constraint.New("unique", fieldTuple, func(a any) gomerr.Gomerr {
+					tt := a.(toTest)
+					return t.checkFieldTupleUnique(tt.ctx, tt.p, fieldTuple)
+				}),
 			}, nil
 		}
 	}
@@ -58,26 +61,28 @@ func (ap constraintApplierProvider) Applier(st reflect.Type, sf reflect.StructFi
 	return nil, nil
 }
 
-type uniquenessApplier struct {
-	table      *table
-	fieldName  string
-	fieldTuple []string
+type toTest struct {
+	ctx context.Context
+	p   data.Persistable
 }
 
-func (a uniquenessApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
+type uniquenessApplier struct {
+	constraint constraint.Constraint
+}
+
+func (a uniquenessApplier) Apply(sv reflect.Value, _ reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
 	// Get context from ToolContext
 	ctxVal := tc.Get("ctx")
 	if ctxVal == nil {
-		return gomerr.Configuration("context.Context not found in ToolContext").AddAttribute("Field", a.fieldName)
+		return gomerr.Configuration("context.Context not found in ToolContext")
 	}
 	ctx := ctxVal.(context.Context)
 
 	// Get the persistable (sv is the struct value)
 	p, ok := sv.Addr().Interface().(data.Persistable)
 	if !ok {
-		return gomerr.Configuration("struct does not implement data.Persistable").AddAttribute("Type", sv.Type().String())
+		return gomerr.Configuration("struct does not implement data.Persistable").AddAttribute("type", sv.Type().String())
 	}
 
-	// Check uniqueness using table's query functionality
-	return a.table.checkFieldTupleUnique(ctx, p, a.fieldTuple)
+	return a.constraint.Test(toTest{ctx, p})
 }

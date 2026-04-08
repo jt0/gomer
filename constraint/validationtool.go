@@ -40,7 +40,7 @@ func (ap validationApplierProvider) Applier(sv reflect.Type, sf reflect.StructFi
 
 	c, ge := constraintFor(directive, none, sf)
 	if ge != nil {
-		return nil, gomerr.Configuration("Cannot process directive").Wrap(ge).AddAttribute("Directive", directive)
+		return nil, gomerr.Configuration("cannot process directive").Wrap(ge).AddAttribute("directive", directive)
 	}
 
 	var target string
@@ -75,9 +75,9 @@ func (t validationApplier) Apply(sv reflect.Value, fv reflect.Value, _ structs.T
 	if dc, ok := t.constraint.(*dynamicConstraint); ok {
 		for source, dv := range dc.dynamicValues {
 			if value, ge := structs.ValueFromStruct(sv, fv, source); ge != nil {
-				return gomerr.Configuration("Unable to validate").AddAttributes("Source", source, "Value", value).Wrap(ge)
+				return gomerr.Configuration("unable to validate").AddAttributes("source", source, "value", value).Wrap(ge)
 			} else if ge = flect.SetValue(dv.Elem(), value); ge != nil {
-				return gomerr.Configuration("Unable to validate").AddAttributes("Source", source, "Value", value).Wrap(ge)
+				return gomerr.Configuration("unable to validate").AddAttributes("source", source, "value", value).Wrap(ge)
 			}
 		}
 	}

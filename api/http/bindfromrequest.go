@@ -94,7 +94,7 @@ func BindFromRequest(request *http.Request, resource any, scope string) gomerr.G
 			}
 
 			if err = unmarshal(bodyBytes, &unmarshaled); err != nil {
-				return gomerr.Unmarshal("unable to unmarshal data", bodyBytes, unmarshaled).AddAttribute("ContentType", contentType).Wrap(err)
+				return gomerr.Unmarshal("unable to unmarshal data", bodyBytes, unmarshaled).AddAttribute("contentType", contentType).Wrap(err)
 			}
 		}
 
@@ -116,7 +116,7 @@ func (requestExtension) Applier(structType reflect.Type, structField reflect.Str
 	if strings.HasPrefix(directive, requestConfig.PathBindingPrefix) {
 		index, err := strconv.Atoi(directive[len(requestConfig.PathBindingPrefix):])
 		if err != nil {
-			return nil, gomerr.Configuration("Expected numeric index value for path binding, received: " + directive)
+			return nil, gomerr.Configuration("expected numeric index value for path binding, received: " + directive)
 		}
 		return bindPathApplier{index}, nil
 	} else if strings.HasPrefix(directive, requestConfig.QueryParamBindingPrefix) {
@@ -133,7 +133,7 @@ func (requestExtension) Applier(structType reflect.Type, structField reflect.Str
 		return bindRequestHeaderApplier{headerName}, nil
 	} else if directive == requestConfig.BindBody {
 		if structField.Type != byteSliceType {
-			return nil, gomerr.Configuration("Body field must be of type []byte, not: " + structField.Type.String())
+			return nil, gomerr.Configuration("body field must be of type []byte, not: " + structField.Type.String())
 		}
 		hasInBodyBinding[structType.String()] = true
 		return bodyInApplier{}, nil
@@ -159,7 +159,7 @@ func (b bindPathApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.Too
 	}
 
 	if ge := flect.SetValue(fv, pathParts[b.index]); ge != nil {
-		return ge.AddAttributes("PathIndex", b.index)
+		return ge.AddAttributes("pathIndex", b.index)
 	}
 
 	return nil
@@ -181,7 +181,7 @@ func (b bindQueryParamApplier) Apply(_ reflect.Value, fv reflect.Value, tc struc
 	}
 
 	if ge := flect.SetValue(fv, values[0]); ge != nil {
-		return ge.AddAttributes("Parameter", b.name)
+		return ge.AddAttributes("queryParameter", b.name)
 	}
 
 	return nil
@@ -198,7 +198,7 @@ func (b bindRequestHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc st
 	}
 
 	if ge := flect.SetValue(fv, values[0]); ge != nil {
-		return ge.AddAttributes("Header", b.name)
+		return ge.AddAttributes("header", b.name)
 	}
 
 	return nil
