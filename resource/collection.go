@@ -44,7 +44,14 @@ func (c *Collection[I]) DoAction(ctx context.Context, action Action[*Collection[
 		return nil, ge
 	}
 
-	if ge := action.Do(ctx, c); ge != nil {
+	ge := action.Do(ctx, c)
+	for i := 0; i < 2 && ge != nil; i++ { // up to 2 retries
+		if ge = action.Retry(ctx, c, ge); ge != nil {
+			break
+		}
+		ge = action.Do(ctx, c)
+	}
+	if ge != nil {
 		return nil, action.OnDoFailure(ctx, c, ge)
 	}
 
@@ -108,10 +115,14 @@ func (c *Collection[I]) SetConsistencyType(consistencyType dynamodb.ConsistencyT
 	c.consistencyType = consistencyType
 }
 
-// List lifecycle hooks - override these in concrete types as needed.
+// List hooks - override these in concrete types as needed.
 
 func (*Collection[I]) PreList(_ context.Context) gomerr.Gomerr {
 	return nil
+}
+
+func (*Collection[I]) RetryList(_ context.Context, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
 }
 
 func (*Collection[I]) PostList(_ context.Context) gomerr.Gomerr {

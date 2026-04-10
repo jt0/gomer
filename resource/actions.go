@@ -35,6 +35,7 @@ type AnyAction interface {
 type Action[T any] interface {
 	AnyAction
 	Pre(context.Context, T) gomerr.Gomerr
+	Retry(context.Context, T, gomerr.Gomerr) gomerr.Gomerr
 	Do(context.Context, T) gomerr.Gomerr
 	OnDoSuccess(context.Context, T) (T, gomerr.Gomerr)
 	OnDoFailure(context.Context, T, gomerr.Gomerr) gomerr.Gomerr
@@ -59,16 +60,20 @@ func (*createAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.CreatePermission
 }
 
-func (*createAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
-	return instance.PreCreate(ctx)
+func (*createAction[I]) Pre(ctx context.Context, i I) gomerr.Gomerr {
+	return i.PreCreate(ctx)
 }
 
-func (*createAction[I]) Do(ctx context.Context, instance I) gomerr.Gomerr {
-	return instance.registeredType().store.Create(ctx, instance)
+func (*createAction[I]) Do(ctx context.Context, i I) gomerr.Gomerr {
+	return i.registeredType().store.Create(ctx, i)
 }
 
-func (*createAction[I]) OnDoSuccess(ctx context.Context, instance I) (I, gomerr.Gomerr) {
-	return instance, instance.PostCreate(ctx)
+func (*createAction[I]) Retry(ctx context.Context, i I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return i.RetryCreate(ctx, ge)
+}
+
+func (*createAction[I]) OnDoSuccess(ctx context.Context, i I) (I, gomerr.Gomerr) {
+	return i, i.PostCreate(ctx)
 }
 
 func (*createAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
@@ -98,8 +103,8 @@ func (*readAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.ReadPermission
 }
 
-func (*readAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
-	if ge := instance.PreRead(ctx); ge != nil {
+func (*readAction[I]) Pre(ctx context.Context, i I) gomerr.Gomerr {
+	if ge := i.PreRead(ctx); ge != nil {
 		return ge
 	}
 
@@ -109,7 +114,7 @@ func (*readAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
 		return nil // No registry in context, skip auto-population
 	}
 
-	iv := reflect.ValueOf(instance)
+	iv := reflect.ValueOf(i)
 	if iv.Kind() == reflect.Pointer {
 		iv = iv.Elem()
 	}
@@ -118,8 +123,8 @@ func (*readAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
 	}
 
 	it := iv.Type()
-	for i := range it.NumField() {
-		field := it.Field(i)
+	for fieldNum := range it.NumField() {
+		field := it.Field(fieldNum)
 		if !field.IsExported() {
 			continue
 		}
@@ -129,7 +134,7 @@ func (*readAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
 			continue
 		}
 
-		fv := iv.Field(i)
+		fv := iv.Field(fieldNum)
 		if !fv.IsNil() {
 			continue // Already set (possibly by PreRead)
 		}
@@ -157,22 +162,26 @@ func (*readAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
 		}
 
 		// Create proto instance and collection
-		proto := rt.newInstance(instance.Subject())
-		collection := rt.newCollection(proto)
+		proto := rt.newInstance(i.Subject())
+		c := rt.newCollection(proto)
 
 		// Set the collection on the field
-		fv.Set(reflect.ValueOf(collection))
+		fv.Set(reflect.ValueOf(c))
 	}
 
 	return nil
 }
 
-func (*readAction[I]) Do(ctx context.Context, instance I) gomerr.Gomerr {
-	return instance.registeredType().store.Read(ctx, instance)
+func (*readAction[I]) Do(ctx context.Context, i I) gomerr.Gomerr {
+	return i.registeredType().store.Read(ctx, i)
 }
 
-func (*readAction[I]) OnDoSuccess(ctx context.Context, instance I) (I, gomerr.Gomerr) {
-	return instance, instance.PostRead(ctx)
+func (*readAction[I]) Retry(ctx context.Context, i I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return i.RetryRead(ctx, ge)
+}
+
+func (*readAction[I]) OnDoSuccess(ctx context.Context, i I) (I, gomerr.Gomerr) {
+	return i, i.PostRead(ctx)
 }
 
 func (*readAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
@@ -231,6 +240,10 @@ func (a *updateAction[I]) Do(ctx context.Context, update I) gomerr.Gomerr {
 	return update.registeredType().store.Update(ctx, a.current, update)
 }
 
+func (a *updateAction[I]) Retry(ctx context.Context, update I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return a.current.RetryUpdate(ctx, update, ge)
+}
+
 func (a *updateAction[I]) OnDoSuccess(ctx context.Context, update I) (I, gomerr.Gomerr) {
 	return a.current, a.current.PostUpdate(ctx, update)
 }
@@ -262,16 +275,20 @@ func (*deleteAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.NoPermissions
 }
 
-func (*deleteAction[I]) Pre(ctx context.Context, instance I) gomerr.Gomerr {
-	return instance.PreDelete(ctx)
+func (*deleteAction[I]) Pre(ctx context.Context, i I) gomerr.Gomerr {
+	return i.PreDelete(ctx)
 }
 
-func (*deleteAction[I]) Do(ctx context.Context, instance I) gomerr.Gomerr {
-	return instance.registeredType().store.Delete(ctx, instance)
+func (*deleteAction[I]) Do(ctx context.Context, i I) gomerr.Gomerr {
+	return i.registeredType().store.Delete(ctx, i)
 }
 
-func (*deleteAction[I]) OnDoSuccess(ctx context.Context, instance I) (I, gomerr.Gomerr) {
-	return instance, instance.PostDelete(ctx)
+func (*deleteAction[I]) Retry(ctx context.Context, i I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return i.RetryDelete(ctx, ge)
+}
+
+func (*deleteAction[I]) OnDoSuccess(ctx context.Context, i I) (I, gomerr.Gomerr) {
+	return i, i.PostDelete(ctx)
 }
 
 func (*deleteAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
@@ -301,16 +318,20 @@ func (*listAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.WritePermissions
 }
 
-func (*listAction[I]) Pre(ctx context.Context, collection *Collection[I]) gomerr.Gomerr {
-	return collection.PreList(ctx)
+func (*listAction[I]) Pre(ctx context.Context, c *Collection[I]) gomerr.Gomerr {
+	return c.PreList(ctx)
 }
 
-func (*listAction[I]) Do(ctx context.Context, collection *Collection[I]) gomerr.Gomerr {
-	return collection.Query(ctx)
+func (*listAction[I]) Do(ctx context.Context, c *Collection[I]) gomerr.Gomerr {
+	return c.Query(ctx)
 }
 
-func (*listAction[I]) OnDoSuccess(ctx context.Context, collection *Collection[I]) (*Collection[I], gomerr.Gomerr) {
-	return collection, collection.PostList(ctx)
+func (*listAction[I]) Retry(ctx context.Context, c *Collection[I], ge gomerr.Gomerr) gomerr.Gomerr {
+	return c.RetryList(ctx, ge)
+}
+
+func (*listAction[I]) OnDoSuccess(ctx context.Context, c *Collection[I]) (*Collection[I], gomerr.Gomerr) {
+	return c, c.PostList(ctx)
 }
 
 func (*listAction[I]) OnDoFailure(_ context.Context, _ *Collection[I], ge gomerr.Gomerr) gomerr.Gomerr {
@@ -372,6 +393,10 @@ func (NoOpAction[T]) Pre(_ context.Context, _ T) gomerr.Gomerr {
 
 func (NoOpAction[T]) Do(_ context.Context, _ T) gomerr.Gomerr {
 	return nil
+}
+
+func (NoOpAction[T]) Retry(_ context.Context, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
 }
 
 func (NoOpAction[T]) OnDoSuccess(_ context.Context, r T) (T, gomerr.Gomerr) {

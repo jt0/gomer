@@ -28,12 +28,16 @@ type Instance[I Resource[I]] interface {
 	data.Persistable // TypeName() string, NewQueryable() data.Queryable
 	Id() string
 	PreCreate(context.Context) gomerr.Gomerr
+	RetryCreate(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PostCreate(context.Context) gomerr.Gomerr
 	PreRead(context.Context) gomerr.Gomerr
+	RetryRead(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PostRead(context.Context) gomerr.Gomerr
 	PreUpdate(context.Context, I) gomerr.Gomerr
+	RetryUpdate(context.Context, I, gomerr.Gomerr) gomerr.Gomerr
 	PostUpdate(context.Context, I) gomerr.Gomerr
 	PreDelete(context.Context) gomerr.Gomerr
+	RetryDelete(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PostDelete(context.Context) gomerr.Gomerr
 }
 
@@ -60,10 +64,14 @@ func (b *BaseInstance[I]) NewQueryable() data.Queryable {
 	return b.rt.newCollection(b.rt.newInstance(b.sub)).(data.Queryable)
 }
 
-// Action lifecycle hooks - override these in concrete types as needed.
+// Instance action hooks - override these in concrete types as needed.
 
 func (*BaseInstance[I]) PreCreate(context.Context) gomerr.Gomerr {
 	return nil
+}
+
+func (*BaseInstance[I]) RetryCreate(_ context.Context, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
 }
 
 func (*BaseInstance[I]) PostCreate(context.Context) gomerr.Gomerr {
@@ -74,6 +82,10 @@ func (*BaseInstance[I]) PreRead(context.Context) gomerr.Gomerr {
 	return nil
 }
 
+func (*BaseInstance[I]) RetryRead(_ context.Context, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
+}
+
 func (*BaseInstance[I]) PostRead(context.Context) gomerr.Gomerr {
 	return nil
 }
@@ -82,12 +94,20 @@ func (*BaseInstance[I]) PreUpdate(context.Context, I) gomerr.Gomerr {
 	return nil
 }
 
+func (*BaseInstance[I]) RetryUpdate(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
+}
+
 func (*BaseInstance[I]) PostUpdate(context.Context, I) gomerr.Gomerr {
 	return nil
 }
 
 func (*BaseInstance[I]) PreDelete(context.Context) gomerr.Gomerr {
 	return nil
+}
+
+func (*BaseInstance[I]) RetryDelete(_ context.Context, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
 }
 
 func (*BaseInstance[I]) PostDelete(context.Context) gomerr.Gomerr {

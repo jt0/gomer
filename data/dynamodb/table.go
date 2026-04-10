@@ -322,6 +322,13 @@ func mergeFields(uv, pv reflect.Value, pt *persistableType) bool {
 	return validateConstraints
 }
 
+var conditionalCheckFailure = constraint.New("uniqueKeys", nil, func(toTest any) gomerr.Gomerr {
+	if ccf := gomerr.ErrorAs[*types.ConditionalCheckFailedException](toTest.(error)); ccf != nil {
+		return constraint.NotSatisfied(ccf)
+	}
+	return nil
+})
+
 func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints bool, ensureUniqueId bool) gomerr.Gomerr {
 	// Validate constraints using tool framework
 	if validateConstraints {
@@ -366,13 +373,11 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 	}
 	_, err = t.ddb.PutItem(ctx, input) // TODO:p3 look at result data to track capacity or other info?
 	if err != nil {
-		var condCheckErr *types.ConditionalCheckFailedException
-		if errors.As(err, &condCheckErr) {
+		if ge := conditionalCheckFailure.Test(err); ge != nil {
 			if ensureUniqueId {
-				return gomerr.Internal("unique id check failed, retry with a new id value").Wrap(err)
-			} else {
-				return gomerr.Dependency("DynamoDB", input).Wrap(err)
+				return ge.AddAttribute("persistable", p)
 			}
+			return gomerr.Dependency("DynamoDB", input).Wrap(err)
 		}
 
 		var apiErr smithy.APIError

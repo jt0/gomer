@@ -37,7 +37,14 @@ func (b *BaseResource[T]) DoAction(ctx context.Context, action Action[T]) (T, go
 		return zero, ge
 	}
 
-	if ge := action.Do(ctx, b.self); ge != nil {
+	ge := action.Do(ctx, b.self)
+	for i := 0; i < 2 && ge != nil; i++ { // up to 2 retries
+		if ge = action.Retry(ctx, b.self, ge); ge != nil {
+			break
+		}
+		ge = action.Do(ctx, b.self)
+	}
+	if ge != nil {
 		return zero, action.OnDoFailure(ctx, b.self, ge)
 	}
 

@@ -138,6 +138,14 @@ func (rw *ResponseWriter) WriteError(err error) {
 	rw.err = err
 }
 
+func (rw *ResponseWriter) StatusCode() int {
+	return rw.statusCode
+}
+
+func (rw *ResponseWriter) Body() []byte {
+	return rw.body
+}
+
 func (rw *ResponseWriter) writeTo(w http.ResponseWriter) {
 	// If an error remains unhandled by middleware, use the default renderer
 	if rw.err != nil {
