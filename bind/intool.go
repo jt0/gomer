@@ -10,12 +10,6 @@ import (
 	"github.com/jt0/gomer/structs"
 )
 
-var DefaultInTool = NewInTool(NewConfiguration(), structs.StructTagDirectiveProvider{"in"})
-
-func In(data map[string]any, v any, inTool *structs.Tool, optional ...structs.ToolContext) gomerr.Gomerr {
-	return structs.ApplyTools(v, structs.EnsureContext(optional...).With(InKey, data), inTool)
-}
-
 // NewInTool
 //
 // <name>              -> Default input value matching <name>. If name == "" then name = b.DataCase(StructField.Name)
@@ -138,6 +132,15 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 				}
 				return nil
 			} // TODO:p2 treat the rest as raw input data - but may have already been exploded depending on how the rest of the data has been handled
+		}
+
+		vt := reflect.TypeOf(value)
+		if vt.Kind() != reflect.Slice {
+			return gomerr.Unprocessable("expected slice", value).AddAttribute("source", a.source)
+		}
+
+		if fvt == vt {
+			return flect.SetValue(fv, value)
 		}
 
 		sliceData := value.([]any)

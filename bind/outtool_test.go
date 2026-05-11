@@ -55,7 +55,8 @@ func TestInterface(t *testing.T) {
 }
 
 func bindToJson(t *testing.T, stringBarOut OutStruct) []byte {
-	data, ge := bind.Out(stringBarOut, bind.DefaultOutTool)
+	binder := bind.NewBinder()
+	data, ge := binder.Out(stringBarOut)
 	assert.Success(t, ge)
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	assert.Success(t, err)

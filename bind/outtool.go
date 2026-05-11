@@ -9,16 +9,6 @@ import (
 	"github.com/jt0/gomer/structs"
 )
 
-var DefaultOutTool = NewOutTool(NewConfiguration(), structs.StructTagDirectiveProvider{"out"})
-
-func Out(v any, outTool *structs.Tool, optional ...structs.ToolContext) (map[string]any, gomerr.Gomerr) {
-	tc := structs.EnsureContext(optional...).With(OutKey, make(map[string]any))
-	if ge := structs.ApplyTools(v, tc, outTool); ge != nil {
-		return nil, ge
-	}
-	return tc.Get(OutKey).(map[string]any), nil
-}
-
 // NewOutTool
 //
 // +                   -> Use field name as value's key. Required if EmptyDirectiveHandling == skipField

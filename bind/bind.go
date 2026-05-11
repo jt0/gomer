@@ -1,8 +1,41 @@
 package bind
 
 import (
+	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/structs"
 )
+
+// Binder holds a configured pair of in/out tools for binding data to and from structs.
+// Create one via NewBinder and pass it explicitly to the components that need it.
+type Binder struct {
+	InTool  *structs.Tool
+	OutTool *structs.Tool
+}
+
+// NewBinder creates a Binder with the provided configuration options.
+//
+//	binder := bind.NewBinder(bind.CamelCaseFields, bind.OmitEmpty)
+func NewBinder(options ...func(*Configuration)) *Binder {
+	config := NewConfiguration(options...)
+	return &Binder{
+		InTool:  NewInTool(config, structs.StructTagDirectiveProvider{"in"}),
+		OutTool: NewOutTool(config, structs.StructTagDirectiveProvider{"out"}),
+	}
+}
+
+// In binds data into v using this Binder's InTool.
+func (b *Binder) In(data map[string]any, v any, optional ...structs.ToolContext) gomerr.Gomerr {
+	return structs.ApplyTools(v, structs.EnsureContext(optional...).With(InKey, data), b.InTool)
+}
+
+// Out binds v's fields into a map using this Binder's OutTool.
+func (b *Binder) Out(v any, optional ...structs.ToolContext) (map[string]any, gomerr.Gomerr) {
+	tc := structs.EnsureContext(optional...).With(OutKey, make(map[string]any))
+	if ge := structs.ApplyTools(v, tc, b.OutTool); ge != nil {
+		return nil, ge
+	}
+	return tc.Get(OutKey).(map[string]any), nil
+}
 
 const (
 	InKey  = "$_gomer_bind_in"
@@ -55,7 +88,7 @@ func (bc *Configuration) withOptions(options ...func(*Configuration)) Configurat
 func NewConfiguration(options ...func(*Configuration)) Configuration {
 	bc := &Configuration{
 		emptyValue: omitEmpty,
-		toCase:     &PascalCaseFn,
+		toCase:     &CamelCaseFn,
 		// strictMode: false,  // true if should fail on extra input values, false otherwise
 	}
 

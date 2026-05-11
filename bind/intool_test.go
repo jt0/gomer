@@ -31,7 +31,8 @@ type Bat struct {
 func TestAnonymous(t *testing.T) {
 	var v Bat
 	inData := dataFrom(t, in1)
-	ge := bind.In(inData, &v, bind.DefaultInTool)
+	binder := bind.NewBinder()
+	ge := binder.In(inData, &v)
 	assert.Success(t, ge)
 }
 
