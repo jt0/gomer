@@ -13,6 +13,14 @@ type zeroVal struct{}
 
 var ZeroVal = zeroVal{}
 
+// SetValue assigns value into target, performing type coercion as needed. Handles:
+//   - String-to-type conversion (int, float, bool, time.Time, etc.) via StringToType
+//   - Pointer wrapping/unwrapping (e.g. setting a string into a *string, or a *int into an int)
+//   - Type conversion between compatible types (e.g. int to int64, or a typedef to its base)
+//   - Interface targets (any/interface{}) accept any value directly
+//
+// Used throughout gomer for binding request data, populating struct fields, setting dynamic
+// constraint parameters, and marshaling/unmarshaling DynamoDB attributes.
 func SetValue(target reflect.Value, value any) gomerr.Gomerr {
 	if value == nil {
 		return nil

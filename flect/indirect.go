@@ -6,6 +6,10 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
+// IndirectInterface dereferences a pointer value one level, returning the underlying value
+// as an interface. Returns (nil, false) if v is nil or an invalid/nil pointer. For
+// non-pointer values, returns (v, true) unchanged. Useful for unwrapping optional fields
+// or interface values before comparison or serialization.
 func IndirectInterface(v any) (indirect any, ok bool) {
 	ttv := reflect.ValueOf(v)
 	if !ttv.IsValid() {
@@ -22,6 +26,10 @@ func IndirectInterface(v any) (indirect any, ok bool) {
 	return v, true
 }
 
+// ReadableIndirectValue returns the fully dereferenced reflect.Value for v, suitable for
+// reading its kind, calling type-specific accessors (.Int(), .String(), etc.), or passing
+// to other reflection APIs. Accepts both raw values and reflect.Value inputs. Returns
+// (invalid, false) if the value is nil or otherwise unreadable.
 func ReadableIndirectValue(v any) (indirectValue reflect.Value, ok bool) {
 	vv, ok := v.(reflect.Value)
 	if !ok {
@@ -43,6 +51,8 @@ func ReadableIndirectValue(v any) (indirectValue reflect.Value, ok bool) {
 	return vv, true
 }
 
+// IndirectType returns the element type if v is a pointer type, otherwise returns the type
+// directly. Accepts either a reflect.Type or a value from which the type is derived.
 func IndirectType(v any) reflect.Type {
 	vt, ok := v.(reflect.Type)
 	if !ok {
@@ -55,6 +65,8 @@ func IndirectType(v any) reflect.Type {
 	return vt.Elem()
 }
 
+// IndirectValue dereferences v and optionally checks that the result is settable.
+// Returns an error if the value is invalid or (when mustSet is true) not addressable.
 func IndirectValue(v any, mustSet bool) (reflect.Value, gomerr.Gomerr) {
 	vv, ok := v.(reflect.Value)
 	if !ok {
