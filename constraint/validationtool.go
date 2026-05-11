@@ -71,6 +71,14 @@ type validationApplier struct {
 	constraint Constraint
 }
 
+// Apply runs the constraint against the field value fv. If the constraint contains dynamic
+// parameters ($.FieldName references), their pointer slots are populated from the enclosing
+// struct sv before the constraint's test function executes. This is the point where the
+// parse-time allocated pointers receive their runtime values:
+//
+//  1. structs.ValueFromStruct reads the referenced field's value from the struct.
+//  2. flect.SetValue writes it into the pointer (dv.Elem()), coercing types as needed.
+//  3. The constraint's test function dereferences the pointer to access the live value.
 func (t validationApplier) Apply(sv reflect.Value, fv reflect.Value, _ structs.ToolContext) gomerr.Gomerr {
 	if dc, ok := t.constraint.(*dynamicConstraint); ok {
 		for source, dv := range dc.dynamicValues {

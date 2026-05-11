@@ -7,22 +7,52 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-func Equals(value any) Constraint {
+func Equals(value *any) Constraint {
 	return New("equals", value, func(toTest any) gomerr.Gomerr {
-		if tt, ok := flect.IndirectInterface(toTest); !ok || tt != value {
+		tt, ok := flect.IndirectInterface(toTest)
+		if !ok {
+			return NotSatisfied(tt)
+		}
+		compareTo := *value
+		if !equalCoerced(tt, compareTo) {
 			return NotSatisfied(tt)
 		}
 		return nil
 	})
 }
 
-func NotEquals(value any) Constraint {
+func NotEquals(value *any) Constraint {
 	return New("notEquals", value, func(toTest any) gomerr.Gomerr {
-		if tt, ok := flect.IndirectInterface(toTest); !ok || tt == value {
+		tt, ok := flect.IndirectInterface(toTest)
+		if !ok || equalCoerced(tt, *value) {
 			return NotSatisfied(tt)
 		}
 		return nil
 	})
+}
+
+// equalCoerced compares two values, coercing b to a's type if they differ.
+func equalCoerced(a, b any) bool {
+	av, aOk := flect.ReadableIndirectValue(a)
+	bv, bOk := flect.ReadableIndirectValue(b)
+	if !aOk || !bOk {
+		return !aOk && !bOk
+	}
+	bv, _ = coerceToType(av, bv)
+	return av.Interface() == bv.Interface()
+}
+
+// coerceToType coerces b to match a's type using flect.SetValue. Returns the coerced value
+// and any error. If types already match, b is returned unchanged.
+func coerceToType(a, b reflect.Value) (reflect.Value, gomerr.Gomerr) {
+	if a.Type() == b.Type() {
+		return b, nil
+	}
+	coerced := reflect.New(a.Type()).Elem()
+	if ge := flect.SetValue(coerced, b.Interface()); ge != nil {
+		return b, ge
+	}
+	return coerced, nil
 }
 
 func OneOf(values ...any) Constraint {
