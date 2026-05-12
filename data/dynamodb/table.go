@@ -263,63 +263,12 @@ func (t *table) Update(ctx context.Context, p data.Persistable, update data.Pers
 	if update != nil {
 		uv := reflect.ValueOf(update).Elem()
 		pv := reflect.ValueOf(p).Elem()
-		validateConstraints = mergeFields(uv, pv, pt)
+		validateConstraints = mergeFields(pv, uv, pt)
 	}
 
 	ge = t.put(ctx, p, validateConstraints, false)
 
 	return
-}
-
-func mergeFields(uv, pv reflect.Value, pt *persistableType) bool {
-	validateConstraints := false
-
-	for i := 0; i < uv.NumField(); i++ {
-		uField := uv.Field(i)
-		if !uField.CanSet() {
-			continue
-		}
-
-		pField := pv.Field(i)
-		fieldName := uv.Type().Field(i).Name
-		if uField.Kind() == reflect.Struct {
-			mergeFields(uField, pField, nil)
-			continue
-		}
-
-		if reflect.DeepEqual(uField.Interface(), pField.Interface()) {
-			uField.Set(reflect.Zero(uField.Type()))
-		} else if uField.Kind() == reflect.Ptr {
-			if uField.IsNil() {
-				continue
-			}
-			if uField.Elem().Kind() == reflect.Struct {
-				if pField.IsNil() {
-					pField.Set(reflect.New(uField.Elem().Type()))
-				}
-				mergeFields(uField.Elem(), pField.Elem(), nil)
-				continue
-			}
-			if !pField.IsNil() && reflect.DeepEqual(uField.Elem().Interface(), pField.Elem().Interface()) {
-				uField.Set(reflect.Zero(uField.Type()))
-			} else {
-				pField.Set(uField)
-				if pt != nil && pt.constraintFields[fieldName] {
-					validateConstraints = true
-				}
-			}
-		} else {
-			if uField.IsZero() {
-				continue
-			}
-			pField.Set(uField)
-			if pt != nil && pt.constraintFields[fieldName] {
-				validateConstraints = true
-			}
-		}
-	}
-
-	return validateConstraints
 }
 
 var conditionalCheckFailure = constraint.New("uniqueKeys", nil, func(toTest any) gomerr.Gomerr {
