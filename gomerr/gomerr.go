@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"runtime"
 	"strings"
@@ -312,6 +313,10 @@ func (g *gomerr) String() string {
 	return g.string(func(v any) ([]byte, error) {
 		return json.MarshalIndent(v, "", "  ")
 	})
+}
+
+func (g *gomerr) LogValue() slog.Value {
+	return slog.StringValue(g.String())
 }
 
 func (g *gomerr) string(marshal func(any) ([]byte, error)) string {

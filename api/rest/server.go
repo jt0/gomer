@@ -9,6 +9,7 @@ import (
 
 	. "github.com/jt0/gomer/api/http"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/log"
 	"github.com/jt0/gomer/resource"
 )
 
@@ -80,18 +81,10 @@ func Serve(handler http.Handler, optFns ...func(*Options)) {
 		optFn(o)
 	}
 
-	// log.Info("Serving on: {}", o.Port)
-	println("serving on", "localhost:"+strconv.Itoa(int(o.Port)))
-	err := http.ListenAndServe("localhost:"+strconv.Itoa(int(o.Port)), handler)
-
-	var shutdownInfo string
-	if err != nil {
-		shutdownInfo = " due to: " + err.Error()
-	} else {
-		shutdownInfo = " cleanly"
-	}
-	// log.Error("server shutdown{}", shutdownInfo)
-	println("server shutdown", shutdownInfo)
+	addr := "127.0.0.1:" + strconv.Itoa(int(o.Port))
+	log.Logger().Info("serving", "addr", addr)
+	err := http.ListenAndServe(addr, handler)
+	log.Logger().Info("server shutdown", "err", err)
 }
 
 func noOptFn(*Options) {}
@@ -100,8 +93,7 @@ func Port(p string) func(*Options) {
 	i, err := strconv.ParseInt(p, 10, 16)
 	if err != nil {
 		if p != "" {
-			// log.Error()
-			println("invalid port value, ignoring:", p)
+			log.Logger().Error("invalid port, ignoring", "provided", p)
 		}
 		return noOptFn
 	}
@@ -173,7 +165,7 @@ func defaultErrorRenderer(w http.ResponseWriter, err error) {
 	// TODO: add flag to output details only if running in non-prod
 
 	if ge := gomerr.ErrorAs[gomerr.Gomerr](err); ge != nil {
-		println(ge.String())
+		log.Logger().Error("unhandled error", "error", ge)
 		w.Write([]byte(ge.Error()))
 		return
 	}

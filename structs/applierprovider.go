@@ -1,12 +1,12 @@
 package structs
 
 import (
-	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
 
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/log"
 )
 
 func ExpressionApplierProvider(_ reflect.Type, sf reflect.StructField, directive string) (Applier, gomerr.Gomerr) {
@@ -40,7 +40,7 @@ func ScopeAlias(alias, scope string) {
 	}
 
 	if current, ok := scopeAliases[alias]; ok && current != scope {
-		panic(fmt.Sprintf("%s already aliased tp %s. First delete the existing alias to %s first.", alias, current, scope))
+		panic(alias + " already aliased tp " + current + ". First delete the existing alias to " + scope)
 	}
 
 	scopeAliases[alias] = scope
@@ -158,7 +158,7 @@ func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructF
 	if rhs := directive[tIndex+1:]; len(rhs) > 0 {
 		right, rightGe = applyScopes(tool.applierProvider, st, sf, rhs)
 		if _, ok := rightGe.(*gomerr.ConfigurationError); rightGe != nil && !ok {
-			rightGe = gomerr.Configuration(fmt.Sprintf("unable to process directive: %s", directive)).Wrap(rightGe)
+			rightGe = gomerr.Configuration("unable to process directive: " + directive).Wrap(rightGe)
 		}
 	}
 	if ge := gomerr.Batch(leftGe, rightGe); ge != nil || (left == nil && right == nil) {
@@ -216,8 +216,7 @@ func (a leftTestRightApplier) Apply(sv reflect.Value, fv reflect.Value, tc ToolC
 	if ge != nil {
 		return gomerr.Batch(ge, leftGe) // Okay if leftGe is nil
 	} else if leftGe != nil {
-		// TODO: replace w/ debug-level log statement
-		fmt.Println("Left-side applier failed, but right side succeeded. Left error:\n", leftGe.String())
+		log.Logger().Debug("left-side applier failed, but right side succeeded", "leftError", leftGe)
 	}
 
 	return nil

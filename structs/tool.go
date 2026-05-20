@@ -170,9 +170,6 @@ func process(st reflect.Type, tools ...*Tool) (*preparedStruct, []gomerr.Gomerr)
 				}
 			}
 		case reflect.Array, reflect.Map, reflect.Ptr, reflect.Slice:
-			if sft.String() == "*resource.metadata" {
-				println("Found", sft.String())
-			}
 			_, subErrors := process(sft.Elem(), tools...)
 			errors = append(errors, subErrors...)
 		}

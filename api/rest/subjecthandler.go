@@ -6,6 +6,7 @@ import (
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/log"
 )
 
 var Subject = NilSubject
@@ -44,7 +45,7 @@ func SubjectHandler(subjectProvider SubjectProvider) func(http.Handler) http.Han
 			// Post-processing: Release subject
 			ge = subject.Release(rw.err != nil)
 			if ge != nil {
-				// TODO: log but don't error
+				log.Logger().Warn("failed to release subject", "error", ge)
 			}
 		})
 	}

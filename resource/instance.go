@@ -7,6 +7,7 @@ import (
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/log"
 )
 
 // NewInstance creates a new instance of type I.
@@ -53,6 +54,7 @@ func (b *BaseInstance[I]) TypeName() string {
 func (b *BaseInstance[I]) Id() string {
 	id, ge := Id(reflect.ValueOf(b.self).Elem())
 	if ge != nil {
+		log.Logger().Warn("unable to resolve id", "type", b.TypeName(), "error", ge)
 		return ""
 	}
 	return id

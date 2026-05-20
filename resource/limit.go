@@ -2,11 +2,11 @@ package resource
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
+	"github.com/jt0/gomer/log"
 )
 
 type limitAction func(limit.Limiter, limit.Limited) gomerr.Gomerr
@@ -101,8 +101,7 @@ func saveLimiterIfDirty(ctx context.Context, limiter limit.Limiter) {
 	li := limiter.(instanceLike) // Should always be true
 	ge := li.Metadata().store.Update(ctx, li, nil)
 	if ge != nil {
-		// TODO: use provided logger
-		fmt.Printf("Failed to save limiter (type: %s, id: %s). Error:\n%s\n", li.Metadata().instanceName, li.Id(), ge)
+		log.Logger().Error("failed to save limiter", "type", li.Metadata().instanceName, "id", li.Id(), "error", ge)
 		return
 	}
 

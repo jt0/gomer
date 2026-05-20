@@ -1,11 +1,11 @@
 package bind
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/log"
 	"github.com/jt0/gomer/structs"
 )
 
@@ -69,11 +69,11 @@ func RegisterUnstashFieldFunction(name, destinationKey string, include Inclusion
 					}
 				}
 			case reflect.Map:
-				fmt.Printf("Unstash map not yet supported. Key = %s, Value =\n%v\n", key, stashValue.Interface())
+				log.Logger().Warn("unstash map not yet supported", "key", key)
 			case reflect.Slice, reflect.Array:
-				fmt.Printf("Unstash slice/array not yet supported. Key = %s, Value =\n%v\n", key, stashValue.Interface())
+				log.Logger().Warn("unstash slice/array not yet supported", "key", key)
 			case reflect.Ptr:
-				fmt.Printf("Unstash pointer not yet supported. Key = %s, Value =\n%v", key, stashValue.Elem().Interface())
+				log.Logger().Warn("unstash pointer not yet supported", "key", key)
 			default:
 				destination.Put(key, stashValue.Interface())
 			}

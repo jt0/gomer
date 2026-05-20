@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jt0/gomer/gomerr"
-	"github.com/jt0/gomer/id"
+	"github.com/jt0/gomer/log"
 	"github.com/jt0/gomer/structs"
 )
 
@@ -115,7 +115,7 @@ func (a copyIdsApplier) Apply(sv reflect.Value, _ reflect.Value, tc structs.Tool
 func Id(sv reflect.Value) (string, gomerr.Gomerr) {
 	idfa, ok := structIdFields[sv.Type().String()]
 	if !ok {
-		// TODO: dummy call to just prepare type is kinda...yeah. Maybe need a "Prepare" or something after all.
+		log.Logger().Debug("lazy-initializing id fields", "type", sv.Type().String())
 		_ = structs.ApplyTools(sv, nil, DefaultIdFieldTool)
 
 		idfa, ok = structIdFields[sv.Type().String()]

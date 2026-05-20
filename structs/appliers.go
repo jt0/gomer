@@ -6,6 +6,7 @@ import (
 
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/log"
 )
 
 type Applier interface {
@@ -60,7 +61,7 @@ func ValueFromStruct(sv reflect.Value, fv reflect.Value, source string) (any, go
 	}
 
 	if f.Kind() == reflect.Ptr && f.IsNil() && source == "Attributes" {
-		println("Source is nil!!")
+		log.Logger().Debug("source field is nil", "source", source)
 	}
 	return f.Interface(), nil
 }
