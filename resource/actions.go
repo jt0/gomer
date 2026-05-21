@@ -193,12 +193,13 @@ func (a *readAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomer
 }
 
 // UpdateAction returns an action for updating instances.
-func UpdateAction[I Instance[I]]() Action[I] {
-	return &updateAction[I]{}
+func UpdateAction[I Instance[I]](readAction Action[I]) Action[I] {
+	return &updateAction[I]{readAction: readAction}
 }
 
 type updateAction[I Instance[I]] struct {
-	current I // The current state, read from store
+	readAction Action[I]
+	current    I // The current state, read from store
 }
 
 func (*updateAction[I]) Name() string {
@@ -221,16 +222,16 @@ func (a *updateAction[I]) Pre(ctx context.Context, update I) gomerr.Gomerr {
 
 	// Copy ID fields from update to current
 	tc := structs.EnsureContext().With(SourceValue, reflect.ValueOf(update).Elem())
-	if ge := structs.ApplyTools(current, tc, IdTool); ge != nil {
+	ge := structs.ApplyTools(current, tc, IdTool)
+	if ge != nil {
 		return ge
 	}
 
-	// Read current state from store
-	if ge := rt.store.Read(ctx, current); ge != nil {
+	// Read current state
+	a.current, ge = current.DoAction(ctx, a.readAction)
+	if ge != nil {
 		return ge
 	}
-
-	a.current = current
 
 	// Call PreUpdate hook
 	return current.PreUpdate(ctx, update)
@@ -319,6 +320,9 @@ func (*listAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 }
 
 func (*listAction[I]) Pre(ctx context.Context, c *Collection[I]) gomerr.Gomerr {
+	if ge := c.proto.PreList(ctx); ge != nil {
+		return ge
+	}
 	return c.PreList(ctx)
 }
 
@@ -407,12 +411,9 @@ func (NoOpAction[T]) OnDoFailure(_ context.Context, _ T, ge gomerr.Gomerr) gomer
 	return ge
 }
 
-var persistableNotFound = &dataerr.PersistableNotFoundError{}
-
 func convertPersistableNotFoundIfApplicable[I Instance[I]](i I, ge gomerr.Gomerr) gomerr.Gomerr {
-	if !errors.Is(ge, persistableNotFound) {
+	if _, ok := errors.AsType[*dataerr.PersistableNotFoundError](ge); !ok {
 		return ge
 	}
-
 	return gomerr.NotFound(i.registeredType().instanceName, i.Id()).Wrap(ge)
 }

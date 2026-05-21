@@ -10,18 +10,10 @@ import (
 	"github.com/jt0/gomer/structs"
 )
 
-func RegisterIdGeneratorFieldFunction(idGenerator id.Generator) {
-	fn := func(reflect.Value, reflect.Value, structs.ToolContext) (any, gomerr.Gomerr) {
-		return idGenerator.Generate(), nil
-	}
-	_ = structs.RegisterToolFunction("$id", fn)
-}
-
 var DefaultIdFieldTool = NewIdTool(structs.StructTagDirectiveProvider{"id"})
 
 // NewIdTool produces a structs.Applier that will take each of the defined id fields and propagate them to another
 // struct value.
-// Todo:p3 specify that should be ordered in decreasing specificity.
 func NewIdTool(dp structs.DirectiveProvider) *structs.Tool {
 	return structs.NewTool("resource.IdTool", idTool{}, dp)
 }
@@ -29,9 +21,10 @@ func NewIdTool(dp structs.DirectiveProvider) *structs.Tool {
 type idTool struct{}
 
 func (idTool) Applier(st reflect.Type, sf reflect.StructField, directive string, _ string) (structs.Applier, gomerr.Gomerr) {
-	//if directive == "" {
-	//	return nil, nil
-	//}
+	if directive == "-" {
+		log.Warn("id:\"-\" struct tag contains no fields and excludes itself; skipping", "type", sf.Type.String(), "field", sf.Name)
+		return nil, nil
+	}
 
 	var typeName string
 	if parts := strings.Split(directive, "/"); len(parts) < 2 {
@@ -62,7 +55,9 @@ func (idTool) Applier(st reflect.Type, sf reflect.StructField, directive string,
 	case 0:
 		applier.idFields = []string{sf.Name}
 	default:
-		if applier.idFields[0] != sf.Name {
+		if applier.idFields[0] == "-" {
+			applier.idFields = applier.idFields[1:]
+		} else if applier.idFields[0] != sf.Name {
 			applier.idFields = append([]string{sf.Name}, applier.idFields...)
 		}
 	}
@@ -112,12 +107,10 @@ func (a copyIdsApplier) Apply(sv reflect.Value, _ reflect.Value, tc structs.Tool
 	return nil
 }
 
-func Id(sv reflect.Value) (string, gomerr.Gomerr) {
+func id(sv reflect.Value) (string, gomerr.Gomerr) {
 	idfa, ok := structIdFields[sv.Type().String()]
 	if !ok {
-		log.Logger().Debug("lazy-initializing id fields", "type", sv.Type().String())
 		_ = structs.ApplyTools(sv, nil, DefaultIdFieldTool)
-
 		idfa, ok = structIdFields[sv.Type().String()]
 		if !ok {
 			return "", gomerr.Unprocessable("unprocessed type or no field marked as an 'id'", sv.Type().String())
@@ -141,4 +134,37 @@ func Id(sv reflect.Value) (string, gomerr.Gomerr) {
 	default:
 		return "", gomerr.Unprocessable("id value does not provide a string representation", t)
 	}
+}
+
+func ids(sv reflect.Value) ([]string, gomerr.Gomerr) {
+	svt := sv.Type().String()
+	idfa, ok := structIdFields[svt]
+	if !ok {
+		_ = structs.ApplyTools(sv, nil, DefaultIdFieldTool)
+		idfa, ok = structIdFields[svt]
+		if !ok {
+			return nil, gomerr.Unprocessable("unprocessed type or no field marked as an 'id'", svt)
+		}
+	}
+
+	idList := make([]string, 0, len(idfa.idFields))
+	for _, idField := range idfa.idFields {
+		fv := sv.FieldByName(idField)
+		if !fv.IsValid() {
+			return nil, gomerr.Unprocessable("provided struct's 'id' field is not valid", idField)
+		}
+		if idfa.hidden[idField] {
+			idList = append(idList, "**********")
+			continue
+		}
+		switch t := fv.Interface().(type) {
+		case string:
+			idList = append(idList, t)
+		case interface{ String() string }:
+			idList = append(idList, t.String())
+		default:
+			log.Logger().Info("id field does not provide a string representation; suppress with '-' as the first id field", "field", svt+"."+idField)
+		}
+	}
+	return idList, nil
 }

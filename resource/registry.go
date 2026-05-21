@@ -90,6 +90,7 @@ func Register[I Instance[I]](r *Registry, opts ...Option) {
 			panic(gomerr.Configuration("unregistered parent type: " + rt.parentType.String()).String())
 		}
 		parent.children = append(parent.children, rt)
+		rt.parent = parent
 	} else {
 		r.rootTypes = append(r.rootTypes, rt)
 	}
@@ -132,9 +133,10 @@ type registeredType struct {
 	instanceName   string
 	collectionName string
 	actions        map[any]func() AnyAction // Returns Action[I] for the registered type
-	children       []*registeredType
-	store          data.Store
 	parentType     reflect.Type
+	parent         *registeredType
+	children       []RegisteredType
+	store          data.Store
 
 	newInstance   func(sub auth.Subject) any
 	newCollection func(proto any) any
@@ -152,12 +154,15 @@ func (m *registeredType) Actions() map[any]func() AnyAction {
 	return m.actions
 }
 
-func (m *registeredType) Children() []*registeredType {
-	return m.children
+func (m *registeredType) Parent() RegisteredType {
+	if m.parent == nil {
+		return nil // to avoid type-mismatch
+	}
+	return m.parent
 }
 
-func (m *registeredType) DataStore() data.Store {
-	return m.store
+func (m *registeredType) Children() []RegisteredType {
+	return m.children
 }
 
 func (m *registeredType) NewInstance(subject auth.Subject) any {
@@ -168,13 +173,19 @@ func (m *registeredType) NewCollection(proto any) any {
 	return m.newCollection(proto)
 }
 
+func (m *registeredType) Store() data.Store {
+	return m.store
+}
+
 type RegisteredType interface {
 	InstanceName() string
 	CollectionName() string
 	Actions() map[any]func() AnyAction
-	Children() []*registeredType
+	Parent() RegisteredType
+	Children() []RegisteredType
 	NewInstance(auth.Subject) any
 	NewCollection(proto any) any
+	Store() data.Store
 }
 
 type registryCtxKey struct{}

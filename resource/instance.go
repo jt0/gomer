@@ -40,6 +40,7 @@ type Instance[I Resource[I]] interface {
 	PreDelete(context.Context) gomerr.Gomerr
 	RetryDelete(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PostDelete(context.Context) gomerr.Gomerr
+	PreList(context.Context) gomerr.Gomerr
 }
 
 // BaseInstance provides the default implementation for Instance[I]. Embed this in concrete instance types.
@@ -52,12 +53,21 @@ func (b *BaseInstance[I]) TypeName() string {
 }
 
 func (b *BaseInstance[I]) Id() string {
-	id, ge := Id(reflect.ValueOf(b.self).Elem())
+	instanceId, ge := id(reflect.ValueOf(b.self).Elem())
 	if ge != nil {
 		log.Logger().Warn("unable to resolve id", "type", b.TypeName(), "error", ge)
 		return ""
 	}
-	return id
+	return instanceId
+}
+
+func (b *BaseInstance[I]) Ids() []string {
+	instanceIdChain, ge := ids(reflect.ValueOf(b.self).Elem())
+	if ge != nil {
+		log.Logger().Warn("unable to resolve ids", "type", b.TypeName(), "error", ge)
+		return nil
+	}
+	return instanceIdChain
 }
 
 // NewQueryable creates a Collection for querying instances of this type.
@@ -116,6 +126,10 @@ func (*BaseInstance[I]) PostDelete(context.Context) gomerr.Gomerr {
 	return nil
 }
 
+func (*BaseInstance[I]) PreList(context.Context) gomerr.Gomerr {
+	return nil
+}
+
 // CRUD convenience methods
 
 func (b *BaseInstance[I]) Create(ctx context.Context) (I, gomerr.Gomerr) {
@@ -127,7 +141,7 @@ func (b *BaseInstance[I]) Read(ctx context.Context) (I, gomerr.Gomerr) {
 }
 
 func (b *BaseInstance[I]) Update(ctx context.Context) (I, gomerr.Gomerr) {
-	return b.DoAction(ctx, UpdateAction[I]())
+	return b.DoAction(ctx, UpdateAction[I](ReadAction[I]()))
 }
 
 func (b *BaseInstance[I]) Delete(ctx context.Context) (I, gomerr.Gomerr) {

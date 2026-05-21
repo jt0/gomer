@@ -13,6 +13,7 @@ import (
 type Resource[T any] interface {
 	Subject() auth.Subject
 	DoAction(context.Context, Action[T]) (T, gomerr.Gomerr)
+	RegisteredType() RegisteredType
 
 	registeredType() *registeredType
 	initialize(rt *registeredType, sub auth.Subject)
@@ -28,6 +29,10 @@ type BaseResource[T Resource[T]] struct {
 
 func (b *BaseResource[T]) Subject() auth.Subject {
 	return b.sub
+}
+
+func (b *BaseResource[T]) Self() T {
+	return b.self
 }
 
 func (b *BaseResource[T]) DoAction(ctx context.Context, action Action[T]) (T, gomerr.Gomerr) {
@@ -49,6 +54,10 @@ func (b *BaseResource[T]) DoAction(ctx context.Context, action Action[T]) (T, go
 	}
 
 	return action.OnDoSuccess(ctx, b.self)
+}
+
+func (b *BaseResource[T]) RegisteredType() RegisteredType {
+	return b.rt
 }
 
 func (b *BaseResource[T]) registeredType() *registeredType {
