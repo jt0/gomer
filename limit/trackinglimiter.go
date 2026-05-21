@@ -6,8 +6,8 @@ import (
 )
 
 type TrackingLimiter struct {
-	Currents  map[string]amount
-	Overrides map[string]amount
+	Currents  map[string]amount `dynamodbav:",omitempty"`
+	Overrides map[string]amount `dynamodbav:",omitempty"`
 	dirty     bool
 }
 

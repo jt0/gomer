@@ -94,7 +94,7 @@ type outApplier struct {
 }
 
 func (a outApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
-	if fv.IsZero() && a.omitempty {
+	if !fv.IsValid() || (fv.IsZero() && a.omitempty) {
 		return nil
 	}
 

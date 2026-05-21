@@ -91,6 +91,7 @@ var built = map[string]Constraint{
 	"notzero":  IsNotZero,
 	"true":     IsTrue,
 	"false":    IsFalse,
+	"skip":     Success("skip"),
 }
 
 var builders = map[string]any{
