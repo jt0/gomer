@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -42,11 +43,15 @@ func RenderErrorMiddleware(renderer func(gomerr.Gomerr) StatusCoder) func(http.H
 			next.ServeHTTP(w, r)
 
 			rw, ok := w.(*ResponseWriter)
-			if !ok || rw.err == nil {
+			if !ok || rw.err == nil || errors.Is(rw.err, gomerr.NotAnError) {
 				return
 			}
 
 			if ge := gomerr.ErrorAs[gomerr.Gomerr](rw.err); ge != nil {
+				if ue := gomerr.ErrorAs[*UnroutableError](ge); ue != nil {
+					ue.Method = r.Method
+					ue.Path = r.URL.Path
+				}
 				rendered := renderer(ge)
 				bytes, statusCode := BindToResponse(reflect.ValueOf(rendered), rw.Header(), "", r.Header.Get("Accept-Language"), rendered.StatusCode())
 				rw.statusCode = statusCode
@@ -138,9 +143,13 @@ func (rw *ResponseWriter) Body() []byte {
 	return rw.body
 }
 
+func (rw *ResponseWriter) Error() error {
+	return rw.err
+}
+
 func (rw *ResponseWriter) writeTo(w http.ResponseWriter) {
 	// If an error remains unhandled by middleware, use the default renderer
-	if rw.err != nil {
+	if rw.err != nil && !errors.Is(rw.err, gomerr.NotAnError) {
 		defaultErrorRenderer(w, rw.err)
 		return
 	}

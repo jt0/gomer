@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/jt0/gomer/auth"
@@ -43,7 +44,7 @@ func SubjectHandler(subjectProvider SubjectProvider) func(http.Handler) http.Han
 			next.ServeHTTP(w, r)
 
 			// Post-processing: Release subject
-			ge = subject.Release(rw.err != nil)
+			ge = subject.Release(rw.err != nil && !errors.Is(rw.err, gomerr.NotAnError))
 			if ge != nil {
 				log.Logger().Warn("failed to release subject", "error", ge)
 			}

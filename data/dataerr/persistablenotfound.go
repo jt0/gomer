@@ -1,15 +1,15 @@
 package dataerr
 
 import (
+	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 )
 
 type PersistableNotFoundError struct {
 	gomerr.Gomerr
-	TypeName string
-	Key      any
+	Persistable data.Persistable
 }
 
-func PersistableNotFound(typeName string, key any) *PersistableNotFoundError {
-	return gomerr.Build(new(PersistableNotFoundError), typeName, key).(*PersistableNotFoundError)
+func PersistableNotFound(p data.Persistable) *PersistableNotFoundError {
+	return gomerr.Build(new(PersistableNotFoundError), p).(*PersistableNotFoundError)
 }

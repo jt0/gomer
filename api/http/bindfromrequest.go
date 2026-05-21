@@ -118,7 +118,7 @@ func (requestExtension) Applier(structType reflect.Type, structField reflect.Str
 		if err != nil {
 			return nil, gomerr.Configuration("expected numeric index value for path binding, received: " + directive)
 		}
-		return bindPathApplier{index}, nil
+		return bindPathApplier{index, structField.Name}, nil
 	} else if strings.HasPrefix(directive, requestConfig.QueryParamBindingPrefix) {
 		queryParamName := directive[len(requestConfig.QueryParamBindingPrefix):]
 		if queryParamName == requestConfig.IncludeField {
@@ -150,6 +150,7 @@ var hasInBodyBinding = make(map[string]bool)
 
 type bindPathApplier struct {
 	index int
+	name  string
 }
 
 func (b bindPathApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
@@ -159,7 +160,7 @@ func (b bindPathApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.Too
 	}
 
 	if ge := flect.SetValue(fv, pathParts[b.index]); ge != nil {
-		return ge.AddAttributes("pathIndex", b.index)
+		return ge.AddAttributes("httpLocation", "path."+strconv.Itoa(b.index), "source", b.name)
 	}
 
 	return nil
@@ -181,7 +182,7 @@ func (b bindQueryParamApplier) Apply(_ reflect.Value, fv reflect.Value, tc struc
 	}
 
 	if ge := flect.SetValue(fv, values[0]); ge != nil {
-		return ge.AddAttributes("queryParameter", b.name)
+		return ge.AddAttributes("httpLocation", "queryParam", "source", b.name)
 	}
 
 	return nil
@@ -198,7 +199,7 @@ func (b bindRequestHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc st
 	}
 
 	if ge := flect.SetValue(fv, values[0]); ge != nil {
-		return ge.AddAttributes("header", b.name)
+		return ge.AddAttributes("httpLocation", "header", "source", b.name)
 	}
 
 	return nil

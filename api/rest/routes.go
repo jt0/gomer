@@ -45,9 +45,17 @@ func CrudlActions[I resource.Instance[I]]() map[any]func() resource.AnyAction {
 	return map[any]func() resource.AnyAction{
 		PostCollection: func() resource.AnyAction { return resource.CreateAction[I]() },
 		GetInstance:    func() resource.AnyAction { return resource.ReadAction[I]() },
-		PatchInstance:  func() resource.AnyAction { return resource.UpdateAction[I]() },
+		PatchInstance:  func() resource.AnyAction { return resource.UpdateAction[I](resource.ReadAction[I]()) },
 		DeleteInstance: func() resource.AnyAction { return resource.DeleteAction[I]() },
 		GetCollection:  func() resource.AnyAction { return resource.ListAction[I]() },
+	}
+}
+
+// ReadOnlyActions is a helper function to create Read and List actions for a given Instance[I] type.
+func ReadOnlyActions[I resource.Instance[I]]() map[any]func() resource.AnyAction {
+	return map[any]func() resource.AnyAction{
+		GetInstance:   func() resource.AnyAction { return resource.ReadAction[I]() },
+		GetCollection: func() resource.AnyAction { return resource.ListAction[I]() },
 	}
 }
 
@@ -74,8 +82,7 @@ func noRouteHandler() http.Handler {
 			rw = &ResponseWriter{}
 			defer rw.writeTo(w)
 		}
-
-		rw.WriteError(gomerr.NotFound("route", r.Method+" "+r.URL.Path))
+		rw.WriteError(Unroutable())
 	})
 }
 

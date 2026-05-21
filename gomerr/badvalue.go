@@ -10,8 +10,8 @@ const (
 	InvalidValueType    BadValueType = "Invalid"
 	MalformedValueType  BadValueType = "Malformed"
 
-	reasonAttributeKey   = "Reason"
-	expectedAttributeKey = "Expected"
+	reasonAttributeKey   = "reason"
+	expectedAttributeKey = "expected"
 )
 
 type BadValueError struct {
@@ -26,7 +26,11 @@ func BadValue(badValueType BadValueType, name string, value any) *BadValueError 
 }
 
 func InvalidValue(name string, value any, expected any) *BadValueError {
-	return Build(new(BadValueError), InvalidValueType, name, value).AddAttributes(expectedAttributeKey, expected).(*BadValueError)
+	ge := Build(new(BadValueError), InvalidValueType, name, value)
+	if expected != nil {
+		ge = ge.AddAttributes(expectedAttributeKey, expected)
+	}
+	return ge.(*BadValueError)
 }
 
 func MalformedValue(name string, value any) *BadValueError {

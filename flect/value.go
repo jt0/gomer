@@ -62,7 +62,10 @@ func SetValue(target reflect.Value, value any) gomerr.Gomerr {
 	if !indirectTypesMatch {
 		vvConvertibleToTv = indirectValueValueType.ConvertibleTo(indirectTargetValueType)
 		if !vvConvertibleToTv && !indirectValueValueType.AssignableTo(indirectTargetValueType) {
-			return gomerr.Unprocessable("unable to set value with type '"+valueValue.Type().String()+"' to '"+target.Type().String()+"'", value)
+			return gomerr.Unprocessable("unsettable", value).AddAttributes(
+				"sourceType", valueValue.Type().String(),
+				"targetType", target.Type().String(),
+			)
 		}
 	}
 
