@@ -116,13 +116,22 @@ func (pt *persistableType) processConstraintsTag(fieldName string, tag string, e
 	return errors
 }
 
-var ddbKeyStatementRegexp = regexp.MustCompile(`(!)?([+-])?(?:([\w-.]+):)?(pk|sk)(?:.(\d))?(?:=('\w+')(\+)?)?`)
+var ddbKeyStatementRegexp = regexp.MustCompile(`(!)?([+-])?(?:([\w-.]+):)?(pk|sk)(?:.(\d))?(?:=(_|'\w+'))?`)
 
+// processKeysTag parses a field's `db.keys` tag and registers it as a key field for the appropriate
+// index(es). Each comma-separated statement in the tag assigns the field (or a static value) to a
+// position in an index's partition or sort key.
+//
+// The `=_` (reset) syntax allows a child persistable type to clear inherited key field assignments
+// for a specific index key and redefine them. This is needed in single-table designs where a child
+// type shares an index with its parent but requires different key composition for queries to work
+// correctly against that type. Resets must appear before any non-reset statements in the tag.
 func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes map[string]*index, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	if tag == "" {
 		return nil
 	}
 
+	var resetsComplete bool
 	for _, keyStatement := range strings.Split(strings.ReplaceAll(tag, " ", ""), ",") {
 		groups := ddbKeyStatementRegexp.FindStringSubmatch(keyStatement)
 		if groups == nil {
@@ -131,7 +140,7 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 
 		idx, ok := indexes[groups[3]]
 		if !ok {
-			return append(errors, gomerr.Configuration(fmt.Sprintf("undefined index: %s", groups[3])).AddAttribute("field", fieldName))
+			return append(errors, gomerr.Configuration("undefined index: "+groups[3]).AddAttribute("field", fieldName))
 		}
 
 		var key *keyAttribute
@@ -146,13 +155,31 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 			partIndex, _ = strconv.Atoi(groups[5])
 		}
 
-		kfName := fieldName  // Use local variable to avoid modifying parameter across iterations
-		if groups[6] != "" { // If non-empty, this field has a static value. Replace with that value.
+		kfName := fieldName   // Use local variable to avoid modifying parameter across iterations
+		if groups[6] == "_" { // Underscore indicates the fields in idx's key should be re-evaluated as key fields
+			if resetsComplete {
+				return append(errors, gomerr.Configuration("resets must be ordered first in a tag: "+tag).AddAttribute("field", fieldName))
+			}
+			notKeyFields := make(map[string]struct{})
+			for _, field := range key.keyFieldsByPersistable[pt.name] {
+				if field.name[0] != '\'' { // exclude static keys
+					notKeyFields[field.name] = struct{}{}
+				}
+			}
+			identifyKeyFields(indexes, key, pt.name, notKeyFields)
+			for notKeyField := range notKeyFields {
+				delete(pt.keyFields, notKeyField)
+			}
+
+			key.keyFieldsByPersistable[pt.name] = nil
+			continue
+		} else if groups[6] != "" { // If non-empty, this field has a static value. Replace with that value.
 			kfName = groups[6]
 		} else {
 			// Mark non-static field as a key field (should not be stored as separate attribute)
 			pt.keyFields[fieldName] = true
 		}
+		resetsComplete = true
 
 		// TODO: Determine scenarios where skLength/skMissing don't map to desired behavior. May need preferred
 		//       priority levels to compensate
@@ -161,6 +188,19 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 	}
 
 	return errors
+}
+
+func identifyKeyFields(indexes map[string]*index, resetKey *keyAttribute, persistable string, notKeyFields map[string]struct{}) {
+	for _, idx := range indexes {
+		for _, ka := range idx.keyAttributes() {
+			if ka == resetKey {
+				continue
+			}
+			for _, field := range ka.keyFieldsByPersistable[persistable] {
+				delete(notKeyFields, field.name)
+			}
+		}
+	}
 }
 
 func insertAtIndex(slice []*keyField, value *keyField, index int) []*keyField {

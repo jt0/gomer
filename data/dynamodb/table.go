@@ -1,6 +1,7 @@
 package dynamodb
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -208,8 +209,8 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 				if keyFields := attribute.keyFieldsByPersistable[unqualifiedPersistableName]; keyFields != nil {
 					for i, kf := range keyFields {
 						if kf == nil {
-							return gomerr.Configuration(fmt.Sprintf("index %s is missing a key field: %s[%s][%d]",
-								idx.friendlyName(), attribute.name, unqualifiedPersistableName, i),
+							return gomerr.Configuration(fmt.Sprintf("index %s: key field %s.%d missing for type %s ",
+								idx.friendlyName(), attribute.name, i, unqualifiedPersistableName),
 							).AddAttribute("keyFields", keyFields)
 						}
 					}
@@ -238,7 +239,7 @@ func (t *table) Create(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 	defer func() {
 		if ge != nil {
 			// Todo: is this needed or should this just be added to the attributes?
-			ge = dataerr.Store("Create", p).Wrap(ge)
+			ge = dataerr.Store("Create", p, ge)
 		}
 	}()
 
@@ -251,7 +252,7 @@ func (t *table) Create(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 func (t *table) Update(ctx context.Context, p data.Persistable, update data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = dataerr.Store("Update", p).Wrap(ge)
+			ge = dataerr.Store("Update", p, ge)
 		}
 	}()
 
@@ -348,102 +349,125 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 func (t *table) Read(ctx context.Context, p data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = dataerr.Store("Read", p).Wrap(ge)
+			ge = dataerr.Store("Read", p, ge)
 		}
 	}()
 
-	key := make(map[string]types.AttributeValue, 2)
-	if ge = t.populateKeyValues(key, p, t.valueSeparatorChar, true); ge != nil {
+	if key := t.itemKey(p); key == nil {
+		ge = t.queryOne(ctx, p)
+	} else {
+		ge = t.readOne(ctx, p, key)
+	}
+
+	if ge != nil {
 		return ge
 	}
 
-	useQuery := false
-	if len(t.pk.keyFieldsByPersistable[p.TypeName()]) > 1 {
-		if pk, ok := key[t.pk.name].(*types.AttributeValueMemberS); ok && pk.Value[len(pk.Value)-1] == t.valueSeparatorChar {
-			useQuery = true
-		}
-	}
-	if t.sk != nil && len(t.sk.keyFieldsByPersistable[p.TypeName()]) > 1 {
-		if sk, ok := key[t.sk.name].(*types.AttributeValueMemberS); ok && sk.Value[len(sk.Value)-1] == t.valueSeparatorChar {
-			useQuery = true
-		}
-	}
-
-	if useQuery {
-		pt, ok := t.persistableTypes[p.TypeName()]
-		if !ok {
-			return gomerr.Configuration("no persistable type for " + p.TypeName())
-		}
-
-		fields := make([]string, 0, len(pt.keyFields))
-		for field := range pt.keyFields {
-			fields = append(fields, field)
-		}
-
-		q, qge := toQueryable(p, fields)
-		if qge != nil {
-			return qge
-		}
-
-		if ge = t.Query(ctx, q); ge != nil {
-			return ge
-		}
-
-		results := q.Results()
-		if len(results) == 0 {
-			return dataerr.PersistableNotFound(p.TypeName(), key)
-		} else if len(results) > 1 {
-			return gomerr.Conflict(p.TypeName(), "", "multiple_matches")
-		}
-
-		copyFields(reflect.ValueOf(p).Elem(), reflect.ValueOf(results[0]).Elem())
-	} else {
-		input := &dynamodb.GetItemInput{
-			Key:            key,
-			ConsistentRead: consistentRead(t.consistencyType(p), true),
-			TableName:      t.tableName,
-		}
-		output, err := t.ddb.GetItem(ctx, input)
-		if err != nil {
-			var notFoundErr *types.ResourceNotFoundException
-			if errors.As(err, &notFoundErr) {
-				return dataerr.PersistableNotFound(p.TypeName(), key).Wrap(err)
-			}
-
-			var apiErr smithy.APIError
-			if errors.As(err, &apiErr) {
-				switch apiErr.ErrorCode() {
-				case "RequestLimitExceeded", "ProvisionedThroughputExceededException":
-					return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(err)
-				}
-			}
-
-			return gomerr.Dependency("DynamoDB", input).Wrap(err)
-		}
-
-		if output.Item == nil {
-			return dataerr.PersistableNotFound(p.TypeName(), key)
-		}
-
-		err = attributevalue.UnmarshalMap(output.Item, p)
-		if err != nil {
-			return gomerr.Unmarshal(p.TypeName(), output.Item, p).Wrap(err)
-		}
-
-		// Populate key fields from composite keys
-		pt := t.persistableTypes[p.TypeName()]
-		if ge = pt.populateKeyFieldsFromAttributes(p, output.Item, t.indexes, t.valueSeparatorChar, t.validateKeyFieldConsistency); ge != nil {
-			return ge
-		}
-	}
-
-	// Check for nested Queryables (including auto-populated) and execute queries for each
+	// Check for nested Queryables (including autopopulated) and execute queries for each
 	for _, nested := range t.prepareNestedQueryables(p) {
 		if ge = t.querySingleType(ctx, nested.queryable); ge != nil {
 			return ge
 		}
 	}
 
+	return nil
+}
+
+func (t *table) itemKey(p data.Persistable) map[string]types.AttributeValue {
+	key := make(map[string]types.AttributeValue, 2)
+	_ = t.populateKeyValues(key, p, t.valueSeparatorChar, false)
+
+	pk, ok := key[t.pk.name].(*types.AttributeValueMemberS)
+	if !ok || keyPartIncomplete(pk.Value, t.valueSeparatorChar) {
+		return nil
+	}
+
+	if t.sk == nil {
+		return key
+	}
+
+	sk, ok := key[t.sk.name].(*types.AttributeValueMemberS)
+	if !ok || keyPartIncomplete(sk.Value, t.valueSeparatorChar) {
+		return nil
+	}
+
+	return key
+}
+
+func keyPartIncomplete(s string, sep byte) bool {
+	return len(s) == 0 || s[len(s)-1] == sep || bytes.Contains([]byte(s), []byte{sep, sep})
+}
+
+func (t *table) queryOne(ctx context.Context, p data.Persistable) gomerr.Gomerr {
+	pt, ok := t.persistableTypes[p.TypeName()]
+	if !ok {
+		return gomerr.Configuration("no persistable type for " + p.TypeName())
+	}
+
+	fields := make([]string, 0, len(pt.keyFields))
+	for field := range pt.keyFields {
+		fields = append(fields, field)
+	}
+
+	q, ge := toQueryable(p, fields)
+	if ge != nil {
+		return ge
+	}
+
+	if ge = t.Query(ctx, q); ge != nil {
+		return ge
+	}
+
+	results := q.Results()
+	if len(results) == 0 {
+		return dataerr.PersistableNotFound(p)
+	} else if len(results) > 1 {
+		return gomerr.Conflict(p.TypeName(), "", "multiple_matches")
+	}
+
+	copyFields(reflect.ValueOf(p).Elem(), reflect.ValueOf(results[0]).Elem())
+
+	return nil
+}
+
+func (t *table) readOne(ctx context.Context, p data.Persistable, key map[string]types.AttributeValue) gomerr.Gomerr {
+	input := &dynamodb.GetItemInput{
+		Key:            key,
+		ConsistentRead: consistentRead(t.consistencyType(p), true),
+		TableName:      t.tableName,
+	}
+	output, err := t.ddb.GetItem(ctx, input)
+	if err != nil {
+		var notFoundErr *types.ResourceNotFoundException
+		if errors.As(err, &notFoundErr) {
+			return dataerr.PersistableNotFound(p).Wrap(err)
+		}
+
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.ErrorCode() {
+			case "RequestLimitExceeded", "ProvisionedThroughputExceededException":
+				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(err)
+			}
+		}
+
+		return gomerr.Dependency("DynamoDB", input).Wrap(err)
+	}
+
+	if output.Item == nil {
+		return dataerr.PersistableNotFound(p)
+	}
+
+	err = attributevalue.UnmarshalMap(output.Item, p)
+	if err != nil {
+		return gomerr.Unmarshal(p.TypeName(), output.Item, p).Wrap(err)
+	}
+
+	// Populate key fields from composite keys
+	pt := t.persistableTypes[p.TypeName()]
+	if ge := pt.populateKeyFieldsFromAttributes(p, output.Item, t.indexes, t.valueSeparatorChar, t.validateKeyFieldConsistency); ge != nil {
+		return ge
+	}
 	return nil
 }
 
@@ -485,15 +509,14 @@ func copyFields(dst, src reflect.Value) {
 func (t *table) Delete(ctx context.Context, p data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = dataerr.Store("Delete", p).Wrap(ge)
+			ge = dataerr.Store("Delete", p, ge)
 		}
 	}()
 
 	// TODO:p2 support a soft-delete option
 
 	key := make(map[string]types.AttributeValue, 2)
-	ge = t.populateKeyValues(key, p, t.valueSeparatorChar, true)
-	if ge != nil {
+	if ge = t.populateKeyValues(key, p, t.valueSeparatorChar, true); ge != nil {
 		return ge
 	}
 
@@ -515,8 +538,8 @@ func (t *table) Delete(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 	if err != nil {
 		var notFoundErr *types.ResourceNotFoundException
 		var condCheckErr *types.ConditionalCheckFailedException
-		if errors.As(err, &notFoundErr) || errors.As(err, &condCheckErr) {
-			return dataerr.PersistableNotFound(p.TypeName(), key).Wrap(err)
+		if errors.Is(err, notFoundErr) || errors.Is(err, condCheckErr) {
+			return dataerr.PersistableNotFound(p).Wrap(err)
 		}
 
 		var apiErr smithy.APIError
@@ -536,7 +559,7 @@ func (t *table) Delete(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = dataerr.Store("Query", q).Wrap(ge)
+			ge = dataerr.Store("Query", q, ge)
 		}
 	}()
 
