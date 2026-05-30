@@ -173,7 +173,7 @@ func (g *gomerr) AddAttributes(keysAndValues ...any) Gomerr {
 	for i := 0; i < len(keysAndValues); i += 2 {
 		key, ok := keysAndValues[i].(string)
 		if !ok {
-			keyStringer, ok := keysAndValues[i].(fmt.Stringer)
+			keyStringer, ok := keysAndValues[i].(interface{ String() string })
 			if !ok {
 				key = fmt.Sprintf("[Non-string key type %T]: %v", keysAndValues[i], keysAndValues[i])
 			}
@@ -271,7 +271,7 @@ func (g *gomerr) ToMap() map[string]any {
 				fieldKey += " (" + fv.Type().String() + ")"
 			}
 		}
-		if s, ok := fi.(fmt.Stringer); ok {
+		if s, ok := fi.(interface{ String() string }); ok {
 			fi = s.String()
 		}
 		m[fieldKey] = fi

@@ -2,6 +2,8 @@ package dynamodb
 
 import (
 	"reflect"
+
+	"github.com/jt0/gomer/log"
 )
 
 // mergeFields applies field-level changes from the update value (uv) into the persisted value (pv). The merge
@@ -21,6 +23,7 @@ import (
 func mergeFields(pv, uv reflect.Value, pt *persistableType) bool {
 	validateConstraints := false
 
+	var skippedZeros []string
 	for i := 0; i < uv.NumField(); i++ {
 		pField := pv.Field(i)
 		uField := uv.Field(i)
@@ -78,8 +81,8 @@ func mergeFields(pv, uv reflect.Value, pt *persistableType) bool {
 			}
 			pField.Set(uField)
 		} else {
-			// Scalar zero value means "not provided" — use pointer types to set zero intentionally
 			if uField.IsZero() {
+				skippedZeros = append(skippedZeros, fieldName)
 				continue
 			}
 			pField.Set(uField)
@@ -87,6 +90,9 @@ func mergeFields(pv, uv reflect.Value, pt *persistableType) bool {
 				validateConstraints = true
 			}
 		}
+	}
+	if len(skippedZeros) > 0 {
+		log.Debug("skipped zero-value fields - use pointer if the zero-value is valid", "field", skippedZeros)
 	}
 
 	return validateConstraints

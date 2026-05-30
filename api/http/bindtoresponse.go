@@ -2,7 +2,6 @@ package http
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -187,7 +186,7 @@ func (b bindResponseHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc s
 				return gomerr.Marshal("value", fv).Wrap(err)
 			}
 			headerVal = string(marshaled)
-		} else if stringer, ok := val.(fmt.Stringer); ok {
+		} else if stringer, ok := val.(interface{ String() string }); ok {
 			headerVal = stringer.String()
 		} else {
 
