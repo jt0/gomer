@@ -40,7 +40,7 @@ func Struct(validationTool *structs.Tool) Constraint {
 }
 
 func Union(validationTool *structs.Tool) Constraint {
-	return New("union", nil, func(toTest any) gomerr.Gomerr {
+	return New("union", "one", func(toTest any) gomerr.Gomerr {
 		v, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
 			return nil
@@ -51,12 +51,12 @@ func Union(validationTool *structs.Tool) Constraint {
 			if !fv.IsValid() || fv.IsZero() {
 				continue
 			} else if found.IsValid() {
-				return NotSatisfied("values:2").AddAttributes("expected", "values:1")
+				return NotSatisfied("multiple")
 			}
 			found = fv
 		}
 		if !found.IsValid() {
-			return NotSatisfied("values:0").AddAttributes("expected", "values:1")
+			return NotSatisfied("none")
 		}
 
 		if ge := structs.ApplyTools(found, structs.EnsureContext(), validationTool); ge != nil {
