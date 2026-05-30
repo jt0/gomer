@@ -26,9 +26,7 @@ var UseBracketsForContainedTargets = false
 
 func Struct(validationTool *structs.Tool) Constraint {
 	return New("struct", nil, func(toTest any) gomerr.Gomerr {
-		// Do we need to check for 'nil' here?
-		_, ok := flect.ReadableIndirectValue(toTest)
-		if !ok {
+		if _, ok := flect.ReadableIndirectValue(toTest); !ok {
 			return nil
 		}
 
@@ -37,7 +35,33 @@ func Struct(validationTool *structs.Tool) Constraint {
 		if ge := structs.ApplyTools(toTest, structs.EnsureContext(), validationTool); ge != nil {
 			return ge
 		}
+		return nil
+	})
+}
 
+func Union(validationTool *structs.Tool) Constraint {
+	return New("union", nil, func(toTest any) gomerr.Gomerr {
+		v, ok := flect.ReadableIndirectValue(toTest)
+		if !ok {
+			return nil
+		}
+
+		var found reflect.Value
+		for _, fv := range v.Fields() {
+			if !fv.IsValid() || fv.IsZero() {
+				continue
+			} else if found.IsValid() {
+				return NotSatisfied("values:2").AddAttributes("expected", "values:1")
+			}
+			found = fv
+		}
+		if !found.IsValid() {
+			return NotSatisfied("values:0").AddAttributes("expected", "values:1")
+		}
+
+		if ge := structs.ApplyTools(found, structs.EnsureContext(), validationTool); ge != nil {
+			return ge
+		}
 		return nil
 	})
 }

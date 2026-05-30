@@ -15,7 +15,7 @@ type fsSpec struct {
 
 type rangeSpec struct {
 	Min int `validate:""`
-	Max int `validate:"field($.Min,lte,$.Max)"`
+	Max int `validate:"int(gte,$.Min)"`
 }
 
 type boolSpec struct {

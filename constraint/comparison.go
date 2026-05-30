@@ -28,14 +28,14 @@ func IntCompare(comparisonType ComparisonType, compareTo *int64) Constraint {
 		return ConfigurationError("unrecognized comparison type: " + comparisonType)
 	}
 
-	return New("int_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
+	return New(comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
 		if compareTo == nil {
 			return nil
 		}
 
 		ttv, vOk := flect.ReadableIndirectValue(toTest)
 		if !vOk {
-			return nil // should be NotSatisfied?
+			return nil
 		}
 
 		defer func() {
@@ -55,13 +55,7 @@ func IntCompare(comparisonType ComparisonType, compareTo *int64) Constraint {
 // IntBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func IntBetween(lower, upper *int64) Constraint {
-	lc := IntCompare(GTE, lower)
-	lc.(*constraint).type_ = GTE
-	uc := IntCompare(LTE, upper)
-	uc.(*constraint).type_ = LTE
-	c := And(lc, uc)
-	c.(*constraint).type_ = "int"
-	return c
+	return And(IntCompare(GTE, lower), IntCompare(LTE, upper))
 }
 
 var intComparators = map[ComparisonType]func(int64, int64) bool{
@@ -83,14 +77,14 @@ func UintCompare(comparisonType ComparisonType, compareTo *uint64) Constraint {
 		return ConfigurationError("unrecognized comparison type: " + comparisonType)
 	}
 
-	return New("uint_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
+	return New(comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
 		if compareTo == nil {
 			return nil
 		}
 
 		ttv, vOk := flect.ReadableIndirectValue(toTest)
 		if !vOk {
-			return nil // should be NotSatisfied?
+			return nil
 		}
 
 		defer func() {
@@ -110,13 +104,7 @@ func UintCompare(comparisonType ComparisonType, compareTo *uint64) Constraint {
 // UintBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func UintBetween(lower, upper *uint64) Constraint {
-	lc := UintCompare(GTE, lower)
-	lc.(*constraint).type_ = GTE
-	uc := UintCompare(LTE, upper)
-	uc.(*constraint).type_ = LTE
-	c := And(lc, uc)
-	c.(*constraint).type_ = "uint"
-	return c
+	return And(UintCompare(GTE, lower), UintCompare(LTE, upper))
 }
 
 var uintComparators = map[ComparisonType]func(uint64, uint64) bool{
@@ -137,14 +125,14 @@ func FloatCompare(comparisonType ComparisonType, compareTo *float64) Constraint 
 		return ConfigurationError("unrecognized comparison type: " + comparisonType)
 	}
 
-	return New("float_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
+	return New(comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
 		if compareTo == nil {
 			return nil
 		}
 
 		ttv, ok := flect.ReadableIndirectValue(toTest)
 		if !ok {
-			return nil // should be NotSatisfied?
+			return nil
 		}
 
 		defer func() {
@@ -164,13 +152,7 @@ func FloatCompare(comparisonType ComparisonType, compareTo *float64) Constraint 
 // FloatBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func FloatBetween(lower, upper *float64) Constraint {
-	lc := FloatCompare(GTE, lower)
-	lc.(*constraint).type_ = GTE
-	uc := FloatCompare(LTE, upper)
-	uc.(*constraint).type_ = LTE
-	c := And(lc, uc)
-	c.(*constraint).type_ = "float"
-	return c
+	return And(FloatCompare(GTE, lower), FloatCompare(LTE, upper))
 }
 
 var floatComparators = map[ComparisonType]func(float64, float64) bool{
@@ -190,14 +172,14 @@ func TimeCompare(comparisonType ComparisonType, compareTo *time.Time) Constraint
 		return ConfigurationError("unrecognized comparison type: " + comparisonType)
 	}
 
-	return New("time_"+comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
+	return New(comparisonType, compareTo, func(toTest any) (ge gomerr.Gomerr) {
 		if compareTo == nil {
 			return nil
 		}
 
 		ttv, vOk := flect.ReadableIndirectValue(toTest)
 		if !vOk {
-			return nil // should be NotSatisfied?
+			return nil
 		}
 
 		defer func() {
@@ -217,13 +199,7 @@ func TimeCompare(comparisonType ComparisonType, compareTo *time.Time) Constraint
 // TimeBetween determines whether the provided value is (inclusively) between the lower and upper values provided.
 // Stated explicitly, this tests for lower <= value <= upper.
 func TimeBetween(lower, upper *time.Time) Constraint {
-	lc := TimeCompare(GTE, lower)
-	lc.(*constraint).type_ = GTE
-	uc := TimeCompare(LTE, upper)
-	uc.(*constraint).type_ = LTE
-	c := And(lc, uc)
-	c.(*constraint).type_ = "time"
-	return c
+	return And(TimeCompare(GTE, lower), TimeCompare(LTE, upper))
 }
 
 var timeComparators = map[ComparisonType]func(time.Time, time.Time) bool{

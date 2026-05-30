@@ -96,7 +96,6 @@ var built = map[string]Constraint{
 
 var builders = map[string]any{
 	"and":          And,
-	"array":        Elements,
 	"elements":     Elements,
 	"endswith":     EndsWith, // static or dynamic values: endswith($.Suffix)
 	"entries":      Entries,
@@ -124,8 +123,7 @@ var builders = map[string]any{
 	"oneof":        OneOf,
 	"or":           Or,
 	"regexp":       Regexp,
-	"required":     Required, // static or dynamic values: required($.Other)
-	"slice":        Elements,
+	"required":     Required,    // static or dynamic values: required($.Other)
 	"startswith":   StartsWith,  // static or dynamic values: startswith($.Prefix)
 	"time":         TimeCompare, // static or dynamic values: time(gte,$.Limit)
 	"timebetween":  TimeBetween, // static or dynamic values: timebetween($.Start,$.End)
@@ -241,6 +239,10 @@ func constraintFor(validationsString string, op logicOp /* passing field to supp
 			}
 		}
 
+		if op != orOp && isFieldConstraint(c) {
+			return nil, gomerr.Configuration("field() constraint may only be used as a guard within an or() clause")
+		}
+
 		constraints = append(constraints, c)
 	}
 
@@ -321,7 +323,7 @@ func buildConstraint(constraintName, parametersString string, field reflect.Stru
 	}
 
 	in := make([]reflect.Value, parametersLen)
-	dynamicValues := make(map[string]reflect.Value)
+	dynamicValues := make(map[string][]reflect.Value)
 
 	var pIndex int
 	for pIndex = 0; pIndex < numIn; pIndex++ {
@@ -384,7 +386,14 @@ var (
 //   - Dynamic reference ($.Field): allocates a pointer that will be populated at validation
 //     time with the referenced field's value.
 //   - Static value: converts the string to the target type using flect.SetValue.
-func parameterValue(pType reflect.Type, pString string, dynamicValues map[string]reflect.Value, field reflect.StructField) (reflect.Value, gomerr.Gomerr) {
+func isFieldConstraint(c Constraint) bool {
+	if dc, ok := c.(*dynamicConstraint); ok {
+		c = dc.Constraint
+	}
+	return strings.HasPrefix(c.Type(), "fieldTest_")
+}
+
+func parameterValue(pType reflect.Type, pString string, dynamicValues map[string][]reflect.Value, field reflect.StructField) (reflect.Value, gomerr.Gomerr) {
 	// Constraint parameter
 	if pType == constraintType {
 		if pString == "" {
@@ -406,7 +415,7 @@ func parameterValue(pType reflect.Type, pString string, dynamicValues map[string
 
 		pv := reflect.New(pType).Elem()
 		pv.Set(reflect.New(pType.Elem()))
-		dynamicValues[pString] = pv
+		dynamicValues[pString] = append(dynamicValues[pString], pv)
 		return pv, nil
 	}
 

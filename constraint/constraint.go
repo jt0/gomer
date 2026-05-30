@@ -151,18 +151,28 @@ func parametersToString(params any) string {
 // at `apply` need to get the value of what the constraint is going to use to check
 type dynamicConstraint struct {
 	Constraint
-	dynamicValues map[string]reflect.Value
+	dynamicValues map[string][]reflect.Value
 }
 
 func dynamicIfNeeded(newConstraint Constraint, constraints ...Constraint) Constraint {
-	collectedDynamicValues := make(map[string]reflect.Value)
+	collectedDynamicValues := make(map[string][]reflect.Value)
 	for _, c := range constraints {
 		if dc, ok := c.(*dynamicConstraint); ok {
-			for k, v := range dc.dynamicValues {
-				if dv, exists := collectedDynamicValues[k]; exists && dv != v {
-					return ConfigurationError("duplicate key for dynamic attributes: " + k)
+			for k, vs := range dc.dynamicValues {
+				existing := collectedDynamicValues[k]
+				for _, v := range vs {
+					found := false
+					for _, ev := range existing {
+						if ev == v {
+							found = true
+							break
+						}
+					}
+					if !found {
+						existing = append(existing, v)
+					}
 				}
-				collectedDynamicValues[k] = v
+				collectedDynamicValues[k] = existing
 			}
 		}
 	}

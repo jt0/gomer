@@ -25,6 +25,7 @@ func NewValidationTool(dp structs.DirectiveProvider, optional ...TargetNamer) *s
 
 	// TODO:p1 revisit - kinda hacky
 	built["struct"] = Struct(tool)
+	built["union"] = Union(tool)
 
 	return tool
 }
@@ -81,11 +82,15 @@ type validationApplier struct {
 //  3. The constraint's test function dereferences the pointer to access the live value.
 func (t validationApplier) Apply(sv reflect.Value, fv reflect.Value, _ structs.ToolContext) gomerr.Gomerr {
 	if dc, ok := t.constraint.(*dynamicConstraint); ok {
-		for source, dv := range dc.dynamicValues {
-			if value, ge := structs.ValueFromStruct(sv, fv, source); ge != nil {
+		for source, dvs := range dc.dynamicValues {
+			value, ge := structs.ValueFromStruct(sv, fv, source)
+			if ge != nil {
 				return gomerr.Configuration("unable to validate").AddAttributes("source", source, "value", value).Wrap(ge)
-			} else if ge = flect.SetValue(dv.Elem(), value); ge != nil {
-				return gomerr.Configuration("unable to validate").AddAttributes("source", source, "value", value).Wrap(ge)
+			}
+			for _, dv := range dvs {
+				if ge = flect.SetValue(dv.Elem(), value); ge != nil {
+					return gomerr.Configuration("unable to validate").AddAttributes("source", source, "value", value).Wrap(ge)
+				}
 			}
 		}
 	}
