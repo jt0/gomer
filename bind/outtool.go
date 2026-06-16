@@ -45,17 +45,16 @@ func (ap outApplierProvider) Applier(st reflect.Type, sf reflect.StructField, di
 
 	//goland:noinspection GoBoolExpressions
 	omitIfEmpty := ap.emptyValue == omitEmpty
-	if cIndex := strings.IndexByte(directive, ','); cIndex != -1 {
+	if cIndex := strings.LastIndexByte(directive, ','); cIndex != -1 {
 		switch flag := directive[cIndex+1:]; flag {
 		case omitEmpty:
 			omitIfEmpty = true
+			directive = directive[:cIndex]
 		case includeEmpty:
 			omitIfEmpty = false
-		default:
-			return nil, gomerr.Configuration("unrecognized directive flag: " + flag)
+			directive = directive[:cIndex]
+		default: // ignore
 		}
-
-		directive = directive[:cIndex]
 	}
 
 	if applier, ge := structs.Composite(directive, ap.tool, st, sf); applier != nil || ge != nil {
