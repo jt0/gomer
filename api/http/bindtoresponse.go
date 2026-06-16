@@ -9,6 +9,7 @@ import (
 
 	"github.com/jt0/gomer/bind"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/log"
 	"github.com/jt0/gomer/structs"
 )
 
@@ -62,8 +63,7 @@ func BindToResponse(result reflect.Value, header http.Header, scope string, acce
 		With(bind.OutKey, make(map[string]any))
 
 	if ge := structs.ApplyTools(result, tc, bindToResponseTool); ge != nil {
-		// TODO: Previously returned error: ge (from ApplyTools)
-		// Consider logging or otherwise handling this error
+		log.Error("unable to bind response", "ge", ge.String())
 		return nil, http.StatusInternalServerError
 	}
 
