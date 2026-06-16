@@ -91,12 +91,8 @@ func (a inApplier) Apply(sv reflect.Value, fv reflect.Value, tc structs.ToolCont
 	if !mv.IsValid() || mv.IsNil() {
 		return nil
 	}
+
 	value := mv.Interface()
-
-	if a.omitIfEmpty && reflect.ValueOf(value).IsZero() {
-		return nil
-	}
-
 	switch fvt := fv.Type(); fv.Kind() {
 	case reflect.Struct:
 		vt := reflect.TypeOf(value)
