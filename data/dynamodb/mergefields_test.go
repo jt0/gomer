@@ -34,10 +34,6 @@ type mergeTarget struct {
 	Items []string
 }
 
-func sp(s string) *string                       { return &s }
-func ip(i int) *int                             { return &i }
-func mp(m map[string]string) *map[string]string { return &m }
-
 func TestMergeFields(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -99,26 +95,26 @@ func TestMergeFields(t *testing.T) {
 		{
 			name: "ptr-scalar/nil uv leaves pv untouched",
 			uv:   mergeTarget{},
-			pv:   mergeTarget{PtrStr: sp("keep")},
-			want: mergeTarget{PtrStr: sp("keep")},
+			pv:   mergeTarget{PtrStr: new("keep")},
+			want: mergeTarget{PtrStr: new("keep")},
 		},
 		{
 			name: "ptr-scalar/different value overwrites pv",
-			uv:   mergeTarget{PtrStr: sp("new")},
-			pv:   mergeTarget{PtrStr: sp("old")},
-			want: mergeTarget{PtrStr: sp("new")},
+			uv:   mergeTarget{PtrStr: new("new")},
+			pv:   mergeTarget{PtrStr: new("old")},
+			want: mergeTarget{PtrStr: new("new")},
 		},
 		{
 			name: "ptr-scalar/same dereferenced value is noop",
-			uv:   mergeTarget{PtrStr: sp("same")},
-			pv:   mergeTarget{PtrStr: sp("same")},
-			want: mergeTarget{PtrStr: sp("same")},
+			uv:   mergeTarget{PtrStr: new("same")},
+			pv:   mergeTarget{PtrStr: new("same")},
+			want: mergeTarget{PtrStr: new("same")},
 		},
 		{
 			name: "ptr-scalar/non-nil uv into nil pv",
-			uv:   mergeTarget{PtrInt: ip(42)},
+			uv:   mergeTarget{PtrInt: new(42)},
 			pv:   mergeTarget{},
-			want: mergeTarget{PtrInt: ip(42)},
+			want: mergeTarget{PtrInt: new(42)},
 		},
 		// --- Map: string values ---
 		{
@@ -192,45 +188,45 @@ func TestMergeFields(t *testing.T) {
 		{
 			name: "map-ptr/nil value deletes key",
 			uv:   mergeTarget{PtrMap: map[string]*string{"a": nil}},
-			pv:   mergeTarget{PtrMap: map[string]*string{"a": sp("old")}},
+			pv:   mergeTarget{PtrMap: map[string]*string{"a": new("old")}},
 			want: mergeTarget{PtrMap: map[string]*string{}},
 		},
 		{
 			name: "map-ptr/non-nil value adds key",
-			uv:   mergeTarget{PtrMap: map[string]*string{"b": sp("new")}},
-			pv:   mergeTarget{PtrMap: map[string]*string{"a": sp("keep")}},
-			want: mergeTarget{PtrMap: map[string]*string{"a": sp("keep"), "b": sp("new")}},
+			uv:   mergeTarget{PtrMap: map[string]*string{"b": new("new")}},
+			pv:   mergeTarget{PtrMap: map[string]*string{"a": new("keep")}},
+			want: mergeTarget{PtrMap: map[string]*string{"a": new("keep"), "b": new("new")}},
 		},
 		// --- Pointer to map ---
 		{
 			name: "ptr-to-map/nil uv leaves pv untouched",
 			uv:   mergeTarget{},
-			pv:   mergeTarget{PtrToMap: mp(map[string]string{"a": "1"})},
-			want: mergeTarget{PtrToMap: mp(map[string]string{"a": "1"})},
+			pv:   mergeTarget{PtrToMap: new(map[string]string{"a": "1"})},
+			want: mergeTarget{PtrToMap: new(map[string]string{"a": "1"})},
 		},
 		{
 			name: "ptr-to-map/empty map clears pointer",
-			uv:   mergeTarget{PtrToMap: mp(map[string]string{})},
-			pv:   mergeTarget{PtrToMap: mp(map[string]string{"a": "1", "b": "2"})},
+			uv:   mergeTarget{PtrToMap: new(map[string]string{})},
+			pv:   mergeTarget{PtrToMap: new(map[string]string{"a": "1", "b": "2"})},
 			want: mergeTarget{},
 		},
 		{
 			name: "ptr-to-map/merge keys",
-			uv:   mergeTarget{PtrToMap: mp(map[string]string{"b": "new"})},
-			pv:   mergeTarget{PtrToMap: mp(map[string]string{"a": "keep", "b": "old"})},
-			want: mergeTarget{PtrToMap: mp(map[string]string{"a": "keep", "b": "new"})},
+			uv:   mergeTarget{PtrToMap: new(map[string]string{"b": "new"})},
+			pv:   mergeTarget{PtrToMap: new(map[string]string{"a": "keep", "b": "old"})},
+			want: mergeTarget{PtrToMap: new(map[string]string{"a": "keep", "b": "new"})},
 		},
 		{
 			name: "ptr-to-map/delete key via zero value",
-			uv:   mergeTarget{PtrToMap: mp(map[string]string{"a": ""})},
-			pv:   mergeTarget{PtrToMap: mp(map[string]string{"a": "1", "b": "2"})},
-			want: mergeTarget{PtrToMap: mp(map[string]string{"b": "2"})},
+			uv:   mergeTarget{PtrToMap: new(map[string]string{"a": ""})},
+			pv:   mergeTarget{PtrToMap: new(map[string]string{"a": "1", "b": "2"})},
+			want: mergeTarget{PtrToMap: new(map[string]string{"b": "2"})},
 		},
 		{
 			name: "ptr-to-map/nil pv sets pointer",
-			uv:   mergeTarget{PtrToMap: mp(map[string]string{"a": "1"})},
+			uv:   mergeTarget{PtrToMap: new(map[string]string{"a": "1"})},
 			pv:   mergeTarget{},
-			want: mergeTarget{PtrToMap: mp(map[string]string{"a": "1"})},
+			want: mergeTarget{PtrToMap: new(map[string]string{"a": "1"})},
 		},
 		// --- Map with struct values ---
 		{
@@ -302,19 +298,24 @@ func TestMergeFields(t *testing.T) {
 			want: mergeTarget{Items: []string{"new"}},
 		},
 	}
+	tbl := &table{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			uv, pv := tt.uv, tt.pv
-			mergeFields(reflect.ValueOf(&pv).Elem(), reflect.ValueOf(&uv).Elem(), nil)
-			if !reflect.DeepEqual(pv, tt.want) {
-				t.Errorf("got  %+v\nwant %+v", pv, tt.want)
+			_, _ = tbl.mergeFields(reflect.ValueOf(&tt.pv).Elem(), reflect.ValueOf(&tt.uv).Elem(), nil)
+			if !reflect.DeepEqual(tt.pv, tt.want) {
+				t.Errorf("got  %+v\nwant %+v", tt.pv, tt.want)
 			}
 		})
 	}
 }
 
 func TestMergeFields_ConstraintTracking(t *testing.T) {
-	pt := &persistableType{constraintFields: map[string]bool{"Name": true}}
+	tbl := &table{
+		index: index{pk: &keyAttribute{
+			keyFieldsByPersistable: map[string][]*keyField{"foo": nil},
+		}},
+	}
+	pt := &persistableType{name: "foo", constraintFields: map[string]bool{"Name": true}}
 
 	tests := []struct {
 		name           string
@@ -342,8 +343,7 @@ func TestMergeFields_ConstraintTracking(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			uv, pv := tt.uv, tt.pv
-			got := mergeFields(reflect.ValueOf(&pv).Elem(), reflect.ValueOf(&uv).Elem(), pt)
+			got, _ := tbl.mergeFields(reflect.ValueOf(&tt.pv).Elem(), reflect.ValueOf(&tt.uv).Elem(), pt)
 			if got != tt.wantConstraint {
 				t.Errorf("validateConstraints = %v, want %v", got, tt.wantConstraint)
 			}
