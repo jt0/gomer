@@ -9,26 +9,19 @@ import (
 	"github.com/jt0/gomer/log"
 )
 
-func ExpressionApplierProvider(_ reflect.Type, sf reflect.StructField, directive string) (Applier, gomerr.Gomerr) {
-	if directive == "" {
+func ExpressionApplierProvider(directive string) (Applier, gomerr.Gomerr) {
+	if len(directive) < 2 || directive[0] != '$' {
 		return nil, nil
 	}
 
-	// special chars: $, [ (if map or slice/array)
-
-	// if directive[0] != '$' {
-	//
-	// }
-
-	if directive[1] == '.' {
-		return StructApplier{directive}, nil
-	} else {
+	if directive[1] != '.' {
 		tf := GetToolFunction(directive) // include the '$'
 		if tf == nil {
 			return nil, gomerr.Configuration("field function not found: " + directive)
 		}
 		return tf, nil
 	}
+	return StructApplier{directive}, nil
 }
 
 // ScopeAlias allows the caller to specify an alternative value to use when defining scoped configuration from the
@@ -63,13 +56,14 @@ var (
 )
 
 // Format: [<scope>:]<tool_config>[;[<scope>:]<tool_config>]]*
-// Note that both ':' and ';' are special chars. Once a scope has been provided, colons are allowed until the
-// end of the input or a ';' is found. If a colon should be used for what would otherwise not contain a scope,
-// one can use the wildcard scope (e.g. "*:this_colon_:_does_not_indicate_a_scope").
+// Note that both ':' and ';' are special chars. Once a scope has been provided, colons
+// are allowed until the end of the input or a ';' is found. If a colon should be used
+// for what would otherwise not contain a scope, one can use the wildcard scope (e.g.
+// "*:this_colon_:_does_not_indicate_a_scope").
 //
-// NB: scopes can't be reused within the input. If a scope repeats, the last one wins. This is true for wildcards
+// NB: Scopes can't be reused within the input. If a scope repeats, the last one wins.
 //
-//	(implicit, explicit, or both) as well.
+//	This is also true for wildcards (explicit or implicit).
 func applyScopes(ap ApplierProvider, structType reflect.Type, structField reflect.StructField, directive string) (Applier, gomerr.Gomerr) {
 	appliers := make(map[string]Applier)
 	for _, match := range scopeRegexp.FindAllStringSubmatch(directive, -1) {
@@ -129,27 +123,82 @@ func (s scopeSelect) Apply(sv reflect.Value, fv reflect.Value, tc ToolContext) g
 	return scopedApplier.Apply(sv, fv, tc)
 }
 
-// Composite checks for a composition directive (one of '?', '&' or '!') and if found creates a composed Applier from
-// the directive on either side based on the specified semantic. If there isn't a composition directive, this returns
-// nil for both Applier and gomerr.Gomerr.
+// Composite checks for a composition directive (one of 'if', '?', '&' or '!') and if
+// found, creates a composed Applier from the directive. If there isn't a composition
+// directive, this returns nil for both Applier and gomerr.Gomerr.
 // TODO:p2 this should perhaps be a default intermediary similar to how the scope applier can be
 func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructField) (Applier, gomerr.Gomerr) {
 	if strings.HasPrefix(directive, "if(") && directive[len(directive)-1] == ')' {
-		// TODO:p1
-		// Format: if({test},{do}<,{else}>)
-		// Example: if($.Enabled,+,-) or if($IsAdmin,+,=*****)
+		return ifThen(directive, tool, st, sf)
+	} else if tIndex := strings.IndexAny(directive, "?&!"); tIndex >= 0 {
+		return leftRight(directive, tool, st, sf, tIndex)
+	}
+	return nil, nil
+}
+
+// Format: if({test},{do}<,{else}>), for example if($.Enabled,+,-) or if($IsAdmin,+,=*****)
+func ifThen(directive string, tool *Tool, st reflect.Type, sf reflect.StructField) (_ Applier, ge gomerr.Gomerr) {
+	parts := strings.Split(directive[len("if("):len(directive)-len(")")], ",")
+
+	ite := ifThenElseApplier{name: sf.Name}
+	switch len(parts) {
+	case 3:
+		if ite.orElse, ge = applyScopes(tool.applierProvider, st, sf, parts[2]); ge != nil {
+			return nil, ge
+		}
+		fallthrough
+	case 2:
+		if ite.then, ge = applyScopes(tool.applierProvider, st, sf, parts[1]); ge != nil {
+			return nil, ge
+		}
+	default:
+		return nil, gomerr.Configuration("malformed 'if({test},{do}<,{else}>)' directive: " + directive)
 	}
 
-	tIndex := strings.IndexAny(directive, "?&!")
-	if tIndex == -1 {
-		return nil, nil
+	ea, ge := ExpressionApplierProvider(parts[0])
+	if ge != nil {
+		return nil, ge.AddAttribute("if", directive)
 	}
 
+	sa, ok := ea.(StructApplier)
+	if !ok {
+		return nil, gomerr.Configuration("if condition directive must reference a struct field or method; directive: " + directive)
+	}
+
+	source := sa.Source
+	ite.condition = func(sv reflect.Value, fv reflect.Value, tc ToolContext) bool {
+		a, vge := ValueFromStruct(sv, fv, source)
+		if vge != nil {
+			log.Warn("unable to get struct value", "field", sf.Name, "source", source, "ge", vge.Error())
+			return false
+		}
+		return a != nil && !reflect.ValueOf(a).IsZero()
+	}
+	return ite, nil
+}
+
+type ifThenElseApplier struct {
+	name      string
+	condition func(sv reflect.Value, fv reflect.Value, tc ToolContext) bool
+	then      Applier
+	orElse    Applier
+}
+
+func (a ifThenElseApplier) Apply(sv reflect.Value, fv reflect.Value, tc ToolContext) gomerr.Gomerr {
+	if a.condition(sv, fv, tc) {
+		return a.then.Apply(sv, fv, tc)
+	} else if a.orElse != nil {
+		return a.orElse.Apply(sv, fv, tc)
+	}
+	return nil
+}
+
+func leftRight(directive string, tool *Tool, st reflect.Type, sf reflect.StructField, tIndex int) (Applier, gomerr.Gomerr) {
 	var left Applier
 	var leftGe gomerr.Gomerr
 	if lhs := directive[:tIndex]; len(lhs) > 0 {
 		left, leftGe = applyScopes(tool.applierProvider, st, sf, lhs)
-		if _, ok := leftGe.(*gomerr.ConfigurationError); leftGe != nil && !ok {
+		if leftGe != nil && gomerr.ErrorAs[*gomerr.ConfigurationError](leftGe) == nil {
 			leftGe = gomerr.Configuration("unable to process directive: " + directive).Wrap(leftGe)
 		}
 	}
@@ -157,7 +206,7 @@ func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructF
 	var rightGe gomerr.Gomerr
 	if rhs := directive[tIndex+1:]; len(rhs) > 0 {
 		right, rightGe = applyScopes(tool.applierProvider, st, sf, rhs)
-		if _, ok := rightGe.(*gomerr.ConfigurationError); rightGe != nil && !ok {
+		if rightGe != nil && gomerr.ErrorAs[*gomerr.ConfigurationError](rightGe) == nil {
 			rightGe = gomerr.Configuration("unable to process directive: " + directive).Wrap(rightGe)
 		}
 	}
@@ -179,20 +228,6 @@ func Composite(directive string, tool *Tool, st reflect.Type, sf reflect.StructF
 
 	return leftTestRightApplier{sf.Name, left, testFn, right}, nil
 }
-
-// func (t *Tool) ifApplier(st reflect.Type, sf reflect.StructField, directive string) (Applier, gomerr.Gomerr) {
-// 	return nil, nil
-// }
-
-type ifThenElseApplier struct {
-	name   string
-	test   func(reflect.Value, gomerr.Gomerr) bool
-	then   Applier
-	orElse Applier
-}
-
-// func (a ifThenElseApplier) Apply(sv reflect.Value, fv reflect.Value, tc ToolContext) gomerr.Gomerr {
-// }
 
 type leftTestRightApplier struct {
 	name  string

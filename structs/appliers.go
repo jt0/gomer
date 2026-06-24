@@ -61,7 +61,7 @@ func ValueFromStruct(sv reflect.Value, fv reflect.Value, source string) (any, go
 	}
 
 	if f.Kind() == reflect.Ptr && f.IsNil() && source == "Attributes" {
-		log.Logger().Debug("source field is nil", "source", source)
+		log.Debug("source field is nil", "source", source)
 	}
 	return f.Interface(), nil
 }
