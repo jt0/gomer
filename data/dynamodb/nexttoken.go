@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -15,36 +14,29 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
+type NextTokenizer interface {
+	Tokenize(ctx context.Context, q data.Queryable, lastEvaluatedKey map[string]types.AttributeValue) (*string, gomerr.Gomerr)
+	Untokenize(ctx context.Context, q data.Queryable) (map[string]types.AttributeValue, gomerr.Gomerr)
+}
+
 type nextTokenizer struct {
 	cipher crypto.Cipher
 }
 
+// TODO: add queryable details into token
 type nextToken struct {
-	Version          uint               `json:"v"`
 	Filter           map[string]*string `json:"fd"`
 	LastEvaluatedKey map[string]string  `json:"lek"`
 	Expiration       time.Time          `json:"exp"`
 }
 
-func (nt nextToken) ExpiresAt() time.Time {
+func (nt *nextToken) ExpiresAt() time.Time {
 	return nt.Expiration
 }
 
-const (
-	stringPrefix = "S:"
-	numberPrefix = "N:"
+const NextPageToken = "NextPageToken"
 
-	NextPageToken = "NextPageToken"
-)
-
-var formatVersionExpirations = []time.Time{
-	time.Date(1971, 11, 30, 3, 56, 0, 0, time.UTC), // Version "0" expired a while ago
-}
-
-var formatVersion = uint(len(formatVersionExpirations))
-
-// TODO: add queryable details into token
-func (t *nextTokenizer) tokenize(ctx context.Context, q data.Queryable, lastEvaluatedKey map[string]types.AttributeValue) (*string, gomerr.Gomerr) {
+func (t *nextTokenizer) Tokenize(ctx context.Context, q data.Queryable, lastEvaluatedKey map[string]types.AttributeValue) (*string, gomerr.Gomerr) {
 	if lastEvaluatedKey == nil {
 		return nil, nil
 	}
@@ -54,10 +46,9 @@ func (t *nextTokenizer) tokenize(ctx context.Context, q data.Queryable, lastEval
 	}
 
 	nt := &nextToken{
-		Version:          formatVersion,
 		Filter:           nil, // TODO
 		LastEvaluatedKey: encodeLastEvaluatedKey(lastEvaluatedKey),
-		Expiration:       expirationTime(),
+		Expiration:       time.Now().UTC().Add(time.Hour * 24),
 	}
 
 	toEncrypt, err := json.Marshal(nt)
@@ -75,18 +66,17 @@ func (t *nextTokenizer) tokenize(ctx context.Context, q data.Queryable, lastEval
 	return &encoded, nil
 }
 
-// untokenize will pull the NextPageToken from the queryable and (if there is one) decode the value. Possible errors:
+// Untokenize will pull the NextPageToken from the queryable and (if there is one) decode the value. Possible errors:
 //
 //	gomerr.BadValueError's Type:
 //	    Expired:
 //	    	If the token was generated more than 24 hours ago (a hard-coded duration)
-//	        If the token is using an old format version
 //	    Malformed:
 //	        If the token is not Base64-encoded
 //	        If the token fails decryption
 //
 // See the crypto.kmsDataKeyDecrypter Decrypt operation for additional errors types.
-func (t *nextTokenizer) untokenize(ctx context.Context, q data.Queryable) (map[string]types.AttributeValue, gomerr.Gomerr) {
+func (t *nextTokenizer) Untokenize(ctx context.Context, q data.Queryable) (map[string]types.AttributeValue, gomerr.Gomerr) {
 	if q.NextPageToken() == nil {
 		return nil, nil
 	}
@@ -110,12 +100,7 @@ func (t *nextTokenizer) untokenize(ctx context.Context, q data.Queryable) (map[s
 		return nil, gomerr.MalformedValue(NextPageToken, nil).Wrap(err)
 	}
 
-	// only one version to check so far...
-	if nt.Version != formatVersion {
-		return nil, gomerr.ValueExpired(NextPageToken, formatVersionExpirations[nt.Version]).Wrap(ge)
-	}
-
-	if nt.tokenExpired() {
+	if time.Now().UTC().After(nt.Expiration) {
 		return nil, gomerr.ValueExpired(NextPageToken, nt.Expiration)
 	}
 
@@ -124,20 +109,10 @@ func (t *nextTokenizer) untokenize(ctx context.Context, q data.Queryable) (map[s
 	return decodeLastEvaluatedKey(nt.LastEvaluatedKey), nil
 }
 
-func expirationTime() time.Time {
-	return time.Now().UTC().Add(time.Hour * 24)
-}
-
-func (nt *nextToken) tokenExpired() bool {
-	return time.Now().UTC().After(nt.Expiration)
-}
-
-func (nt *nextToken) formatVersionExpired() bool {
-	if nt.Version == formatVersion {
-		return false
-	}
-	return time.Now().UTC().After(formatVersionExpirations[nt.Version])
-}
+const (
+	stringPrefix = "S:"
+	numberPrefix = "N:"
+)
 
 func encodeLastEvaluatedKey(lastEvaluatedKey map[string]types.AttributeValue) map[string]string {
 	lek := make(map[string]string, len(lastEvaluatedKey))
@@ -145,9 +120,9 @@ func encodeLastEvaluatedKey(lastEvaluatedKey map[string]types.AttributeValue) ma
 	for key, value := range lastEvaluatedKey {
 		switch v := value.(type) {
 		case *types.AttributeValueMemberS:
-			lek[key] = fmt.Sprintf("%s%s", stringPrefix, v.Value)
+			lek[key] = stringPrefix + v.Value
 		case *types.AttributeValueMemberN:
-			lek[key] = fmt.Sprintf("%s%s", numberPrefix, v.Value)
+			lek[key] = numberPrefix + v.Value
 		}
 	}
 

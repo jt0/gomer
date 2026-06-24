@@ -150,7 +150,7 @@ func (t *table) querySingleType(ctx context.Context, q data.Queryable) gomerr.Go
 		return ge
 	}
 
-	nt, ge := t.nextTokenizer.tokenize(ctx, q, output.LastEvaluatedKey)
+	nt, ge := t.nextTokenizer.Tokenize(ctx, q, output.LastEvaluatedKey)
 	if ge != nil {
 		return gomerr.Internal("unable to generate nextToken").Wrap(ge)
 	}
@@ -210,7 +210,7 @@ func (t *table) buildMultiTypeQueryInput(ctx context.Context, q data.Queryable, 
 		expressionAttributeNames = nil
 	}
 
-	exclusiveStartKey, ge := t.nextTokenizer.untokenize(ctx, q)
+	exclusiveStartKey, ge := t.nextTokenizer.Untokenize(ctx, q)
 	if ge != nil {
 		return nil, ge
 	}
@@ -313,7 +313,7 @@ func (t *table) routeQueryResults(ctx context.Context, q data.Queryable, nested 
 	}
 
 	// Handle pagination token
-	nt, ge := t.nextTokenizer.tokenize(ctx, q, output.LastEvaluatedKey)
+	nt, ge := t.nextTokenizer.Tokenize(ctx, q, output.LastEvaluatedKey)
 	if ge != nil {
 		return gomerr.Internal("unable to generate nextToken").Wrap(ge)
 	}
