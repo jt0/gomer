@@ -48,6 +48,10 @@ func DebugContext(ctx context.Context, msg string, args ...any) {
 	Logger().Log(ctx, slog.LevelDebug, msg, args...)
 }
 
+func DebugEnabled() bool {
+	return Logger().Enabled(nil, slog.LevelDebug)
+}
+
 // Info calls [Logger.Info] on the current logger.
 func Info(msg string, args ...any) {
 	Logger().Log(context.Background(), slog.LevelInfo, msg, args...)

@@ -26,15 +26,16 @@ type kmsDataKeyEncrypter struct {
 	keyId string
 }
 
-// TODO: add support for asymmetric keys
 func KmsDataKeyEncrypter(kmsClient *kms.Client, keyId string) Encrypter {
+	// TODO: add support for asymmetric keys
+	// TODO: get key info to determine KeySpec length
 	return kmsDataKeyEncrypter{
 		kms:   kmsClient,
 		keyId: keyId,
 	}
 }
 
-// Decrypt returns the decrypted form of the encrypted content given the optional encryptionContext. If
+// Encrypt returns the decrypted form of the encrypted content given the optional encryptionContext. If
 //
 //	gomerr.NotFoundError:
 //	    The Encrypter keyId isn't found within KMS
@@ -130,8 +131,7 @@ func KmsDataKeyDecrypter(kmsClient *kms.Client) Decrypter {
 	}
 }
 
-// TODO: add support for grant tokens?
-// DecryptWithContext returns the decrypted form of the encrypted content given the optional encryptionContext.
+// Decrypt returns the decrypted form of the encrypted content given the optional encryptionContext.
 //
 //	gomerr.UnmarshalError:
 //	    There is a problem reading the the encoded data
@@ -144,6 +144,7 @@ func KmsDataKeyDecrypter(kmsClient *kms.Client) Decrypter {
 //	    An unexpected error occurred calling KMS
 //
 // Decrypt returns the same data (and errors) as DecryptWithContext using just the Background context.
+// TODO: add support for grant tokens?
 func (k kmsDataKeyDecrypter) Decrypt(ctx context.Context, encrypted []byte, encryptionContext map[string]string) ([]byte, gomerr.Gomerr) {
 	ciphertext, ciphertextBlob, nonce, ge := k.decode(encrypted)
 	if ge != nil {

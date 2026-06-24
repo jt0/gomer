@@ -198,7 +198,7 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 				c.ascending = kf.ascending
 			}
 
-			if kf.name[:1] == "'" {
+			if kf.name[0] == '\'' {
 				c.preferred = kf.preferred // static values always apply preferred
 				continue
 			}
