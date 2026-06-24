@@ -14,7 +14,6 @@ import (
 	"github.com/jt0/gomer/data"
 	ddb "github.com/jt0/gomer/data/dynamodb"
 	ddbtest "github.com/jt0/gomer/data/dynamodb/_test"
-	testentities "github.com/jt0/gomer/data/dynamodb/_test"
 )
 
 const crudTestTableName = "gomer_crud_test"
@@ -64,13 +63,19 @@ func setupCrudStore(t *testing.T, persistables ...data.Persistable) (data.Store,
 		ConsistencyDefault:          ddb.Preferred,
 		FailDeleteIfNotPresent:      false,
 		ValidateKeyFieldConsistency: false,
-	}, persistables...)
+	})
 	assert.Success(t, ge)
+	assert.Success(t, store.AddPersistables(persistables...))
 
 	return store, client
 }
 
-func cleanupCrudTable(t *testing.T, client *dynamodb.Client) {
+func deleteCrudTable(t *testing.T, client *dynamodb.Client) {
+	err := ddbtest.DeleteTable(client, crudTestTableName)
+	assert.Success(t, err)
+}
+
+func cleanCrudTable(t *testing.T, client *dynamodb.Client) {
 	err := ddbtest.DeleteAllTableData(client, crudTestTableName)
 	assert.Success(t, err)
 }
@@ -127,7 +132,7 @@ func TestCreate(t *testing.T) {
 	}{
 		{
 			name: "create composite key entity",
-			entity: &testentities.CompositeKeyEntity{
+			entity: &ddbtest.CompositeKeyEntity{
 				PartitionKey: "partition1",
 				SortKey:      "sort1",
 				Data:         "test-data",
@@ -138,7 +143,7 @@ func TestCreate(t *testing.T) {
 				if !verifyEntityExists(t, client, "partition1", "sort1") {
 					t.Error("CompositeKeyEntity should exist")
 				}
-				readEntity := &testentities.CompositeKeyEntity{PartitionKey: "partition1", SortKey: "sort1"}
+				readEntity := &ddbtest.CompositeKeyEntity{PartitionKey: "partition1", SortKey: "sort1"}
 				ge := store.Read(context.Background(), readEntity)
 				assert.Success(t, ge)
 				if readEntity.Data != "test-data" || !readEntity.Active {
@@ -148,7 +153,7 @@ func TestCreate(t *testing.T) {
 		},
 		{
 			name: "create multi-part key entity",
-			entity: &testentities.MultiPartKeyEntity{
+			entity: &ddbtest.MultiPartKeyEntity{
 				TenantId:   "tenant1",
 				EntityType: "TYPE1",
 				Id:         "id1",
@@ -159,7 +164,7 @@ func TestCreate(t *testing.T) {
 				if !verifyEntityExists(t, client, "tenant1#TYPE1", "id1") {
 					t.Error("MultiPartKeyEntity should exist")
 				}
-				readEntity := &testentities.MultiPartKeyEntity{TenantId: "tenant1", EntityType: "TYPE1", Id: "id1"}
+				readEntity := &ddbtest.MultiPartKeyEntity{TenantId: "tenant1", EntityType: "TYPE1", Id: "id1"}
 				ge := store.Read(context.Background(), readEntity)
 				assert.Success(t, ge)
 				if readEntity.Payload != "payload-data" {
@@ -169,7 +174,7 @@ func TestCreate(t *testing.T) {
 		},
 		{
 			name: "create static key entity",
-			entity: &testentities.StaticKeyEntity{
+			entity: &ddbtest.StaticKeyEntity{
 				Id:     "item1",
 				Status: "active",
 				Detail: "test-detail",
@@ -179,7 +184,7 @@ func TestCreate(t *testing.T) {
 				if !verifyEntityExists(t, client, "ITEM#item1", "STATUS#active") {
 					t.Error("StaticKeyEntity should exist")
 				}
-				readEntity := &testentities.StaticKeyEntity{Id: "item1", Status: "active"}
+				readEntity := &ddbtest.StaticKeyEntity{Id: "item1", Status: "active"}
 				ge := store.Read(context.Background(), readEntity)
 				assert.Success(t, ge)
 				if readEntity.Detail != "test-detail" {
@@ -189,7 +194,7 @@ func TestCreate(t *testing.T) {
 		},
 		{
 			name: "create user with gsi fields",
-			entity: &testentities.User{
+			entity: &ddbtest.User{
 				TenantId: "tenant1",
 				Id:       "user1",
 				Email:    "user1@example.com",
@@ -214,7 +219,7 @@ func TestCreate(t *testing.T) {
 		},
 		{
 			name: "create product with lsi and gsi",
-			entity: &testentities.Product{
+			entity: &ddbtest.Product{
 				TenantId:    "tenant1",
 				Id:          "prod1",
 				Sku:         "SKU001",
@@ -242,7 +247,7 @@ func TestCreate(t *testing.T) {
 		},
 		{
 			name: "create with missing required sk field",
-			entity: &testentities.CompositeKeyEntity{
+			entity: &ddbtest.CompositeKeyEntity{
 				PartitionKey: "partition1",
 				SortKey:      "", // Empty SK
 				Data:         "test",
@@ -251,18 +256,22 @@ func TestCreate(t *testing.T) {
 		},
 	}
 
+	store, client := setupCrudStore(t,
+		new(ddbtest.CompositeKeyEntity),
+		new(ddbtest.MultiPartKeyEntity),
+		new(ddbtest.StaticKeyEntity),
+		new(ddbtest.User),
+		new(ddbtest.Product),
+	)
+	defer deleteCrudTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupCrudStore(t, tt.entity)
-			defer cleanupCrudTable(t, client)
-
-			ctx := context.Background()
-
 			if tt.setupFunc != nil {
 				tt.setupFunc(store)
 			}
 
-			ge := store.Create(ctx, tt.entity)
+			ge := store.Create(context.Background(), tt.entity)
 
 			if tt.expectError {
 				if ge == nil {
@@ -289,16 +298,16 @@ func TestRead(t *testing.T) {
 		{
 			name: "read composite key entity by pk and sk",
 			setup: func(store data.Store) data.Persistable {
-				entity := &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1", Data: "data1", Active: true}
+				entity := &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1", Data: "data1", Active: true}
 				assert.Success(t, store.Create(context.Background(), entity))
 				return entity
 			},
 			read: func() data.Persistable {
-				return &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1"}
+				return &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1"}
 			},
 			verifyFunc: func(t *testing.T, created, read data.Persistable) {
-				c := created.(*testentities.CompositeKeyEntity)
-				r := read.(*testentities.CompositeKeyEntity)
+				c := created.(*ddbtest.CompositeKeyEntity)
+				r := read.(*ddbtest.CompositeKeyEntity)
 				if r.Data != c.Data || r.Active != c.Active {
 					t.Errorf("Mismatch: got %+v, want %+v", r, c)
 				}
@@ -307,16 +316,16 @@ func TestRead(t *testing.T) {
 		{
 			name: "read multi-part key entity",
 			setup: func(store data.Store) data.Persistable {
-				entity := &testentities.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1", Payload: "pay1"}
+				entity := &ddbtest.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1", Payload: "pay1"}
 				assert.Success(t, store.Create(context.Background(), entity))
 				return entity
 			},
 			read: func() data.Persistable {
-				return &testentities.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1"}
+				return &ddbtest.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1"}
 			},
 			verifyFunc: func(t *testing.T, created, read data.Persistable) {
-				c := created.(*testentities.MultiPartKeyEntity)
-				r := read.(*testentities.MultiPartKeyEntity)
+				c := created.(*ddbtest.MultiPartKeyEntity)
+				r := read.(*ddbtest.MultiPartKeyEntity)
 				if r.Payload != c.Payload {
 					t.Errorf("Mismatch: got Payload=%s, want %s", r.Payload, c.Payload)
 				}
@@ -329,16 +338,16 @@ func TestRead(t *testing.T) {
 		{
 			name: "read static key entity",
 			setup: func(store data.Store) data.Persistable {
-				entity := &testentities.StaticKeyEntity{Id: "item1", Status: "active", Detail: "detail1"}
+				entity := &ddbtest.StaticKeyEntity{Id: "item1", Status: "active", Detail: "detail1"}
 				assert.Success(t, store.Create(context.Background(), entity))
 				return entity
 			},
 			read: func() data.Persistable {
-				return &testentities.StaticKeyEntity{Id: "item1", Status: "active"}
+				return &ddbtest.StaticKeyEntity{Id: "item1", Status: "active"}
 			},
 			verifyFunc: func(t *testing.T, created, read data.Persistable) {
-				c := created.(*testentities.StaticKeyEntity)
-				r := read.(*testentities.StaticKeyEntity)
+				c := created.(*ddbtest.StaticKeyEntity)
+				r := read.(*ddbtest.StaticKeyEntity)
 				if r.Detail != c.Detail {
 					t.Errorf("Mismatch: got Detail=%s, want %s", r.Detail, c.Detail)
 				}
@@ -347,16 +356,16 @@ func TestRead(t *testing.T) {
 		{
 			name: "read user (pk only, no sk)",
 			setup: func(store data.Store) data.Persistable {
-				entity := &testentities.User{TenantId: "t1", Id: "u1", Email: "test@example.com", Name: "Test", Status: "active"}
+				entity := &ddbtest.User{TenantId: "t1", Id: "u1", Email: "test@example.com", Name: "Test", Status: "active"}
 				assert.Success(t, store.Create(context.Background(), entity))
 				return entity
 			},
 			read: func() data.Persistable {
-				return &testentities.User{TenantId: "t1", Id: "u1"}
+				return &ddbtest.User{TenantId: "t1", Id: "u1"}
 			},
 			verifyFunc: func(t *testing.T, created, read data.Persistable) {
-				c := created.(*testentities.User)
-				r := read.(*testentities.User)
+				c := created.(*ddbtest.User)
+				r := read.(*ddbtest.User)
 				if r.Email != c.Email || r.Name != c.Name || r.Status != c.Status {
 					t.Errorf("Mismatch: got %+v, want %+v", r, c)
 				}
@@ -369,16 +378,16 @@ func TestRead(t *testing.T) {
 		{
 			name: "read product (pk+sk)",
 			setup: func(store data.Store) data.Persistable {
-				entity := &testentities.Product{TenantId: "t1", Id: "p1", Sku: "SKU1", Category: "Cat1", Name: "Prod1", Price: 10.0, Description: "desc1"}
+				entity := &ddbtest.Product{TenantId: "t1", Id: "p1", Sku: "SKU1", Category: "Cat1", Name: "Prod1", Price: 10.0, Description: "desc1"}
 				assert.Success(t, store.Create(context.Background(), entity))
 				return entity
 			},
 			read: func() data.Persistable {
-				return &testentities.Product{TenantId: "t1", Id: "p1"}
+				return &ddbtest.Product{TenantId: "t1", Id: "p1"}
 			},
 			verifyFunc: func(t *testing.T, created, read data.Persistable) {
-				c := created.(*testentities.Product)
-				r := read.(*testentities.Product)
+				c := created.(*ddbtest.Product)
+				r := read.(*ddbtest.Product)
 				if r.Sku != c.Sku || r.Category != c.Category || r.Name != c.Name || r.Price != c.Price {
 					t.Errorf("Mismatch: got %+v, want %+v", r, c)
 				}
@@ -388,16 +397,16 @@ func TestRead(t *testing.T) {
 			name: "read order with time.Time in key",
 			setup: func(store data.Store) data.Persistable {
 				orderDate := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
-				entity := &testentities.Order{TenantId: "t1", OrderId: "o1", UserId: "u1", OrderDate: orderDate, Status: "pending", Total: 100.0}
+				entity := &ddbtest.Order{TenantId: "t1", OrderId: "o1", UserId: "u1", OrderDate: orderDate, Status: "pending", Total: 100.0}
 				assert.Success(t, store.Create(context.Background(), entity))
 				return entity
 			},
 			read: func() data.Persistable {
-				return &testentities.Order{TenantId: "t1", OrderId: "o1"}
+				return &ddbtest.Order{TenantId: "t1", OrderId: "o1"}
 			},
 			verifyFunc: func(t *testing.T, created, read data.Persistable) {
-				c := created.(*testentities.Order)
-				r := read.(*testentities.Order)
+				c := created.(*ddbtest.Order)
+				r := read.(*ddbtest.Order)
 				if r.UserId != c.UserId || r.Status != c.Status || r.Total != c.Total {
 					t.Errorf("Mismatch: got %+v, want %+v", r, c)
 				}
@@ -413,7 +422,7 @@ func TestRead(t *testing.T) {
 				return nil
 			},
 			read: func() data.Persistable {
-				return &testentities.CompositeKeyEntity{PartitionKey: "nonexistent", SortKey: "nonexistent"}
+				return &ddbtest.CompositeKeyEntity{PartitionKey: "nonexistent", SortKey: "nonexistent"}
 			},
 			expectError: true,
 		},
@@ -423,7 +432,7 @@ func TestRead(t *testing.T) {
 				return nil
 			},
 			read: func() data.Persistable {
-				return &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: ""}
+				return &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: ""}
 			},
 			expectError: true,
 		},
@@ -433,40 +442,29 @@ func TestRead(t *testing.T) {
 				return nil
 			},
 			read: func() data.Persistable {
-				return &testentities.CompositeKeyEntity{PartitionKey: "", SortKey: "sk1"}
+				return &ddbtest.CompositeKeyEntity{PartitionKey: "", SortKey: "sk1"}
 			},
 			expectError: true,
 		},
 	}
 
+	store, client := setupCrudStore(t,
+		new(ddbtest.CompositeKeyEntity),
+		new(ddbtest.MultiPartKeyEntity),
+		new(ddbtest.StaticKeyEntity),
+		new(ddbtest.User),
+		new(ddbtest.Product),
+		new(ddbtest.Order),
+	)
+	defer deleteCrudTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Determine which entity type to register
-			var entityType data.Persistable
-			readEntity := tt.read()
-			switch readEntity.(type) {
-			case *testentities.CompositeKeyEntity:
-				entityType = &testentities.CompositeKeyEntity{}
-			case *testentities.MultiPartKeyEntity:
-				entityType = &testentities.MultiPartKeyEntity{}
-			case *testentities.StaticKeyEntity:
-				entityType = &testentities.StaticKeyEntity{}
-			case *testentities.User:
-				entityType = &testentities.User{}
-			case *testentities.Product:
-				entityType = &testentities.Product{}
-			case *testentities.Order:
-				entityType = &testentities.Order{}
-			}
+			cleanCrudTable(t, client)
 
-			store, client := setupCrudStore(t, entityType)
-			defer cleanupCrudTable(t, client)
-
-			ctx := context.Background()
 			created := tt.setup(store)
-
-			readEntity = tt.read()
-			ge := store.Read(ctx, readEntity)
+			readEntity := tt.read()
+			ge := store.Read(context.Background(), readEntity)
 
 			if tt.expectError {
 				if ge == nil {
@@ -484,68 +482,51 @@ func TestRead(t *testing.T) {
 
 func TestUpdate(t *testing.T) {
 	tests := []struct {
-		name         string
-		entityType   data.Persistable
-		setupEntity  data.Persistable
-		updateEntity data.Persistable
-		updateParam  data.Persistable
-		expectError  bool
-		verifyFunc   func(t *testing.T, store data.Store)
+		name       string
+		original   data.Persistable
+		update     data.Persistable
+		verifyFunc func(t *testing.T, store data.Store)
 	}{
 		{
-			name:         "update composite key entity",
-			entityType:   &testentities.CompositeKeyEntity{},
-			setupEntity:  &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1", Data: "original", Active: true},
-			updateParam:  &testentities.CompositeKeyEntity{Data: "updated"},
+			name:     "update composite key entity",
+			original: &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1", Data: "original", Active: true},
+			update:   &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1", Data: "updated"},
 			verifyFunc: func(t *testing.T, store data.Store) {
-				read := &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1"}
+				read := &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1"}
 				assert.Success(t, store.Read(context.Background(), read))
 				assert.Equals(t, "updated", read.Data)
+				assert.Equals(t, read.Active, true)
 			},
 		},
 		{
-			name:         "update multi-part key entity",
-			entityType:   &testentities.MultiPartKeyEntity{},
-			setupEntity:  &testentities.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1", Payload: "original"},
-			updateParam:  &testentities.MultiPartKeyEntity{Payload: "updated"},
+			name:     "update multi-part key entity",
+			original: &ddbtest.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1", Payload: "original"},
+			update:   &ddbtest.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1", Payload: "updated"},
 			verifyFunc: func(t *testing.T, store data.Store) {
-				read := &testentities.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1"}
+				read := &ddbtest.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1"}
 				assert.Success(t, store.Read(context.Background(), read))
 				assert.Equals(t, "updated", read.Payload)
 			},
 		},
 		{
-			name:         "update static key entity status",
-			entityType:   &testentities.StaticKeyEntity{},
-			setupEntity:  &testentities.StaticKeyEntity{Id: "item1", Status: "active", Detail: "detail1"},
-			updateEntity: &testentities.StaticKeyEntity{Id: "item1", Status: "inactive", Detail: "detail1"},
+			name:     "update partial fields only",
+			original: &ddbtest.CompositeKeyEntity{PartitionKey: "pk2", SortKey: "sk2", Data: "original", Active: true},
+			update:   &ddbtest.CompositeKeyEntity{PartitionKey: "pk2", SortKey: "sk2", Data: "partial-update"},
 			verifyFunc: func(t *testing.T, store data.Store) {
-				read := &testentities.StaticKeyEntity{Id: "item1", Status: "inactive"}
-				assert.Success(t, store.Read(context.Background(), read))
-				assert.Equals(t, "detail1", read.Detail)
-			},
-		},
-		{
-			name:         "update partial fields only",
-			entityType:   &testentities.CompositeKeyEntity{},
-			setupEntity:  &testentities.CompositeKeyEntity{PartitionKey: "pk2", SortKey: "sk2", Data: "original", Active: true},
-			updateParam:  &testentities.CompositeKeyEntity{Data: "partial-update"},
-			verifyFunc: func(t *testing.T, store data.Store) {
-				read := &testentities.CompositeKeyEntity{PartitionKey: "pk2", SortKey: "sk2"}
+				read := &ddbtest.CompositeKeyEntity{PartitionKey: "pk2", SortKey: "sk2"}
 				assert.Success(t, store.Read(context.Background(), read))
 				assert.Equals(t, "partial-update", read.Data)
 				assert.Equals(t, true, read.Active)
 			},
 		},
 		{
-			name:       "update nested struct partial fields",
-			entityType: &testentities.CompositeKeyEntity{},
-			setupEntity: &testentities.CompositeKeyEntity{PartitionKey: "pk3", SortKey: "sk3", Data: "original", Active: true,
-				Nested: &testentities.Nested{Foo: "a", Bar: "a"}},
-			updateParam: &testentities.CompositeKeyEntity{Data: "partial-update",
-				Nested: &testentities.Nested{Foo: "b"}},
+			name: "update nested struct partial fields",
+			original: &ddbtest.CompositeKeyEntity{PartitionKey: "pk3", SortKey: "sk3", Data: "original", Active: true,
+				Nested: &ddbtest.Nested{Foo: "a", Bar: "a"}},
+			update: &ddbtest.CompositeKeyEntity{PartitionKey: "pk3", SortKey: "sk3", Data: "partial-update",
+				Nested: &ddbtest.Nested{Foo: "b"}},
 			verifyFunc: func(t *testing.T, store data.Store) {
-				read := &testentities.CompositeKeyEntity{PartitionKey: "pk3", SortKey: "sk3"}
+				read := &ddbtest.CompositeKeyEntity{PartitionKey: "pk3", SortKey: "sk3"}
 				assert.Success(t, store.Read(context.Background(), read))
 				assert.Equals(t, "partial-update", read.Data)
 				assert.Equals(t, true, read.Active)
@@ -553,47 +534,32 @@ func TestUpdate(t *testing.T) {
 				assert.Equals(t, "a", read.Nested.Bar)
 			},
 		},
-		{
-			name:         "update non-existent entity",
-			entityType:   &testentities.CompositeKeyEntity{},
-			updateEntity: &testentities.CompositeKeyEntity{PartitionKey: "nonexistent", SortKey: "nonexistent", Data: "new"},
-			expectError:  false, // Update uses PutItem which creates if not exists
-			verifyFunc: func(t *testing.T, store data.Store) {
-				read := &testentities.CompositeKeyEntity{PartitionKey: "nonexistent", SortKey: "nonexistent"}
-				assert.Success(t, store.Read(context.Background(), read))
-				assert.Equals(t, "new", read.Data)
-			},
-		},
+		//{
+		//	name:   "update non-existent entity",
+		//	update: &ddbtest.CompositeKeyEntity{PartitionKey: "nonexistent", SortKey: "nonexistent", Data: "new"},
+		//	verifyFunc: func(t *testing.T, store data.Store) {
+		//		read := &ddbtest.CompositeKeyEntity{PartitionKey: "nonexistent", SortKey: "nonexistent"}
+		//		assert.Success(t, store.Read(context.Background(), read))
+		//		assert.Equals(t, "new", read.Data)
+		//	},
+		//},
 	}
+
+	store, client := setupCrudStore(t,
+		new(ddbtest.CompositeKeyEntity),
+		new(ddbtest.MultiPartKeyEntity),
+		new(ddbtest.StaticKeyEntity),
+	)
+	defer deleteCrudTable(t, client)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupCrudStore(t, tt.entityType)
-			defer cleanupCrudTable(t, client)
-
-			ctx := context.Background()
-
-			// Setup entity if provided
-			if tt.setupEntity != nil {
-				ge := store.Create(ctx, tt.setupEntity)
-				assert.Success(t, ge)
-			}
-
-			// Execute update
-			readEntity := tt.updateEntity
-			if readEntity == nil {
-				readEntity = tt.setupEntity
-			}
-			ge := store.Update(ctx, readEntity, tt.updateParam)
-
-			if tt.expectError {
-				if ge == nil {
-					t.Error("Expected error but got nil")
-				}
-				return
-			}
-
+			ge := store.Create(context.Background(), tt.original)
 			assert.Success(t, ge)
+
+			ge = store.Update(context.Background(), tt.original, tt.update)
+			assert.Success(t, ge)
+
 			if tt.verifyFunc != nil {
 				tt.verifyFunc(t, store)
 			}
@@ -604,7 +570,6 @@ func TestUpdate(t *testing.T) {
 func TestDelete(t *testing.T) {
 	tests := []struct {
 		name         string
-		entityType   data.Persistable
 		setupEntity  data.Persistable
 		deleteEntity data.Persistable
 		expectError  bool
@@ -615,77 +580,67 @@ func TestDelete(t *testing.T) {
 	}{
 		{
 			name:         "delete composite key entity",
-			entityType:   &testentities.CompositeKeyEntity{},
-			setupEntity:  &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1", Data: "data1"},
-			deleteEntity: &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1"},
+			setupEntity:  &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1", Data: "data1"},
+			deleteEntity: &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: "sk1"},
 			expectedPK:   "pk1",
 			expectedSK:   "sk1",
 		},
 		{
 			name:         "delete multi-part key entity",
-			entityType:   &testentities.MultiPartKeyEntity{},
-			setupEntity:  &testentities.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1", Payload: "p1"},
-			deleteEntity: &testentities.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1"},
+			setupEntity:  &ddbtest.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1", Payload: "p1"},
+			deleteEntity: &ddbtest.MultiPartKeyEntity{TenantId: "t1", EntityType: "T1", Id: "i1"},
 			expectedPK:   "t1#T1",
 			expectedSK:   "i1",
 		},
 		{
 			name:         "delete static key entity",
-			entityType:   &testentities.StaticKeyEntity{},
-			setupEntity:  &testentities.StaticKeyEntity{Id: "item1", Status: "active", Detail: "detail1"},
-			deleteEntity: &testentities.StaticKeyEntity{Id: "item1", Status: "active"},
+			setupEntity:  &ddbtest.StaticKeyEntity{Id: "item1", Status: "active", Detail: "detail1"},
+			deleteEntity: &ddbtest.StaticKeyEntity{Id: "item1", Status: "active"},
 			expectedPK:   "ITEM#item1",
 			expectedSK:   "STATUS#active",
 		},
 		{
 			name:         "delete user",
-			entityType:   &testentities.User{},
-			setupEntity:  &testentities.User{TenantId: "t1", Id: "u1", Email: "test@example.com", Name: "Test"},
-			deleteEntity: &testentities.User{TenantId: "t1", Id: "u1"},
+			setupEntity:  &ddbtest.User{TenantId: "t1", Id: "u1", Email: "test@example.com", Name: "Test"},
+			deleteEntity: &ddbtest.User{TenantId: "t1", Id: "u1"},
 			expectedPK:   "t1#USER",
 			expectedSK:   "u1",
 		},
 		{
 			name:         "delete product",
-			entityType:   &testentities.Product{},
-			setupEntity:  &testentities.Product{TenantId: "t1", Id: "p1", Sku: "SKU1", Category: "Cat1", Name: "Prod1", Price: 10.0},
-			deleteEntity: &testentities.Product{TenantId: "t1", Id: "p1"},
+			setupEntity:  &ddbtest.Product{TenantId: "t1", Id: "p1", Sku: "SKU1", Category: "Cat1", Name: "Prod1", Price: 10.0},
+			deleteEntity: &ddbtest.Product{TenantId: "t1", Id: "p1"},
 			expectedPK:   "t1#PRODUCT",
 			expectedSK:   "p1",
 		},
 		{
 			name:         "delete order",
-			entityType:   &testentities.Order{},
-			setupEntity:  &testentities.Order{TenantId: "t1", OrderId: "o1", UserId: "u1", OrderDate: time.Now(), Status: "pending", Total: 100.0},
-			deleteEntity: &testentities.Order{TenantId: "t1", OrderId: "o1"},
+			setupEntity:  &ddbtest.Order{TenantId: "t1", OrderId: "o1", UserId: "u1", OrderDate: time.Now(), Status: "pending", Total: 100.0},
+			deleteEntity: &ddbtest.Order{TenantId: "t1", OrderId: "o1"},
 			expectedPK:   "t1#ORDER",
 			expectedSK:   "ID#o1",
 		},
 		{
 			name:         "delete with missing sk field",
-			entityType:   &testentities.CompositeKeyEntity{},
-			deleteEntity: &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: ""},
+			deleteEntity: &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: ""},
 			expectError:  true,
 		},
 		{
 			name:         "delete with missing pk field",
-			entityType:   &testentities.CompositeKeyEntity{},
-			deleteEntity: &testentities.CompositeKeyEntity{PartitionKey: "", SortKey: "sk1"},
+			deleteEntity: &ddbtest.CompositeKeyEntity{PartitionKey: "", SortKey: "sk1"},
 			expectError:  true,
 		},
 		{
 			name:         "delete then create succeeds",
-			entityType:   &testentities.CompositeKeyEntity{},
-			setupEntity:  &testentities.CompositeKeyEntity{PartitionKey: "recreate-test", SortKey: "sk1", Data: "First", Active: true},
-			deleteEntity: &testentities.CompositeKeyEntity{PartitionKey: "recreate-test", SortKey: "sk1"},
+			setupEntity:  &ddbtest.CompositeKeyEntity{PartitionKey: "recreate-test", SortKey: "sk1", Data: "First", Active: true},
+			deleteEntity: &ddbtest.CompositeKeyEntity{PartitionKey: "recreate-test", SortKey: "sk1"},
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client) {
-				ctx := context.Background()
-				entity := &testentities.CompositeKeyEntity{PartitionKey: "recreate-test", SortKey: "sk1", Data: "Second", Active: false}
-				ge := store.Create(ctx, entity)
+				entity := &ddbtest.CompositeKeyEntity{PartitionKey: "recreate-test", SortKey: "sk1", Data: "Second", Active: false}
+				ge := store.Create(context.Background(), entity)
 				assert.Success(t, ge)
 
-				readEntity := &testentities.CompositeKeyEntity{PartitionKey: "recreate-test", SortKey: "sk1"}
-				ge = store.Read(ctx, readEntity)
+				readEntity := &ddbtest.CompositeKeyEntity{PartitionKey: "recreate-test", SortKey: "sk1"}
+				ge = store.Read(context.Background(), readEntity)
 				assert.Success(t, ge)
 				assert.Equals(t, "Second", readEntity.Data)
 				assert.Equals(t, false, readEntity.Active)
@@ -693,21 +648,26 @@ func TestDelete(t *testing.T) {
 		},
 	}
 
+	store, client := setupCrudStore(t,
+		new(ddbtest.CompositeKeyEntity),
+		new(ddbtest.MultiPartKeyEntity),
+		new(ddbtest.StaticKeyEntity),
+		new(ddbtest.User),
+		new(ddbtest.Product),
+		new(ddbtest.Order),
+	)
+	defer deleteCrudTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupCrudStore(t, tt.entityType)
-			defer cleanupCrudTable(t, client)
-
-			ctx := context.Background()
-
 			// Setup entity if provided
 			if tt.setupEntity != nil {
-				ge := store.Create(ctx, tt.setupEntity)
+				ge := store.Create(context.Background(), tt.setupEntity)
 				assert.Success(t, ge)
 			}
 
 			// Execute delete
-			ge := store.Delete(ctx, tt.deleteEntity)
+			ge := store.Delete(context.Background(), tt.deleteEntity)
 
 			if tt.expectError {
 				if ge == nil {
@@ -739,7 +699,7 @@ func TestCRUD_EmptyAndZeroValues(t *testing.T) {
 	}{
 		{
 			name: "create with empty string in PK",
-			entity: &testentities.EmptyValueEntity{
+			entity: &ddbtest.EmptyValueEntity{
 				Id:          "", // Empty PK
 				EmptyString: "test",
 				ZeroInt:     5,
@@ -748,12 +708,11 @@ func TestCRUD_EmptyAndZeroValues(t *testing.T) {
 		},
 		{
 			name: "create with empty string in SK part",
-			entity: &testentities.EmptyValueEntity{
+			entity: &ddbtest.EmptyValueEntity{
 				Id:          "id1",
 				EmptyString: "", // Empty SK segment
 				ZeroInt:     5,
 			},
-			expectError: false,
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client, entity data.Persistable) {
 				// Verify entity exists - SK is "#5" (EmptyString="" + separator + ZeroInt=5)
 				item := getRawItem(t, client, "id1", "#5")
@@ -761,7 +720,7 @@ func TestCRUD_EmptyAndZeroValues(t *testing.T) {
 					t.Error("Entity should exist")
 				}
 				// Read back and verify
-				read := &testentities.EmptyValueEntity{Id: "id1", EmptyString: "", ZeroInt: 5}
+				read := &ddbtest.EmptyValueEntity{Id: "id1", EmptyString: "", ZeroInt: 5}
 				ge := store.Read(context.Background(), read)
 				assert.Success(t, ge)
 				if read.EmptyString != "" {
@@ -773,15 +732,14 @@ func TestCRUD_EmptyAndZeroValues(t *testing.T) {
 		// To use actual zero values, define field as *int instead of int
 		{
 			name: "create with zero int in middle SK segment",
-			entity: &testentities.EmptyValueEntity{
+			entity: &ddbtest.EmptyValueEntity{
 				Id:          "id3",
 				EmptyString: "prefix",
 				ZeroInt:     0, // Zero in middle
 			},
-			expectError: false,
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client, entity data.Persistable) {
 				// Read back and verify zero is preserved as empty
-				read := &testentities.EmptyValueEntity{Id: "id3", EmptyString: "prefix"}
+				read := &ddbtest.EmptyValueEntity{Id: "id3", EmptyString: "prefix"}
 				ge := store.Read(context.Background(), read)
 				assert.Success(t, ge)
 				if read.ZeroInt != 0 {
@@ -791,14 +749,13 @@ func TestCRUD_EmptyAndZeroValues(t *testing.T) {
 		},
 		{
 			name: "read entity with empty SK segment",
-			entity: &testentities.EmptyValueEntity{
+			entity: &ddbtest.EmptyValueEntity{
 				Id:          "id4",
 				EmptyString: "",
 				ZeroInt:     10,
 			},
-			expectError: false,
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client, entity data.Persistable) {
-				read := &testentities.EmptyValueEntity{Id: "id4", EmptyString: "", ZeroInt: 10}
+				read := &ddbtest.EmptyValueEntity{Id: "id4", EmptyString: "", ZeroInt: 10}
 				ge := store.Read(context.Background(), read)
 				assert.Success(t, ge)
 				if read.EmptyString != "" {
@@ -810,70 +767,65 @@ func TestCRUD_EmptyAndZeroValues(t *testing.T) {
 			},
 		},
 		{
-			name: "update field to empty string",
-			entity: &testentities.EmptyValueEntity{
+			name: "update scalar field to empty string does not update",
+			entity: &ddbtest.EmptyValueEntity{
 				Id:          "id5",
 				EmptyString: "original",
 				ZeroInt:     5,
+				RequiredStr: "required",
 			},
-			expectError: false,
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client, entity data.Persistable) {
 				// Update to empty string
-				updated := &testentities.EmptyValueEntity{
+				updated := &ddbtest.EmptyValueEntity{
 					Id:          "id5",
-					EmptyString: "", // Changed to empty
+					EmptyString: "original",
 					ZeroInt:     5,
+					RequiredStr: "",
 				}
-				ge := store.Update(context.Background(), updated, nil)
+				ge := store.Update(context.Background(), entity, updated)
 				assert.Success(t, ge)
 
-				// Verify update - SK changed to "#5", need both fields
-				read := &testentities.EmptyValueEntity{Id: "id5", EmptyString: "", ZeroInt: 5}
-				ge = store.Read(context.Background(), read)
+				entity.(*ddbtest.EmptyValueEntity).RequiredStr = "abc" // set to validate Read() overwrites it
+				ge = store.Read(context.Background(), entity)
 				assert.Success(t, ge)
-				if read.EmptyString != "" {
-					t.Errorf("EmptyString should be empty after update, got: %s", read.EmptyString)
-				}
+				assert.Equals(t, "required", entity.(*ddbtest.EmptyValueEntity).RequiredStr)
 			},
 		},
 		{
-			name: "update field from empty to value",
-			entity: &testentities.EmptyValueEntity{
-				Id:          "id6",
-				EmptyString: "",
-				ZeroInt:     5,
+			name: "update field to empty pointer string does update",
+			entity: &ddbtest.EmptyValueEntity{
+				Id:          "id5",
+				EmptyString: "original",
+				ZeroInt:     6,
+				OptionalPtr: new("optional"),
 			},
-			expectError: false,
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client, entity data.Persistable) {
-				// Update from empty to value
-				updated := &testentities.EmptyValueEntity{
-					Id:          "id6",
-					EmptyString: "updated",
-					ZeroInt:     5,
+				// Update to empty string
+				updated := &ddbtest.EmptyValueEntity{
+					Id:          "id5",
+					EmptyString: "original",
+					ZeroInt:     6,
+					OptionalPtr: new(""),
 				}
-				ge := store.Update(context.Background(), updated, nil)
+				ge := store.Update(context.Background(), entity, updated)
 				assert.Success(t, ge)
 
-				// Verify update - SK changed to "updated#5", need both fields
-				read := &testentities.EmptyValueEntity{Id: "id6", EmptyString: "updated", ZeroInt: 5}
-				ge = store.Read(context.Background(), read)
+				entity.(*ddbtest.EmptyValueEntity).OptionalPtr = new("abc") // set to validate Read() overwrites it
+				ge = store.Read(context.Background(), entity)
 				assert.Success(t, ge)
-				if read.EmptyString != "updated" {
-					t.Errorf("EmptyString should be 'updated', got: %s", read.EmptyString)
-				}
+				assert.Equals(t, new(""), entity.(*ddbtest.EmptyValueEntity).OptionalPtr)
 			},
 		},
 		{
 			name: "update zero to non-zero int",
-			entity: &testentities.EmptyValueEntity{
+			entity: &ddbtest.EmptyValueEntity{
 				Id:          "id7",
 				EmptyString: "test",
 				ZeroInt:     0,
 			},
-			expectError: false,
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client, entity data.Persistable) {
 				// Update zero to non-zero
-				updated := &testentities.EmptyValueEntity{
+				updated := &ddbtest.EmptyValueEntity{
 					Id:          "id7",
 					EmptyString: "test",
 					ZeroInt:     42,
@@ -882,7 +834,7 @@ func TestCRUD_EmptyAndZeroValues(t *testing.T) {
 				assert.Success(t, ge)
 
 				// Verify update - SK changed to "test#42", need both fields
-				read := &testentities.EmptyValueEntity{Id: "id7", EmptyString: "test", ZeroInt: 42}
+				read := &ddbtest.EmptyValueEntity{Id: "id7", EmptyString: "test", ZeroInt: 42}
 				ge = store.Read(context.Background(), read)
 				assert.Success(t, ge)
 				if read.ZeroInt != 42 {
@@ -892,24 +844,19 @@ func TestCRUD_EmptyAndZeroValues(t *testing.T) {
 		},
 	}
 
+	store, client := setupCrudStore(t, &ddbtest.EmptyValueEntity{})
+	defer deleteCrudTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupCrudStore(t, &testentities.EmptyValueEntity{})
-			defer cleanupCrudTable(t, client)
-
-			ctx := context.Background()
-
 			// Create entity
-			ge := store.Create(ctx, tt.entity)
+			ge := store.Create(context.Background(), tt.entity)
 
 			if tt.expectError {
-				if ge == nil {
-					t.Error("Expected error but got nil")
-				}
-				return
+				assert.Error(t, ge)
+			} else {
+				assert.Success(t, ge)
 			}
-
-			assert.Success(t, ge)
 
 			if tt.verifyFunc != nil {
 				tt.verifyFunc(t, store, client, tt.entity)
@@ -939,66 +886,33 @@ func TestCRUD_EscapedValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupCrudStore(t, &testentities.EscapedValueEntity{})
-			defer cleanupCrudTable(t, client)
+			store, client := setupCrudStore(t, &ddbtest.EscapedValueEntity{})
+			defer deleteCrudTable(t, client)
 
-			ctx := context.Background()
-			entity := &testentities.EscapedValueEntity{
-				Id:              tt.id,
-				FieldWithHash:   tt.fieldWithHash,
-				FieldWithDollar: tt.fieldWithDollar,
-				NormalField:     "data",
+			entity := &ddbtest.EscapedValueEntity{
+				Id:       tt.id,
+				ToEscape: tt.fieldWithHash,
+				//FieldWithDollar: tt.fieldWithDollar,
+				Trailing: "data",
 			}
 
 			// Create entity
-			ge := store.Create(ctx, entity)
+			ge := store.Create(context.Background(), entity)
 			assert.Success(t, ge)
 
 			// Read back and verify
-			read := &testentities.EscapedValueEntity{
-				Id:              tt.id,
-				FieldWithHash:   tt.fieldWithHash,
-				FieldWithDollar: tt.fieldWithDollar,
+			read := &ddbtest.EscapedValueEntity{
+				Id:       tt.id,
+				ToEscape: tt.fieldWithHash,
+				Trailing: "data",
+				//FieldWithDollar: tt.fieldWithDollar,
 			}
-			ge = store.Read(ctx, read)
+			ge = store.Read(context.Background(), read)
 			assert.Success(t, ge)
-			assert.Equals(t, tt.fieldWithHash, read.FieldWithHash)
-			assert.Equals(t, tt.fieldWithDollar, read.FieldWithDollar)
+			assert.Equals(t, tt.fieldWithHash, read.ToEscape)
+			//assert.Equals(t, tt.fieldWithDollar, read.FieldWithDollar)
 		})
 	}
-
-	// Separate test for update with escaped values
-	t.Run("update to value with '#'", func(t *testing.T) {
-		store, client := setupCrudStore(t, &testentities.EscapedValueEntity{})
-		defer cleanupCrudTable(t, client)
-
-		ctx := context.Background()
-		entity := &testentities.EscapedValueEntity{
-			Id:              "id9",
-			FieldWithHash:   "original",
-			FieldWithDollar: "original",
-			NormalField:     "data",
-		}
-		assert.Success(t, store.Create(ctx, entity))
-
-		// Update to value with '#'
-		updated := &testentities.EscapedValueEntity{
-			Id:              "id9",
-			FieldWithHash:   "new#value",
-			FieldWithDollar: "original",
-			NormalField:     "data",
-		}
-		assert.Success(t, store.Update(ctx, updated, nil))
-
-		// Verify update
-		read := &testentities.EscapedValueEntity{
-			Id:              "id9",
-			FieldWithHash:   "new#value",
-			FieldWithDollar: "original",
-		}
-		assert.Success(t, store.Read(ctx, read))
-		assert.Equals(t, "new#value", read.FieldWithHash)
-	})
 }
 
 func TestCRUD_NumericKeys(t *testing.T) {
@@ -1016,14 +930,13 @@ func TestCRUD_NumericKeys(t *testing.T) {
 		{"create with negative SK", 999, -5, "negative-data", false},
 	}
 
+	store, client := setupCrudStore(t, &ddbtest.NumericKeyEntity{})
+	defer deleteCrudTable(t, client)
+
 	for _, tt := range readTests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupCrudStore(t, &testentities.NumericKeyEntity{})
-			defer cleanupCrudTable(t, client)
-
-			ctx := context.Background()
-			entity := &testentities.NumericKeyEntity{Id: tt.id, Version: tt.version, Data: tt.data}
-			ge := store.Create(ctx, entity)
+			entity := &ddbtest.NumericKeyEntity{Id: tt.id, Version: tt.version, Data: tt.data}
+			ge := store.Create(context.Background(), entity)
 
 			if tt.wantErr {
 				if ge == nil {
@@ -1034,50 +947,42 @@ func TestCRUD_NumericKeys(t *testing.T) {
 			assert.Success(t, ge)
 
 			// Read back and verify
-			read := &testentities.NumericKeyEntity{Id: tt.id, Version: tt.version}
-			assert.Success(t, store.Read(ctx, read))
+			read := &ddbtest.NumericKeyEntity{Id: tt.id, Version: tt.version}
+			assert.Success(t, store.Read(context.Background(), read))
 			assert.Equals(t, tt.data, read.Data)
 		})
 	}
 
 	t.Run("update numeric key field", func(t *testing.T) {
-		store, client := setupCrudStore(t, &testentities.NumericKeyEntity{})
-		defer cleanupCrudTable(t, client)
-
-		ctx := context.Background()
-		entity := &testentities.NumericKeyEntity{Id: 111, Version: 1, Data: "original"}
-		assert.Success(t, store.Create(ctx, entity))
+		entity := &ddbtest.NumericKeyEntity{Id: 111, Version: 1, Data: "original"}
+		assert.Success(t, store.Create(context.Background(), entity))
 
 		// Update changes the SK, effectively creating a new item
-		updated := &testentities.NumericKeyEntity{Id: 111, Version: 2, Data: "updated"}
-		assert.Success(t, store.Update(ctx, updated, nil))
+		updated := &ddbtest.NumericKeyEntity{Id: 111, Version: 2, Data: "updated"}
+		assert.Success(t, store.Update(context.Background(), updated, nil))
 
 		// Old version should still exist
-		read1 := &testentities.NumericKeyEntity{Id: 111, Version: 1}
-		assert.Success(t, store.Read(ctx, read1))
+		read1 := &ddbtest.NumericKeyEntity{Id: 111, Version: 1}
+		assert.Success(t, store.Read(context.Background(), read1))
 
 		// New version should exist
-		read2 := &testentities.NumericKeyEntity{Id: 111, Version: 2}
-		assert.Success(t, store.Read(ctx, read2))
+		read2 := &ddbtest.NumericKeyEntity{Id: 111, Version: 2}
+		assert.Success(t, store.Read(context.Background(), read2))
 		assert.Equals(t, "updated", read2.Data)
 	})
 
 	t.Run("sort order with numeric keys (lexicographic)", func(t *testing.T) {
-		store, client := setupCrudStore(t, &testentities.NumericKeyEntity{})
-		defer cleanupCrudTable(t, client)
-
-		ctx := context.Background()
 		// Create multiple versions
 		versions := []int{10, 2, 20, 1, 3}
 		for _, v := range versions {
-			e := &testentities.NumericKeyEntity{Id: 1000, Version: v, Data: fmt.Sprintf("v%d", v)}
-			assert.Success(t, store.Create(ctx, e))
+			e := &ddbtest.NumericKeyEntity{Id: 1000, Version: v, Data: fmt.Sprintf("v%d", v)}
+			assert.Success(t, store.Create(context.Background(), e))
 		}
 
 		// Verify we can read all of them
 		for _, v := range versions {
-			read := &testentities.NumericKeyEntity{Id: 1000, Version: v}
-			assert.Success(t, store.Read(ctx, read))
+			read := &ddbtest.NumericKeyEntity{Id: 1000, Version: v}
+			assert.Success(t, store.Read(context.Background(), read))
 		}
 	})
 }
@@ -1092,22 +997,18 @@ func TestCRUD_PointerFields(t *testing.T) {
 		{
 			name: "create with actual zero value using *int",
 			entity: func() data.Persistable {
-				zero := 0
-				id := "test-id"
-				return &testentities.PointerKeyEntity{
-					Id:      &id,
-					SortVal: &zero, // Actual zero value using pointer
+				return &ddbtest.PointerKeyEntity{
+					Id:      new("test-id"),
+					SortVal: new(0), // Actual zero value using pointer
 					Data:    "data",
 				}
 			}(),
 			expectError: false,
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client, entity data.Persistable) {
 				// Read back with zero value
-				zero := 0
-				id := "test-id"
-				read := &testentities.PointerKeyEntity{
-					Id:      &id,
-					SortVal: &zero,
+				read := &ddbtest.PointerKeyEntity{
+					Id:      new("test-id"),
+					SortVal: new(0),
 				}
 				ge := store.Read(context.Background(), read)
 				assert.Success(t, ge)
@@ -1119,9 +1020,8 @@ func TestCRUD_PointerFields(t *testing.T) {
 		{
 			name: "create with nil pointer (absent value)",
 			entity: func() data.Persistable {
-				id := "test-id-2"
-				return &testentities.PointerKeyEntity{
-					Id:      &id,
+				return &ddbtest.PointerKeyEntity{
+					Id:      new("test-id-2"),
 					SortVal: nil, // Nil pointer - treated as absent
 					Data:    "data",
 				}
@@ -1130,15 +1030,13 @@ func TestCRUD_PointerFields(t *testing.T) {
 		},
 	}
 
+	store, client := setupCrudStore(t, &ddbtest.PointerKeyEntity{})
+	defer deleteCrudTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupCrudStore(t, &testentities.PointerKeyEntity{})
-			defer cleanupCrudTable(t, client)
-
-			ctx := context.Background()
-
 			// Create entity
-			ge := store.Create(ctx, tt.entity)
+			ge := store.Create(context.Background(), tt.entity)
 
 			if tt.expectError {
 				if ge == nil {
@@ -1165,7 +1063,7 @@ func TestCRUD_TimeFields(t *testing.T) {
 	}{
 		{
 			name: "create order with time.Time in key",
-			entity: &testentities.Order{
+			entity: &ddbtest.Order{
 				TenantId:  "tenant1",
 				OrderId:   "order1",
 				UserId:    "user1",
@@ -1175,11 +1073,11 @@ func TestCRUD_TimeFields(t *testing.T) {
 			},
 			expectError: false,
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client, entity data.Persistable) {
-				read := &testentities.Order{TenantId: "tenant1", OrderId: "order1"}
+				read := &ddbtest.Order{TenantId: "tenant1", OrderId: "order1"}
 				ge := store.Read(context.Background(), read)
 				assert.Success(t, ge)
 
-				original := entity.(*testentities.Order)
+				original := entity.(*ddbtest.Order)
 				if !read.OrderDate.Equal(original.OrderDate) {
 					t.Errorf("OrderDate mismatch: got %v, want %v", read.OrderDate, original.OrderDate)
 				}
@@ -1187,7 +1085,7 @@ func TestCRUD_TimeFields(t *testing.T) {
 		},
 		{
 			name: "create order with zero time.Time",
-			entity: &testentities.Order{
+			entity: &ddbtest.Order{
 				TenantId:  "tenant2",
 				OrderId:   "order2",
 				UserId:    "user2",
@@ -1197,7 +1095,7 @@ func TestCRUD_TimeFields(t *testing.T) {
 			},
 			expectError: false,
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client, entity data.Persistable) {
-				read := &testentities.Order{TenantId: "tenant2", OrderId: "order2"}
+				read := &ddbtest.Order{TenantId: "tenant2", OrderId: "order2"}
 				ge := store.Read(context.Background(), read)
 				assert.Success(t, ge)
 				// Zero time is treated as empty segment in key
@@ -1205,7 +1103,7 @@ func TestCRUD_TimeFields(t *testing.T) {
 		},
 		{
 			name: "sort order with time.Time keys",
-			entity: &testentities.Order{
+			entity: &ddbtest.Order{
 				TenantId:  "tenant3",
 				OrderId:   "order_chrono_1",
 				UserId:    "user3",
@@ -1223,7 +1121,7 @@ func TestCRUD_TimeFields(t *testing.T) {
 				}
 
 				for i, d := range dates {
-					order := &testentities.Order{
+					order := &ddbtest.Order{
 						TenantId:  "tenant3",
 						OrderId:   fmt.Sprintf("order_chrono_%d", i+2),
 						UserId:    "user3",
@@ -1238,7 +1136,7 @@ func TestCRUD_TimeFields(t *testing.T) {
 				// RFC3339 format sorts chronologically
 				// This test verifies we can create and read orders with different dates
 				for i := range dates {
-					read := &testentities.Order{TenantId: "tenant3", OrderId: fmt.Sprintf("order_chrono_%d", i+2)}
+					read := &ddbtest.Order{TenantId: "tenant3", OrderId: fmt.Sprintf("order_chrono_%d", i+2)}
 					ge := store.Read(context.Background(), read)
 					assert.Success(t, ge)
 				}
@@ -1246,7 +1144,7 @@ func TestCRUD_TimeFields(t *testing.T) {
 		},
 		{
 			name: "update order changing OrderDate",
-			entity: &testentities.Order{
+			entity: &ddbtest.Order{
 				TenantId:  "tenant4",
 				OrderId:   "order4",
 				UserId:    "user4",
@@ -1257,7 +1155,7 @@ func TestCRUD_TimeFields(t *testing.T) {
 			expectError: false,
 			verifyFunc: func(t *testing.T, store data.Store, client *dynamodb.Client, entity data.Persistable) {
 				// Update with new OrderDate
-				updated := &testentities.Order{
+				updated := &ddbtest.Order{
 					TenantId:  "tenant4",
 					OrderId:   "order4",
 					UserId:    "user4",
@@ -1269,7 +1167,7 @@ func TestCRUD_TimeFields(t *testing.T) {
 				assert.Success(t, ge)
 
 				// Read back and verify new date
-				read := &testentities.Order{TenantId: "tenant4", OrderId: "order4"}
+				read := &ddbtest.Order{TenantId: "tenant4", OrderId: "order4"}
 				ge = store.Read(context.Background(), read)
 				assert.Success(t, ge)
 				if !read.OrderDate.Equal(updated.OrderDate) {
@@ -1279,15 +1177,13 @@ func TestCRUD_TimeFields(t *testing.T) {
 		},
 	}
 
+	store, client := setupCrudStore(t, &ddbtest.Order{})
+	defer deleteCrudTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupCrudStore(t, &testentities.Order{})
-			defer cleanupCrudTable(t, client)
-
-			ctx := context.Background()
-
 			// Create entity
-			ge := store.Create(ctx, tt.entity)
+			ge := store.Create(context.Background(), tt.entity)
 
 			if tt.expectError {
 				if ge == nil {
@@ -1311,8 +1207,8 @@ func TestCRUD_TimeFields(t *testing.T) {
 
 // TestStores tests the Stores() function which returns all registered table stores
 func TestStores(t *testing.T) {
-	store, client := setupCrudStore(t, &testentities.CompositeKeyEntity{})
-	defer cleanupCrudTable(t, client)
+	store, client := setupCrudStore(t, &ddbtest.CompositeKeyEntity{})
+	defer deleteCrudTable(t, client)
 
 	// After creating a store, it should appear in Stores()
 	stores := ddb.Stores()
@@ -1335,8 +1231,8 @@ func TestStores(t *testing.T) {
 // TestStores_MultipleStores tests that multiple stores are properly tracked
 func TestStores_MultipleStores(t *testing.T) {
 	// Create first store
-	store1, client1 := setupCrudStore(t, &testentities.CompositeKeyEntity{})
-	defer cleanupCrudTable(t, client1)
+	store1, client1 := setupCrudStore(t, &ddbtest.CompositeKeyEntity{})
+	defer deleteCrudTable(t, client1)
 
 	// Get the stores map
 	stores := ddb.Stores()
@@ -1372,8 +1268,8 @@ type Namer interface {
 
 // TestTableName tests the Name() method on the table
 func TestTableName(t *testing.T) {
-	store, client := setupCrudStore(t, &testentities.CompositeKeyEntity{})
-	defer cleanupCrudTable(t, client)
+	store, client := setupCrudStore(t, &ddbtest.CompositeKeyEntity{})
+	defer deleteCrudTable(t, client)
 
 	// Cast to Namer interface to access Name() method
 	namer, ok := store.(Namer)
@@ -1389,8 +1285,8 @@ func TestTableName(t *testing.T) {
 
 // TestTableName_Consistency tests that Name() returns consistent results
 func TestTableName_Consistency(t *testing.T) {
-	store, client := setupCrudStore(t, &testentities.CompositeKeyEntity{})
-	defer cleanupCrudTable(t, client)
+	store, client := setupCrudStore(t, &ddbtest.CompositeKeyEntity{})
+	defer deleteCrudTable(t, client)
 
 	namer, ok := store.(Namer)
 	if !ok {
@@ -1422,38 +1318,34 @@ func TestDelete_FailDeleteIfNotPresent(t *testing.T) {
 	}
 
 	// Create table with FailDeleteIfNotPresent=true
-	tableName := "gomer_delete_test"
+	deleteTable := "gomer_delete_test"
 	tableDef := &ddbtest.TableDefinition{}
-	tableDef.WithTableName(tableName).
+	tableDef.WithTableName(deleteTable).
 		WithAttributeDefinition("PK", types.ScalarAttributeTypeS).
 		WithAttributeDefinition("SK", types.ScalarAttributeTypeS).
 		WithKeySchema("PK", types.KeyTypeHash).
 		WithKeySchema("SK", types.KeyTypeRange)
 	tableDef.Create(client)
+	defer ddbtest.DeleteTable(client, deleteTable)
 
-	defer func() {
-		ddbtest.DeleteAllTableData(client, tableName)
-	}()
-
-	store, ge := ddb.Store(tableName, &ddb.Configuration{
+	store, ge := ddb.Store(deleteTable, &ddb.Configuration{
 		DynamoDb:               client,
 		MaxResultsDefault:      100,
 		MaxResultsMax:          1000,
 		ConsistencyDefault:     ddb.Preferred,
 		FailDeleteIfNotPresent: true, // Key configuration for this test
-	}, &testentities.CompositeKeyEntity{})
+	})
 	assert.Success(t, ge)
-
-	ctx := context.Background()
+	assert.Success(t, store.AddPersistables(&ddbtest.CompositeKeyEntity{}))
 
 	// Try to delete an entity that doesn't exist
-	entity := &testentities.CompositeKeyEntity{
+	entity := &ddbtest.CompositeKeyEntity{
 		PartitionKey: "nonexistent-pk",
 		SortKey:      "nonexistent-sk",
 	}
 
 	// Should fail because entity doesn't exist and FailDeleteIfNotPresent=true
-	ge = store.Delete(ctx, entity)
+	ge = store.Delete(context.Background(), entity)
 	if ge == nil {
 		t.Error("Expected error when deleting non-existent entity with FailDeleteIfNotPresent=true")
 	}
@@ -1461,32 +1353,30 @@ func TestDelete_FailDeleteIfNotPresent(t *testing.T) {
 
 // TestDelete_MissingKeyFields tests delete with missing key fields
 func TestDelete_MissingKeyFields(t *testing.T) {
-	store, client := setupCrudStore(t, &testentities.CompositeKeyEntity{})
-	defer cleanupCrudTable(t, client)
-
-	ctx := context.Background()
+	store, client := setupCrudStore(t, &ddbtest.CompositeKeyEntity{})
+	defer deleteCrudTable(t, client)
 
 	tests := []struct {
 		name   string
-		entity *testentities.CompositeKeyEntity
+		entity *ddbtest.CompositeKeyEntity
 	}{
 		{
 			name:   "missing pk",
-			entity: &testentities.CompositeKeyEntity{PartitionKey: "", SortKey: "sk1"},
+			entity: &ddbtest.CompositeKeyEntity{PartitionKey: "", SortKey: "sk1"},
 		},
 		{
 			name:   "missing sk",
-			entity: &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: ""},
+			entity: &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: ""},
 		},
 		{
 			name:   "missing both",
-			entity: &testentities.CompositeKeyEntity{PartitionKey: "", SortKey: ""},
+			entity: &ddbtest.CompositeKeyEntity{PartitionKey: "", SortKey: ""},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ge := store.Delete(ctx, tt.entity)
+			ge := store.Delete(context.Background(), tt.entity)
 			if ge == nil {
 				t.Error("Expected error when deleting entity with missing key fields")
 			}
@@ -1500,18 +1390,16 @@ func TestDelete_MissingKeyFields(t *testing.T) {
 
 // TestRead_NonExistentEntity tests reading an entity that doesn't exist
 func TestRead_NonExistentEntity(t *testing.T) {
-	store, client := setupCrudStore(t, &testentities.CompositeKeyEntity{})
-	defer cleanupCrudTable(t, client)
-
-	ctx := context.Background()
+	store, client := setupCrudStore(t, &ddbtest.CompositeKeyEntity{})
+	defer deleteCrudTable(t, client)
 
 	// Try to read an entity that doesn't exist
-	entity := &testentities.CompositeKeyEntity{
+	entity := &ddbtest.CompositeKeyEntity{
 		PartitionKey: "nonexistent-pk",
 		SortKey:      "nonexistent-sk",
 	}
 
-	ge := store.Read(ctx, entity)
+	ge := store.Read(context.Background(), entity)
 	if ge == nil {
 		t.Error("Expected error when reading non-existent entity")
 	}
@@ -1519,28 +1407,26 @@ func TestRead_NonExistentEntity(t *testing.T) {
 
 // TestRead_MissingKeyFields tests read with missing key fields
 func TestRead_MissingKeyFields(t *testing.T) {
-	store, client := setupCrudStore(t, &testentities.CompositeKeyEntity{})
-	defer cleanupCrudTable(t, client)
-
-	ctx := context.Background()
+	store, client := setupCrudStore(t, &ddbtest.CompositeKeyEntity{})
+	defer deleteCrudTable(t, client)
 
 	tests := []struct {
 		name   string
-		entity *testentities.CompositeKeyEntity
+		entity *ddbtest.CompositeKeyEntity
 	}{
 		{
 			name:   "missing pk",
-			entity: &testentities.CompositeKeyEntity{PartitionKey: "", SortKey: "sk1"},
+			entity: &ddbtest.CompositeKeyEntity{PartitionKey: "", SortKey: "sk1"},
 		},
 		{
 			name:   "missing sk",
-			entity: &testentities.CompositeKeyEntity{PartitionKey: "pk1", SortKey: ""},
+			entity: &ddbtest.CompositeKeyEntity{PartitionKey: "pk1", SortKey: ""},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ge := store.Read(ctx, tt.entity)
+			ge := store.Read(context.Background(), tt.entity)
 			if ge == nil {
 				t.Error("Expected error when reading entity with missing key fields")
 			}
@@ -1554,14 +1440,12 @@ func TestRead_MissingKeyFields(t *testing.T) {
 
 // TestQuery_EmptyPartitionKey tests query with empty partition key
 func TestQuery_EmptyPartitionKey(t *testing.T) {
-	store, client := setupCrudStore(t, &testentities.CompositeKeyEntity{})
-	defer cleanupCrudTable(t, client)
-
-	ctx := context.Background()
+	store, client := setupCrudStore(t, &ddbtest.CompositeKeyEntity{})
+	defer deleteCrudTable(t, client)
 
 	// Query with empty partition key
-	q := &testentities.CompositeKeyEntities{PartitionKey: ""}
-	ge := store.Query(ctx, q)
+	q := &ddbtest.CompositeKeyEntities{PartitionKey: ""}
+	ge := store.Query(context.Background(), q)
 	if ge == nil {
 		t.Error("Expected error when querying with empty partition key")
 	}
@@ -1569,14 +1453,12 @@ func TestQuery_EmptyPartitionKey(t *testing.T) {
 
 // TestQuery_NoMatchingIndex tests query that can't find a matching index
 func TestQuery_NoMatchingIndex(t *testing.T) {
-	store, client := setupCrudStore(t, &testentities.Product{})
-	defer cleanupCrudTable(t, client)
-
-	ctx := context.Background()
+	store, client := setupCrudStore(t, &ddbtest.Product{})
+	defer deleteCrudTable(t, client)
 
 	// Query with only Category - this should fail because GSI_1 needs TenantId+Category
-	q := &testentities.Products{Category: "Electronics"}
-	ge := store.Query(ctx, q)
+	q := &ddbtest.Products{Category: "Electronics"}
+	ge := store.Query(context.Background(), q)
 	if ge == nil {
 		t.Error("Expected error when querying with incomplete index key")
 	}

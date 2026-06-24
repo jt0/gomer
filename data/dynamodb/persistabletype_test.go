@@ -64,20 +64,25 @@ func setupQueryStore(t *testing.T, persistables ...data.Persistable) (data.Store
 		QueryWildcardChar:           '*',
 		FailDeleteIfNotPresent:      false,
 		ValidateKeyFieldConsistency: false,
-	}, persistables...)
+	})
 	assert.Success(t, ge)
+	assert.Success(t, store.AddPersistables(persistables...))
 
 	return store, client
 }
 
-func cleanupQueryTable(t *testing.T, client *dynamodb.Client) {
+func deleteQueryTable(t *testing.T, client *dynamodb.Client) {
+	err := ddbtest.DeleteTable(client, queryTestTableName)
+	assert.Success(t, err)
+}
+
+func cleanQueryTable(t *testing.T, client *dynamodb.Client) {
 	err := ddbtest.DeleteAllTableData(client, queryTestTableName)
 	assert.Success(t, err)
 }
 
 // Test data population helper
 func populateTestData(t *testing.T, store data.Store) {
-	ctx := context.Background()
 
 	// Create CompositeKeyEntity items
 	for i := 1; i <= 5; i++ {
@@ -87,7 +92,7 @@ func populateTestData(t *testing.T, store data.Store) {
 			Data:         fmt.Sprintf("data%d", i),
 			Active:       i%2 == 1, // odd numbers are active
 		}
-		assert.Success(t, store.Create(ctx, entity))
+		assert.Success(t, store.Create(context.Background(), entity))
 	}
 
 	// Create CompositeKeyEntity items for T2 partition
@@ -98,7 +103,7 @@ func populateTestData(t *testing.T, store data.Store) {
 			Data:         "test",
 			Active:       true,
 		}
-		assert.Success(t, store.Create(ctx, entity))
+		assert.Success(t, store.Create(context.Background(), entity))
 	}
 
 	// Create MultiPartKeyEntity items
@@ -110,7 +115,7 @@ func populateTestData(t *testing.T, store data.Store) {
 				Id:         fmt.Sprintf("id%d", i),
 				Payload:    fmt.Sprintf("payload-%s-%d", entityType, i),
 			}
-			assert.Success(t, store.Create(ctx, entity))
+			assert.Success(t, store.Create(context.Background(), entity))
 		}
 	}
 
@@ -121,7 +126,7 @@ func populateTestData(t *testing.T, store data.Store) {
 			Status: status,
 			Detail: fmt.Sprintf("detail-%s", status),
 		}
-		assert.Success(t, store.Create(ctx, entity))
+		assert.Success(t, store.Create(context.Background(), entity))
 	}
 
 	// Create User items
@@ -133,7 +138,7 @@ func populateTestData(t *testing.T, store data.Store) {
 			Name:     fmt.Sprintf("User %d", i),
 			Status:   "active",
 		}
-		assert.Success(t, store.Create(ctx, user))
+		assert.Success(t, store.Create(context.Background(), user))
 	}
 
 	// Create Product items
@@ -148,7 +153,7 @@ func populateTestData(t *testing.T, store data.Store) {
 			Price:       float64(i) * 10.0,
 			Description: fmt.Sprintf("Description for product %d", i),
 		}
-		assert.Success(t, store.Create(ctx, product))
+		assert.Success(t, store.Create(context.Background(), product))
 	}
 
 	// Create Order items
@@ -162,7 +167,7 @@ func populateTestData(t *testing.T, store data.Store) {
 			Status:    []string{"pending", "shipped", "delivered"}[(i-1)%3],
 			Total:     float64(i) * 100.0,
 		}
-		assert.Success(t, store.Create(ctx, order))
+		assert.Success(t, store.Create(context.Background(), order))
 	}
 }
 
@@ -426,23 +431,21 @@ func TestQuery_BasicQueries(t *testing.T) {
 		},
 	}
 
+	store, client := setupQueryStore(t,
+		&testentities.CompositeKeyEntity{},
+		&testentities.MultiPartKeyEntity{},
+		&testentities.StaticKeyEntity{},
+		&testentities.User{},
+		&testentities.Product{},
+		&testentities.Order{},
+	)
+	defer deleteQueryTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup store - register all entity types that populateTestData uses
-			store, client := setupQueryStore(t,
-				&testentities.CompositeKeyEntity{},
-				&testentities.MultiPartKeyEntity{},
-				&testentities.StaticKeyEntity{},
-				&testentities.User{},
-				&testentities.Product{},
-				&testentities.Order{},
-			)
-			defer cleanupQueryTable(t, client)
-
 			// Setup test data
-			if tt.setupFunc != nil {
-				tt.setupFunc(store)
-			}
+			cleanQueryTable(t, client)
+			tt.setupFunc(store)
 
 			// Execute query
 			q := tt.queryFunc()
@@ -469,42 +472,40 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 	tests := []struct {
 		name          string
 		setupFunc     func(store data.Store)
-		queryFunc     func() data.Queryable
+		queryable     func() data.Queryable
 		expectedCount int
 		verifyFunc    func(t *testing.T, q data.Queryable)
 	}{
 		{
 			name: "exact sk match",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				for i := 1; i <= 5; i++ {
 					entity := &testentities.CompositeKeyEntity{
 						PartitionKey: "T1",
-						SortKey:      fmt.Sprintf("item%d", i),
+						SortKey:      fmt.Sprintf("sk%d", i),
 						Data:         "test",
 						Active:       true,
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
-			queryFunc: func() data.Queryable {
+			queryable: func() data.Queryable {
 				return &testentities.CompositeKeyEntities{
 					PartitionKey: "T1",
-					SortKey:      "item1",
+					SortKey:      "sk1",
 				}
 			},
 			expectedCount: 1,
 			verifyFunc: func(t *testing.T, q data.Queryable) {
 				entity := q.Results()[0].(*testentities.CompositeKeyEntity)
-				if entity.SortKey != "item1" {
-					t.Errorf("Expected SortKey=item1, got %s", entity.SortKey)
+				if entity.SortKey != "sk1" {
+					t.Errorf("Expected SortKey=sk1, got %s", entity.SortKey)
 				}
 			},
 		},
 		{
 			name: "sk begins_with via wildcard",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				items := []string{"item1", "item123", "item_a", "other1"}
 				for _, sk := range items {
 					entity := &testentities.CompositeKeyEntity{
@@ -513,10 +514,10 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 						Data:         "test",
 						Active:       true,
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
-			queryFunc: func() data.Queryable {
+			queryable: func() data.Queryable {
 				return &testentities.CompositeKeyEntities{
 					PartitionKey: "T1",
 					SortKey:      "item*",
@@ -536,7 +537,6 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 		{
 			name: "sk begins_with via trailing separator",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				// Create items with composite SK
 				for _, entityType := range []string{"USER", "ADMIN"} {
 					for i := 1; i <= 3; i++ {
@@ -546,11 +546,11 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 							Id:         fmt.Sprintf("id%d", i),
 							Payload:    "test",
 						}
-						assert.Success(t, store.Create(ctx, entity))
+						assert.Success(t, store.Create(context.Background(), entity))
 					}
 				}
 			},
-			queryFunc: func() data.Queryable {
+			queryable: func() data.Queryable {
 				// Query with TenantId and EntityType, but no Id
 				// This should use begins_with due to trailing separator
 				return &testentities.MultiPartKeyEntities{
@@ -571,18 +571,17 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 		{
 			name: "no sk provided",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				for i := 1; i <= 5; i++ {
 					entity := &testentities.CompositeKeyEntity{
 						PartitionKey: "T1",
-						SortKey:      fmt.Sprintf("item%d", i),
+						SortKey:      fmt.Sprintf("noSk%d", i),
 						Data:         "test",
 						Active:       true,
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
-			queryFunc: func() data.Queryable {
+			queryable: func() data.Queryable {
 				return &testentities.CompositeKeyEntities{
 					PartitionKey: "T1",
 					// No SortKey provided
@@ -598,18 +597,17 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 		{
 			name: "zero sk value",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				for i := 1; i <= 3; i++ {
 					entity := &testentities.CompositeKeyEntity{
 						PartitionKey: "T1",
-						SortKey:      fmt.Sprintf("item%d", i),
+						SortKey:      fmt.Sprintf("zero%d", i),
 						Data:         "test",
 						Active:       true,
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
-			queryFunc: func() data.Queryable {
+			queryable: func() data.Queryable {
 				return &testentities.CompositeKeyEntities{
 					PartitionKey: "T1",
 					SortKey:      "", // Empty SK
@@ -624,28 +622,21 @@ func TestQuery_SortKeyConditions(t *testing.T) {
 		},
 	}
 
+	store, client := setupQueryStore(t, new(testentities.CompositeKeyEntity), new(testentities.MultiPartKeyEntity))
+	defer deleteQueryTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			cleanQueryTable(t, client)
+
 			// Determine persistable from query type
-			q := tt.queryFunc()
-			var persistable data.Persistable
-			switch q.(type) {
-			case *testentities.CompositeKeyEntities:
-				persistable = &testentities.CompositeKeyEntity{}
-			case *testentities.MultiPartKeyEntities:
-				persistable = &testentities.MultiPartKeyEntity{}
-			}
-
-			store, client := setupQueryStore(t, persistable)
-			defer cleanupQueryTable(t, client)
-
 			// Setup test data
 			if tt.setupFunc != nil {
 				tt.setupFunc(store)
 			}
 
 			// Execute query
-			q = tt.queryFunc()
+			q := tt.queryable()
 			err := store.Query(context.Background(), q)
 			assert.Success(t, err)
 
@@ -677,7 +668,6 @@ func TestQuery_IndexSelection(t *testing.T) {
 		{
 			name: "single viable index - gsi",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				user := &testentities.User{
 					TenantId: "T1",
 					Id:       "user1",
@@ -685,7 +675,7 @@ func TestQuery_IndexSelection(t *testing.T) {
 					Name:     "Test User",
 					Status:   "active",
 				}
-				assert.Success(t, store.Create(ctx, user))
+				assert.Success(t, store.Create(context.Background(), user))
 			},
 			queryFunc: func() data.Queryable {
 				return &testentities.Users{Email: "user1@example.com"}
@@ -701,7 +691,6 @@ func TestQuery_IndexSelection(t *testing.T) {
 		{
 			name: "base table vs gsi",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				for i := 1; i <= 3; i++ {
 					user := &testentities.User{
 						TenantId: "T1",
@@ -710,7 +699,7 @@ func TestQuery_IndexSelection(t *testing.T) {
 						Name:     fmt.Sprintf("User %d", i),
 						Status:   "active",
 					}
-					assert.Success(t, store.Create(ctx, user))
+					assert.Success(t, store.Create(context.Background(), user))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -729,7 +718,6 @@ func TestQuery_IndexSelection(t *testing.T) {
 		{
 			name: "incomplete pk fails",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				product := &testentities.Product{
 					TenantId: "T1",
 					Id:       "prod1",
@@ -737,7 +725,7 @@ func TestQuery_IndexSelection(t *testing.T) {
 					Name:     "Test",
 					Price:    99.99,
 				}
-				assert.Success(t, store.Create(ctx, product))
+				assert.Success(t, store.Create(context.Background(), product))
 			},
 			queryFunc: func() data.Queryable {
 				// Query with only Category (incomplete GSI_1 PK which needs TenantId+Category)
@@ -748,7 +736,6 @@ func TestQuery_IndexSelection(t *testing.T) {
 		{
 			name: "lsi vs base table",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				for i := 1; i <= 3; i++ {
 					product := &testentities.Product{
 						TenantId: "T1",
@@ -758,7 +745,7 @@ func TestQuery_IndexSelection(t *testing.T) {
 						Name:     fmt.Sprintf("Product %d", i),
 						Price:    float64(i) * 10.0,
 					}
-					assert.Success(t, store.Create(ctx, product))
+					assert.Success(t, store.Create(context.Background(), product))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -791,7 +778,7 @@ func TestQuery_IndexSelection(t *testing.T) {
 			}
 
 			store, client := setupQueryStore(t, persistable)
-			defer cleanupQueryTable(t, client)
+			defer deleteQueryTable(t, client)
 
 			// Setup test data
 			if tt.setupFunc != nil {
@@ -838,7 +825,6 @@ func TestQuery_WildcardMatching(t *testing.T) {
 		{
 			name: "simple prefix wildcard",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				items := []string{"item1", "item123", "item_a", "other1", "itemx"}
 				for _, sk := range items {
 					entity := &testentities.CompositeKeyEntity{
@@ -847,7 +833,7 @@ func TestQuery_WildcardMatching(t *testing.T) {
 						Data:         "test",
 						Active:       true,
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -869,7 +855,6 @@ func TestQuery_WildcardMatching(t *testing.T) {
 		{
 			name: "no wildcard exact match",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				items := []string{"item", "item1", "items"}
 				for _, sk := range items {
 					entity := &testentities.CompositeKeyEntity{
@@ -878,7 +863,7 @@ func TestQuery_WildcardMatching(t *testing.T) {
 						Data:         "test",
 						Active:       true,
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -902,7 +887,6 @@ func TestQuery_WildcardMatching(t *testing.T) {
 		{
 			name: "wildcard with gsi composite sk",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				products := []struct {
 					name     string
 					category string
@@ -921,7 +905,7 @@ func TestQuery_WildcardMatching(t *testing.T) {
 						Name:     p.name,
 						Price:    99.99,
 					}
-					assert.Success(t, store.Create(ctx, product))
+					assert.Success(t, store.Create(context.Background(), product))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -959,7 +943,7 @@ func TestQuery_WildcardMatching(t *testing.T) {
 			}
 
 			store, client := setupQueryStore(t, persistable)
-			defer cleanupQueryTable(t, client)
+			defer deleteQueryTable(t, client)
 
 			// Setup test data
 			if tt.setupFunc != nil {
@@ -998,7 +982,6 @@ func TestQuery_FilterExpressions(t *testing.T) {
 		{
 			name: "single filter field",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				for i := 1; i <= 5; i++ {
 					entity := &testentities.CompositeKeyEntity{
 						PartitionKey: "T1",
@@ -1008,7 +991,7 @@ func TestQuery_FilterExpressions(t *testing.T) {
 					if i%2 == 1 { // odd numbers are 'running'
 						entity.Status = "running"
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -1030,7 +1013,6 @@ func TestQuery_FilterExpressions(t *testing.T) {
 		{
 			name: "multiple filter fields",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				entities := []struct {
 					sortKey string
 					data    string
@@ -1048,7 +1030,7 @@ func TestQuery_FilterExpressions(t *testing.T) {
 						Data:         e.data,
 						Status:       e.status,
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -1081,7 +1063,7 @@ func TestQuery_FilterExpressions(t *testing.T) {
 			}
 
 			store, client := setupQueryStore(t, persistable)
-			defer cleanupQueryTable(t, client)
+			defer deleteQueryTable(t, client)
 
 			// Setup test data
 			if tt.setupFunc != nil {
@@ -1119,7 +1101,6 @@ func TestQuery_SortOrder(t *testing.T) {
 		{
 			name: "ascending order default",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				items := []string{"item05", "item20", "item01", "item10"}
 				for _, sk := range items {
 					entity := &testentities.CompositeKeyEntity{
@@ -1128,7 +1109,7 @@ func TestQuery_SortOrder(t *testing.T) {
 						Data:         "test",
 						Active:       true,
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -1147,7 +1128,6 @@ func TestQuery_SortOrder(t *testing.T) {
 		{
 			name: "descending order with time.Time",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				baseDate := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 				for i := 1; i <= 3; i++ {
 					order := &testentities.Order{
@@ -1158,7 +1138,7 @@ func TestQuery_SortOrder(t *testing.T) {
 						Status:    "pending",
 						Total:     100.0,
 					}
-					assert.Success(t, store.Create(ctx, order))
+					assert.Success(t, store.Create(context.Background(), order))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -1203,7 +1183,7 @@ func TestQuery_SortOrder(t *testing.T) {
 			}
 
 			store, client := setupQueryStore(t, persistable)
-			defer cleanupQueryTable(t, client)
+			defer deleteQueryTable(t, client)
 
 			// Setup test data
 			if tt.setupFunc != nil {
@@ -1246,7 +1226,6 @@ func TestQuery_WildcardSortOrder(t *testing.T) {
 		{
 			name: "wildcard in Month field should use Month's ascending indicator",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				// Create events with same Year, different Month+DayDetail
 				events := []struct{ month, day string }{
 					{"01", "15-morning"},
@@ -1261,7 +1240,7 @@ func TestQuery_WildcardSortOrder(t *testing.T) {
 						DayDetail: e.day,
 						Value:     "test",
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -1278,7 +1257,6 @@ func TestQuery_WildcardSortOrder(t *testing.T) {
 		{
 			name: "no wildcard in Month should use DayDetail's descending indicator",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				// Create events with same Year+Month, different DayDetail
 				days := []string{"10-morning", "15-afternoon", "20-evening"}
 				for _, day := range days {
@@ -1289,7 +1267,7 @@ func TestQuery_WildcardSortOrder(t *testing.T) {
 						DayDetail: day,
 						Value:     "test",
 					}
-					assert.Success(t, store.Create(ctx, entity))
+					assert.Success(t, store.Create(context.Background(), entity))
 				}
 			},
 			queryFunc: func() data.Queryable {
@@ -1308,7 +1286,7 @@ func TestQuery_WildcardSortOrder(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store, client := setupQueryStore(t, &testentities.TimeSeriesEvent{})
-			defer cleanupQueryTable(t, client)
+			defer deleteQueryTable(t, client)
 
 			if tt.setupFunc != nil {
 				tt.setupFunc(store)
@@ -1356,14 +1334,13 @@ func TestQuery_ErrorCases(t *testing.T) {
 		{
 			name: "incomplete composite pk",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				entity := &testentities.MultiPartKeyEntity{
 					TenantId:   "T1",
 					EntityType: "USER",
 					Id:         "id1",
 					Payload:    "test",
 				}
-				assert.Success(t, store.Create(ctx, entity))
+				assert.Success(t, store.Create(context.Background(), entity))
 			},
 			queryFunc: func() data.Queryable {
 				// Query with only TenantId (missing EntityType for PK)
@@ -1374,7 +1351,6 @@ func TestQuery_ErrorCases(t *testing.T) {
 		{
 			name: "incomplete gsi pk",
 			setupFunc: func(store data.Store) {
-				ctx := context.Background()
 				product := &testentities.Product{
 					TenantId: "T1",
 					Id:       "prod1",
@@ -1382,7 +1358,7 @@ func TestQuery_ErrorCases(t *testing.T) {
 					Name:     "Test",
 					Price:    99.99,
 				}
-				assert.Success(t, store.Create(ctx, product))
+				assert.Success(t, store.Create(context.Background(), product))
 			},
 			queryFunc: func() data.Queryable {
 				// Query with only Category (GSI_1 needs TenantId+Category)
@@ -1407,7 +1383,7 @@ func TestQuery_ErrorCases(t *testing.T) {
 			}
 
 			store, client := setupQueryStore(t, persistable)
-			defer cleanupQueryTable(t, client)
+			defer deleteQueryTable(t, client)
 
 			// Setup test data
 			if tt.setupFunc != nil {

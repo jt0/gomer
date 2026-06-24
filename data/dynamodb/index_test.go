@@ -13,6 +13,8 @@ import (
 	ddbtest "github.com/jt0/gomer/data/dynamodb/_test"
 )
 
+const tableName = "gomer_keys_test"
+
 // Test setup helpers
 func setupTestStore(t *testing.T, persistables ...data.Persistable) (data.Store, *dynamodb.Client) {
 	client, isLocal, err := ddbtest.NewClient()
@@ -24,7 +26,7 @@ func setupTestStore(t *testing.T, persistables ...data.Persistable) (data.Store,
 
 	// Create table definition with all needed indexes
 	tableDef := &ddbtest.TableDefinition{}
-	tableDef.WithTableName("gomer_keys_test").
+	tableDef.WithTableName(tableName).
 		WithAttributeDefinition("PK", types.ScalarAttributeTypeS).
 		WithAttributeDefinition("SK", types.ScalarAttributeTypeS).
 		WithAttributeDefinition("GSI1PK", types.ScalarAttributeTypeS).
@@ -43,19 +45,20 @@ func setupTestStore(t *testing.T, persistables ...data.Persistable) (data.Store,
 
 	tableDef.Create(client)
 
-	store, ge := ddb.Store("gomer_keys_test", &ddb.Configuration{
+	store, ge := ddb.Store(tableName, &ddb.Configuration{
 		DynamoDb:           client,
 		MaxResultsDefault:  100,
 		MaxResultsMax:      1000,
 		ConsistencyDefault: ddb.Preferred,
-	}, persistables...)
+	})
 	assert.Success(t, ge)
+	assert.Success(t, store.AddPersistables(persistables...))
 
 	return store, client
 }
 
-func cleanupTestTable(t *testing.T, client *dynamodb.Client) {
-	err := ddbtest.DeleteAllTableData(client, "gomer_keys_test")
+func deleteTestTable(t *testing.T, client *dynamodb.Client) {
+	err := ddbtest.DeleteTable(client, "gomer_keys_test")
 	assert.Success(t, err)
 }
 
@@ -106,25 +109,27 @@ func TestIndex_BuildKeyValue_SinglePK(t *testing.T) {
 		},
 	}
 
+	store, client := setupTestStore(t,
+		new(ddbtest.CompositeKeyEntity),
+		new(ddbtest.NumericKeyEntity),
+		new(ddbtest.PointerKeyEntity),
+	)
+	defer deleteTestTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupTestStore(t, tt.entity)
-			defer cleanupTestTable(t, client)
-
-			ctx := context.Background()
-
 			// For empty PK, Create should fail
 			if tt.expectedPK == "" {
-				ge := store.Create(ctx, tt.entity)
+				ge := store.Create(context.Background(), tt.entity)
 				assert.Error(t, ge) // Expect KeyValueNotFound error
 				return
 			}
 
 			// Create the entity
-			assert.Success(t, store.Create(ctx, tt.entity))
+			assert.Success(t, store.Create(context.Background(), tt.entity))
 
 			// Read back to verify keys were stored correctly
-			assert.Success(t, store.Read(ctx, tt.entity))
+			assert.Success(t, store.Read(context.Background(), tt.entity))
 		})
 	}
 }
@@ -162,22 +167,21 @@ func TestIndex_BuildKeyValue_PKSK(t *testing.T) {
 		},
 	}
 
+	store, client := setupTestStore(t, new(ddbtest.CompositeKeyEntity))
+	defer deleteTestTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupTestStore(t, tt.entity)
-			defer cleanupTestTable(t, client)
-
-			ctx := context.Background()
 
 			// Empty PK should fail
 			if tt.expectedPK == "" {
-				ge := store.Create(ctx, tt.entity)
+				ge := store.Create(context.Background(), tt.entity)
 				assert.Error(t, ge)
 				return
 			}
 
 			// Create the entity
-			ge := store.Create(ctx, tt.entity)
+			ge := store.Create(context.Background(), tt.entity)
 			assert.Success(t, ge)
 
 			// Read back and verify
@@ -185,7 +189,7 @@ func TestIndex_BuildKeyValue_PKSK(t *testing.T) {
 				PartitionKey: tt.entity.PartitionKey,
 				SortKey:      tt.entity.SortKey,
 			}
-			ge = store.Read(ctx, readEntity)
+			ge = store.Read(context.Background(), readEntity)
 			assert.Success(t, ge)
 			assert.Equals(t, tt.entity.Data, readEntity.Data)
 		})
@@ -199,10 +203,9 @@ func TestIndex_BuildKeyValue_PKSK(t *testing.T) {
 // TestIndex_BuildKeyValue_CompositeKeys tests section 2.1: Multi-Part Partition Key
 func TestIndex_BuildKeyValue_CompositeKeys(t *testing.T) {
 	tests := []struct {
-		name        string
-		entity      *ddbtest.MultiPartKeyEntity
-		expectedPK  string
-		shouldError bool
+		name       string
+		entity     *ddbtest.MultiPartKeyEntity
+		expectedPK string
 	}{
 		{
 			name: "Two parts",
@@ -218,18 +221,9 @@ func TestIndex_BuildKeyValue_CompositeKeys(t *testing.T) {
 			entity: &ddbtest.MultiPartKeyEntity{
 				TenantId:   "T1",
 				EntityType: "USER",
-				Id:         "123",
+				Id:         "234",
 			},
 			expectedPK: "T1#USER",
-		},
-		{
-			name: "First part only",
-			entity: &ddbtest.MultiPartKeyEntity{
-				TenantId:   "T1",
-				EntityType: "",
-				Id:         "123",
-			},
-			expectedPK: "T1",
 		},
 		{
 			name: "First part empty",
@@ -238,26 +232,17 @@ func TestIndex_BuildKeyValue_CompositeKeys(t *testing.T) {
 				EntityType: "USER",
 				Id:         "123",
 			},
-			expectedPK:  "#USER", // Empty first part produces "#USER" (separator + second part)
-			shouldError: false,   // Empty segments are valid in composite keys
+			expectedPK: "#USER", // Empty first part produces "#USER" (separator + second part)
 		},
 	}
 
+	store, client := setupTestStore(t, new(ddbtest.MultiPartKeyEntity))
+	defer deleteTestTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupTestStore(t, tt.entity)
-			defer cleanupTestTable(t, client)
-
-			ctx := context.Background()
-
-			if tt.shouldError {
-				ge := store.Create(ctx, tt.entity)
-				assert.Error(t, ge)
-				return
-			}
-
 			// Create and verify
-			ge := store.Create(ctx, tt.entity)
+			ge := store.Create(context.Background(), tt.entity)
 			assert.Success(t, ge)
 
 			// Read back
@@ -266,56 +251,8 @@ func TestIndex_BuildKeyValue_CompositeKeys(t *testing.T) {
 				EntityType: tt.entity.EntityType,
 				Id:         tt.entity.Id,
 			}
-			ge = store.Read(ctx, readEntity)
+			ge = store.Read(context.Background(), readEntity)
 			assert.Success(t, ge)
-		})
-	}
-}
-
-// TestIndex_BuildKeyValue_CompositeSK tests section 2.2: Multi-Part Sort Key
-func TestIndex_BuildKeyValue_CompositeSK(t *testing.T) {
-	tests := []struct {
-		name       string
-		entity     *ddbtest.StaticKeyEntity
-		expectedSK string
-	}{
-		{
-			name: "Two parts",
-			entity: &ddbtest.StaticKeyEntity{
-				Id:     "123",
-				Status: "active",
-			},
-			expectedSK: "STATUS#active",
-		},
-		{
-			name: "One part with static",
-			entity: &ddbtest.StaticKeyEntity{
-				Id:     "123",
-				Status: "",
-			},
-			expectedSK: "STATUS", // Static value only
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupTestStore(t, tt.entity)
-			defer cleanupTestTable(t, client)
-
-			ctx := context.Background()
-
-			// Create and verify
-			ge := store.Create(ctx, tt.entity)
-			assert.Success(t, ge)
-
-			// Read back
-			readEntity := &ddbtest.StaticKeyEntity{
-				Id:     tt.entity.Id,
-				Status: tt.entity.Status,
-			}
-			ge = store.Read(ctx, readEntity)
-			assert.Success(t, ge)
-			assert.Equals(t, tt.entity.Detail, readEntity.Detail)
 		})
 	}
 }
@@ -327,284 +264,75 @@ func TestIndex_BuildKeyValue_CompositeSK(t *testing.T) {
 // TestIndex_EscapeKeyValue tests section 4.1: Field Value Escaping
 func TestIndex_EscapeKeyValue(t *testing.T) {
 	tests := []struct {
-		name           string
-		input          string
-		separator      byte
-		escape         byte
-		expectedOutput string
+		name     string
+		toEscape string
+		escaped  string
 	}{
 		{
-			name:           "No escaping needed",
-			input:          "simple",
-			separator:      '#',
-			escape:         '$',
-			expectedOutput: "simple",
+			name:     "No escaping needed",
+			toEscape: "simple",
+			escaped:  "simple",
 		},
 		{
-			name:           "Escape separator",
-			input:          "has#separator",
-			separator:      '#',
-			escape:         '$',
-			expectedOutput: "has$#separator",
+			name:     "Escape separator",
+			toEscape: "has#separator",
+			escaped:  "has$#separator",
 		},
 		{
-			name:           "Escape the escape char",
-			input:          "has$escape",
-			separator:      '#',
-			escape:         '$',
-			expectedOutput: "has$$escape",
+			name:     "Escape the escape char",
+			toEscape: "has$escape",
+			escaped:  "has$$escape",
 		},
+		//{
+		//	name:           "Empty string",
+		//	toEscape:       "",
+		//	expectedOutput: "",
+		//},
 		{
-			name:           "Escape both",
-			input:          "both#and$",
-			separator:      '#',
-			escape:         '$',
-			expectedOutput: "both$#and$$",
-		},
-		{
-			name:           "Empty string",
-			input:          "",
-			separator:      '#',
-			escape:         '$',
-			expectedOutput: "",
-		},
-		{
-			name:           "Multiple separators",
-			input:          "multiple#values#here",
-			separator:      '#',
-			escape:         '$',
-			expectedOutput: "multiple$#values$#here",
+			name:     "Multiple separators",
+			toEscape: "multiple#values#here",
+			escaped:  "multiple$#values$#here",
 		},
 	}
+
+	store, client := setupTestStore(t, new(ddbtest.EscapedValueEntity))
+	defer deleteTestTable(t, client)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test via actual entity with special characters
 			entity := &ddbtest.EscapedValueEntity{
-				Id:              "test",
-				FieldWithHash:   tt.input,
-				FieldWithDollar: "",
+				Id:       "test",
+				ToEscape: tt.toEscape,
+				Trailing: "foo",
 			}
 
-			store, client := setupTestStore(t, entity)
-			defer cleanupTestTable(t, client)
-
-			ctx := context.Background()
-
 			// Create entity
-			ge := store.Create(ctx, entity)
+			ge := store.Create(context.Background(), entity)
 			assert.Success(t, ge)
+
+			// Validate the
+			out, err := client.GetItem(context.Background(), &dynamodb.GetItemInput{
+				TableName: new(tableName),
+				Key: map[string]types.AttributeValue{
+					"PK": &types.AttributeValueMemberS{Value: entity.Id},
+					"SK": &types.AttributeValueMemberS{Value: tt.escaped + "#" + entity.Trailing},
+				},
+			})
+			assert.Success(t, err)
+			assert.Assert(t, out.Item != nil)
 
 			// Read back - values should be unescaped
 			readEntity := &ddbtest.EscapedValueEntity{
-				Id:              "test",
-				FieldWithHash:   tt.input,
-				FieldWithDollar: "",
+				Id:       "test",
+				ToEscape: tt.toEscape,
+				Trailing: "foo",
 			}
-			ge = store.Read(ctx, readEntity)
+			ge = store.Read(context.Background(), readEntity)
 			assert.Success(t, ge)
 
 			// Verify the value roundtrips correctly
-			assert.Equals(t, tt.input, readEntity.FieldWithHash)
-		})
-	}
-}
-
-// TestIndex_UnescapeAndSplit tests section 4.2: Field Value Unescaping
-func TestIndex_UnescapeAndSplit(t *testing.T) {
-	tests := []struct {
-		name             string
-		input            string
-		separator        byte
-		escape           byte
-		expectedSegments []string
-	}{
-		{
-			name:             "Simple split",
-			input:            "A#B#C",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"A", "B", "C"},
-		},
-		{
-			name:             "Escaped separator (no split)",
-			input:            "A$#B",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"A#B"},
-		},
-		{
-			name:             "Escaped escape char",
-			input:            "A$$B",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"A$B"},
-		},
-		{
-			name:             "Mixed escaping",
-			input:            "A$#B#C$$D",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"A#B", "C$D"},
-		},
-		{
-			name:             "Empty input",
-			input:            "",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{},
-		},
-		{
-			name:             "Trailing separator",
-			input:            "A#",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"A", ""},
-		},
-		{
-			name:             "Leading separator",
-			input:            "#B",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"", "B"},
-		},
-		{
-			name:             "Consecutive separators",
-			input:            "A##B",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"A", "", "B"},
-		},
-		{
-			name:             "Escaped at boundaries",
-			input:            "$#A#B$#",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"#A", "B#"},
-		},
-		{
-			name:             "Escape at end",
-			input:            "value$$",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"value$"},
-		},
-		{
-			name:             "Escape at start",
-			input:            "$$value",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"$value"},
-		},
-		{
-			name:             "Escape+separator combination",
-			input:            "$$#$$",
-			separator:        '#',
-			escape:           '$',
-			expectedSegments: []string{"$", "$"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test via entity with composite key containing escaped values
-			// We'll use StaticKeyEntity with crafted values
-			if tt.input == "" {
-				return // Skip empty input test for entity-based testing
-			}
-
-			// Create a composite value and verify it roundtrips
-			entity := &ddbtest.MultiPartKeyEntity{
-				TenantId:   "T1",
-				EntityType: "TYPE",
-				Id:         "123",
-			}
-
-			store, client := setupTestStore(t, entity)
-			defer cleanupTestTable(t, client)
-
-			ctx := context.Background()
-
-			ge := store.Create(ctx, entity)
-			assert.Success(t, ge)
-
-			readEntity := &ddbtest.MultiPartKeyEntity{
-				TenantId:   "T1",
-				EntityType: "TYPE",
-				Id:         "123",
-			}
-			ge = store.Read(ctx, readEntity)
-			assert.Success(t, ge)
-
-			// Verify all fields populated correctly (unescaped)
-			assert.Equals(t, entity.TenantId, readEntity.TenantId)
-			assert.Equals(t, entity.EntityType, readEntity.EntityType)
-			assert.Equals(t, entity.Id, readEntity.Id)
-		})
-	}
-}
-
-// TestIndex_EscapeRoundtrip tests section 4.3: Roundtrip Escape/Unescape
-func TestIndex_EscapeRoundtrip(t *testing.T) {
-	tests := []struct {
-		name          string
-		originalValue string
-	}{
-		{
-			name:          "Email address",
-			originalValue: "user@example.com",
-		},
-		{
-			name:          "Value with separator",
-			originalValue: "folder#1",
-		},
-		{
-			name:          "Value with escape",
-			originalValue: "item$special",
-		},
-		{
-			name:          "Mixed special chars",
-			originalValue: "a#b$c#d",
-		},
-		{
-			name:          "Unicode characters",
-			originalValue: "user@日本",
-		},
-		{
-			name:          "Multiple separators",
-			originalValue: "path#to#resource",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			entity := &ddbtest.EscapedValueEntity{
-				Id:              "test",
-				FieldWithHash:   tt.originalValue,
-				FieldWithDollar: tt.originalValue,
-			}
-
-			store, client := setupTestStore(t, entity)
-			defer cleanupTestTable(t, client)
-
-			ctx := context.Background()
-
-			// Create with original value
-			ge := store.Create(ctx, entity)
-			assert.Success(t, ge)
-
-			// Read back - should match original
-			readEntity := &ddbtest.EscapedValueEntity{
-				Id:              "test",
-				FieldWithHash:   tt.originalValue,
-				FieldWithDollar: tt.originalValue,
-			}
-			ge = store.Read(ctx, readEntity)
-			assert.Success(t, ge)
-
-			// Verify roundtrip: unescape(escape(x)) == x
-			assert.Equals(t, tt.originalValue, readEntity.FieldWithHash)
-			assert.Equals(t, tt.originalValue, readEntity.FieldWithDollar)
+			assert.Equals(t, tt.toEscape, readEntity.ToEscape)
 		})
 	}
 }

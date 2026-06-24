@@ -29,7 +29,7 @@ type mockCipher struct {
 	key byte
 }
 
-func (m *mockCipher) Encrypt(ctx context.Context, plaintext []byte, ec map[string]string) ([]byte, gomerr.Gomerr) {
+func (m *mockCipher) Encrypt(_ context.Context, plaintext []byte, ec map[string]string) ([]byte, gomerr.Gomerr) {
 	encrypted := make([]byte, len(plaintext))
 	for i, b := range plaintext {
 		encrypted[i] = b ^ m.key
@@ -37,9 +37,9 @@ func (m *mockCipher) Encrypt(ctx context.Context, plaintext []byte, ec map[strin
 	return encrypted, nil
 }
 
-func (m *mockCipher) Decrypt(ctx context.Context, ciphertext []byte, ec map[string]string) ([]byte, gomerr.Gomerr) {
+func (m *mockCipher) Decrypt(_ context.Context, ciphertext []byte, ec map[string]string) ([]byte, gomerr.Gomerr) {
 	// XOR decryption is symmetric
-	return m.Encrypt(ctx, ciphertext, ec)
+	return m.Encrypt(context.Background(), ciphertext, ec)
 }
 
 // createTestCipher creates a cipher for testing pagination.
@@ -102,8 +102,9 @@ func setupPaginationStore(t *testing.T, cipher crypto.Cipher, persistables ...da
 		config.NextTokenCipher = cipher
 	}
 
-	store, ge := ddb.Store(paginationTestTableName, config, persistables...)
+	store, ge := ddb.Store(paginationTestTableName, config)
 	assert.Success(t, ge)
+	assert.Success(t, store.AddPersistables(persistables...))
 
 	return store, client
 }
@@ -113,9 +114,13 @@ func cleanupPaginationTable(t *testing.T, client *dynamodb.Client) {
 	assert.Success(t, err)
 }
 
+func deletePaginationTable(t *testing.T, client *dynamodb.Client) {
+	err := ddbtest.DeleteTable(client, paginationTestTableName)
+	assert.Success(t, err)
+}
+
 // seedTestData creates count User entities in the store
 func seedTestData(t *testing.T, store data.Store, tenantId string, count int) []*ddbtest.User {
-	ctx := context.Background()
 	entities := make([]*ddbtest.User, count)
 
 	for i := 0; i < count; i++ {
@@ -126,7 +131,7 @@ func seedTestData(t *testing.T, store data.Store, tenantId string, count int) []
 			Name:     fmt.Sprintf("User %d", i),
 			Status:   "active",
 		}
-		ge := store.Create(ctx, user)
+		ge := store.Create(context.Background(), user)
 		assert.Success(t, ge)
 		entities[i] = user
 	}
@@ -136,7 +141,6 @@ func seedTestData(t *testing.T, store data.Store, tenantId string, count int) []
 
 // seedOrders creates count Order entities for a specific user
 func seedOrders(t *testing.T, store data.Store, tenantId, userId string, count int) []*ddbtest.Order {
-	ctx := context.Background()
 	entities := make([]*ddbtest.Order, count)
 
 	for i := 0; i < count; i++ {
@@ -148,7 +152,7 @@ func seedOrders(t *testing.T, store data.Store, tenantId, userId string, count i
 			Status:    "pending",
 			Total:     100.0,
 		}
-		ge := store.Create(ctx, order)
+		ge := store.Create(context.Background(), order)
 		assert.Success(t, ge)
 		entities[i] = order
 	}
@@ -158,13 +162,12 @@ func seedOrders(t *testing.T, store data.Store, tenantId, userId string, count i
 
 // collectAllPages executes query and follows pagination to retrieve all items
 func collectAllPages(t *testing.T, store data.Store, q data.Queryable) []any {
-	ctx := context.Background()
 	var allItems []any
 	pageCount := 0
 	maxPages := 1000 // Safety limit
 
 	for {
-		ge := store.Query(ctx, q)
+		ge := store.Query(context.Background(), q)
 		assert.Success(t, ge)
 
 		allItems = append(allItems, q.Results()...)
@@ -213,9 +216,7 @@ func verifyNoDuplicates(t *testing.T, items []any) {
 func TestPagination_BasicBehavior(t *testing.T) {
 	cipher := createTestCipher(t, []byte("test-key"))
 	store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
-	defer cleanupPaginationTable(t, client)
-
-	ctx := context.Background()
+	defer deletePaginationTable(t, client)
 
 	tests := []struct {
 		name            string
@@ -272,7 +273,7 @@ func TestPagination_BasicBehavior(t *testing.T) {
 			// Query
 			q := &ddbtest.Users{TenantId: "T1"}
 			q.SetMaximumPageSize(tt.maxPageSize)
-			ge := store.Query(ctx, q)
+			ge := store.Query(context.Background(), q)
 			assert.Success(t, ge)
 
 			// Verify result count
@@ -296,7 +297,7 @@ func TestPagination_BasicBehavior(t *testing.T) {
 func TestPagination_MultiPage(t *testing.T) {
 	cipher := createTestCipher(t, []byte("test-key"))
 	store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
-	defer cleanupPaginationTable(t, client)
+	defer deletePaginationTable(t, client)
 
 	tests := []struct {
 		name          string
@@ -376,12 +377,11 @@ func TestPagination_MultiPage(t *testing.T) {
 // Test Section 3: NextToken Encryption Tests
 
 func TestPagination_NextTokenEncryption(t *testing.T) {
-	ctx := context.Background()
 
 	t.Run("token encrypted with cipher", func(t *testing.T) {
 		cipher := createTestCipher(t, []byte("test-key"))
 		store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
-		defer cleanupPaginationTable(t, client)
+		defer deletePaginationTable(t, client)
 
 		// Seed data that requires pagination
 		seedTestData(t, store, "T1", 15)
@@ -389,7 +389,7 @@ func TestPagination_NextTokenEncryption(t *testing.T) {
 		// Query with pagination
 		q := &ddbtest.Users{TenantId: "T1"}
 		q.SetMaximumPageSize(5)
-		ge := store.Query(ctx, q)
+		ge := store.Query(context.Background(), q)
 		assert.Success(t, ge)
 
 		// Verify token exists
@@ -407,7 +407,7 @@ func TestPagination_NextTokenEncryption(t *testing.T) {
 
 		// Verify pagination works with encrypted token
 		q.SetNextPageToken(&token)
-		ge = store.Query(ctx, q)
+		ge = store.Query(context.Background(), q)
 		assert.Success(t, ge)
 		assert.Assert(t, len(q.Results()) > 0, "Should retrieve items on second page")
 	})
@@ -421,7 +421,6 @@ func TestPagination_NextTokenEncryption(t *testing.T) {
 // Test Section 4: Limit Configuration Tests
 
 func TestPagination_LimitConfiguration(t *testing.T) {
-	ctx := context.Background()
 
 	tests := []struct {
 		name              string
@@ -499,8 +498,9 @@ func TestPagination_LimitConfiguration(t *testing.T) {
 				NextTokenCipher:   cipher,
 				MaxResultsDefault: int64(tt.maxResultsDefault),
 				MaxResultsMax:     int64(tt.maxResultsMax),
-			}, &ddbtest.User{})
+			})
 			assert.Success(t, ge)
+			assert.Success(t, store.AddPersistables(&ddbtest.User{}))
 
 			// Clean and seed data
 			cleanupPaginationTable(t, client)
@@ -509,7 +509,7 @@ func TestPagination_LimitConfiguration(t *testing.T) {
 			// Query with specified page size
 			q := &ddbtest.Users{TenantId: "T1"}
 			q.SetMaximumPageSize(tt.queryPageSize)
-			ge = store.Query(ctx, q)
+			ge = store.Query(context.Background(), q)
 			assert.Success(t, ge)
 
 			// Verify result count respects limit
@@ -537,9 +537,7 @@ func TestPagination_LimitConfiguration(t *testing.T) {
 func TestPagination_EdgeCases(t *testing.T) {
 	cipher := createTestCipher(t, []byte("test-key"))
 	store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
-	defer cleanupPaginationTable(t, client)
-
-	ctx := context.Background()
+	defer deletePaginationTable(t, client)
 
 	t.Run("empty result set", func(t *testing.T) {
 		cleanupPaginationTable(t, client)
@@ -547,7 +545,7 @@ func TestPagination_EdgeCases(t *testing.T) {
 		// Query with no matches
 		q := &ddbtest.Users{TenantId: "nonexistent"}
 		q.SetMaximumPageSize(10)
-		ge := store.Query(ctx, q)
+		ge := store.Query(context.Background(), q)
 		assert.Success(t, ge)
 
 		// Verify empty results
@@ -561,7 +559,7 @@ func TestPagination_EdgeCases(t *testing.T) {
 
 		q := &ddbtest.Users{TenantId: "T1"}
 		q.SetMaximumPageSize(10)
-		ge := store.Query(ctx, q)
+		ge := store.Query(context.Background(), q)
 		assert.Success(t, ge)
 
 		assert.Equals(t, 1, len(q.Results()), "Expected single item")
@@ -576,7 +574,7 @@ func TestPagination_EdgeCases(t *testing.T) {
 		invalidToken := "not-base64!@#$%"
 		q := &ddbtest.Users{TenantId: "T1"}
 		q.SetNextPageToken(&invalidToken)
-		ge := store.Query(ctx, q)
+		ge := store.Query(context.Background(), q)
 
 		assert.Assert(t, ge != nil, "Expected error with malformed token")
 		assert.ErrorType(t, ge, gomerr.MalformedValue("", nil))
@@ -594,7 +592,7 @@ func TestPagination_AcrossIndexes(t *testing.T) {
 
 	t.Run("base table pagination", func(t *testing.T) {
 		store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
-		defer cleanupPaginationTable(t, client)
+		defer deletePaginationTable(t, client)
 
 		cleanupPaginationTable(t, client)
 		seedTestData(t, store, "T1", 25)
@@ -609,7 +607,7 @@ func TestPagination_AcrossIndexes(t *testing.T) {
 
 	t.Run("LSI pagination with descending order", func(t *testing.T) {
 		store, client := setupPaginationStore(t, cipher, &ddbtest.Order{})
-		defer cleanupPaginationTable(t, client)
+		defer deletePaginationTable(t, client)
 
 		cleanupPaginationTable(t, client)
 		seedOrders(t, store, "T1", "user1", 25)
@@ -632,12 +630,11 @@ func TestPagination_AcrossIndexes(t *testing.T) {
 
 	t.Run("GSI pagination", func(t *testing.T) {
 		store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
-		defer cleanupPaginationTable(t, client)
+		defer deletePaginationTable(t, client)
 
 		cleanupPaginationTable(t, client)
 
 		// Seed users with unique emails
-		ctx := context.Background()
 		for i := 0; i < 25; i++ {
 			user := &ddbtest.User{
 				TenantId: "T1",
@@ -646,13 +643,13 @@ func TestPagination_AcrossIndexes(t *testing.T) {
 				Name:     fmt.Sprintf("User %d", i),
 				Status:   "active",
 			}
-			ge := store.Create(ctx, user)
+			ge := store.Create(context.Background(), user)
 			assert.Success(t, ge)
 		}
 
 		// Query by specific email (GSI lookup)
 		q := &ddbtest.Users{Email: "user001@test.com"}
-		ge := store.Query(ctx, q)
+		ge := store.Query(context.Background(), q)
 		assert.Success(t, ge)
 
 		items := q.Results()
@@ -669,9 +666,7 @@ func TestPagination_TokenSerialization(t *testing.T) {
 
 	cipher := createTestCipher(t, []byte("test-key"))
 	store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
-	defer cleanupPaginationTable(t, client)
-
-	ctx := context.Background()
+	defer deletePaginationTable(t, client)
 
 	t.Run("roundtrip string keys", func(t *testing.T) {
 		cleanupPaginationTable(t, client)
@@ -680,7 +675,7 @@ func TestPagination_TokenSerialization(t *testing.T) {
 		// Get first page
 		q1 := &ddbtest.Users{TenantId: "T1"}
 		q1.SetMaximumPageSize(10)
-		ge := store.Query(ctx, q1)
+		ge := store.Query(context.Background(), q1)
 		assert.Success(t, ge)
 
 		// Save last item ID from first page
@@ -690,7 +685,7 @@ func TestPagination_TokenSerialization(t *testing.T) {
 		q2 := &ddbtest.Users{TenantId: "T1"}
 		q2.SetMaximumPageSize(10)
 		q2.SetNextPageToken(q1.NextPageToken())
-		ge = store.Query(ctx, q2)
+		ge = store.Query(context.Background(), q2)
 		assert.Success(t, ge)
 
 		// First item on page 2 should be different from last item on page 1
@@ -706,40 +701,40 @@ func TestPagination_TokenSerialization(t *testing.T) {
 
 // Test Section 9: Consistency and Pagination
 
-func TestPagination_ConsistencyTypes(t *testing.T) {
-	cipher := createTestCipher(t, []byte("test-key"))
-	store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
-	defer cleanupPaginationTable(t, client)
-
-	seedTestData(t, store, "T1", 25)
-
-	// TODO: Consistency type tests require Users to implement ConsistencyTyper interface
-	// t.Run("consistent read on base table", func(t *testing.T) {
-	// 	q := &ddbtest.Users{TenantId: "T1"}
-	// 	q.SetConsistencyType(ddb.Required)
-	// 	q.SetMaximumPageSize(10)
-	//
-	// 	// First page
-	// 	ge := store.Query(ctx, q)
-	// 	assert.Success(t, ge)
-	//
-	// 	// Second page with consistent read
-	// 	if q.NextPageToken() != nil {
-	// 		q.SetNextPageToken(q.NextPageToken())
-	// 		ge = store.Query(ctx, q)
-	// 		assert.Success(t, ge)
-	// 	}
-	// })
-	//
-	// t.Run("eventually consistent on base table", func(t *testing.T) {
-	// 	q := &ddbtest.Users{TenantId: "T1"}
-	// 	q.SetConsistencyType(ddb.Indifferent)
-	// 	q.SetMaximumPageSize(10)
-	//
-	// 	ge := store.Query(ctx, q)
-	// 	assert.Success(t, ge)
-	// })
-}
+//func TestPagination_ConsistencyTypes(t *testing.T) {
+//	cipher := createTestCipher(t, []byte("test-key"))
+//	store, client := setupPaginationStore(t, cipher, &ddbtest.User{})
+//	defer deletePaginationTable(t, client)
+//
+//	seedTestData(t, store, "T1", 25)
+//
+//	// TODO: Consistency type tests require Users to implement ConsistencyTyper interface
+//	// t.Run("consistent read on base table", func(t *testing.T) {
+//	// 	q := &ddbtest.Users{TenantId: "T1"}
+//	// 	q.SetConsistencyType(ddb.Required)
+//	// 	q.SetMaximumPageSize(10)
+//	//
+//	// 	// First page
+//	// 	ge := store.Query(context.Background(), q)
+//	// 	assert.Success(t, ge)
+//	//
+//	// 	// Second page with consistent read
+//	// 	if q.NextPageToken() != nil {
+//	// 		q.SetNextPageToken(q.NextPageToken())
+//	// 		ge = store.Query(context.Background(), q)
+//	// 		assert.Success(t, ge)
+//	// 	}
+//	// })
+//	//
+//	// t.Run("eventually consistent on base table", func(t *testing.T) {
+//	// 	q := &ddbtest.Users{TenantId: "T1"}
+//	// 	q.SetConsistencyType(ddb.Indifferent)
+//	// 	q.SetMaximumPageSize(10)
+//	//
+//	// 	ge := store.Query(context.Background(), q)
+//	// 	assert.Success(t, ge)
+//	// })
+//}
 
 // Test Section 10: Performance Tests
 
@@ -797,7 +792,6 @@ func TestPagination_ConsistencyTypes(t *testing.T) {
 //	store, client := setupPaginationStore(nil, cipher, &ddbtest.User{})
 //
 //	// Note: Can't use defer in benchmark, manual cleanup needed
-//	ctx := context.Background()
 //
 //	// Seed some data
 //	for i := 0; i < 20; i++ {
@@ -807,14 +801,14 @@ func TestPagination_ConsistencyTypes(t *testing.T) {
 //			Email:    fmt.Sprintf("user%d@test.com", i),
 //			Name:     fmt.Sprintf("User %d", i),
 //		}
-//		store.Create(ctx, user)
+//		store.Create(context.Background(), user)
 //	}
 //
 //	b.ResetTimer()
 //	for i := 0; i < b.N; i++ {
 //		q := &ddbtest.Users{TenantId: "T1"}
 //		q.SetMaximumPageSize(5)
-//		store.Query(ctx, q)
+//		store.Query(context.Background(), q)
 //		// Token generation happens inside Query
 //	}
 //

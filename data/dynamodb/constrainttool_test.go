@@ -90,10 +90,16 @@ func setupStore(t *testing.T, persistables ...data.Persistable) (data.Store, *dy
 		MaxResultsDefault:  100,
 		MaxResultsMax:      1000,
 		ConsistencyDefault: ddb.Preferred,
-	}, persistables...)
+	})
 	assert.Success(t, ge)
+	assert.Success(t, store.AddPersistables(persistables...))
 
 	return store, client
+}
+
+func deleteTable(t *testing.T, client *dynamodb.Client) {
+	err := ddbtest.DeleteTable(client, testTableName)
+	assert.Success(t, err)
 }
 
 func cleanupTable(t *testing.T, client *dynamodb.Client) {
@@ -127,18 +133,16 @@ func TestConstraintTool_Create(t *testing.T) {
 		},
 	}
 
+	store, client := setupStore(t, &User{})
+	defer deleteTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupStore(t, &User{})
-			defer cleanupTable(t, client)
-
-			ctx := context.Background()
-
 			if tt.setup != nil {
 				tt.setup(store)
 			}
 
-			ge := store.Create(ctx, tt.persistable)
+			ge := store.Create(context.Background(), tt.persistable)
 
 			if tt.expectError {
 				assert.ErrorType(t, ge, constraint.NotSatisfied(nil))
@@ -163,8 +167,8 @@ func TestConstraintTool_Update(t *testing.T) {
 				user1 := &User{Id: "user1", Email: "user1@example.com", TenantId: "tenant1", Name: "User One"}
 				assert.Success(t, store.Create(context.Background(), user1))
 			},
-			toUpdate:    &User{Id: "user2", Email: "user2@example.com", TenantId: "tenant1", Name: "User Two"},
-			update:      &User{Email: "newemail@example.com"},
+			toUpdate:    &User{Id: "user2", TenantId: "tenant1", Email: "user2@example.com", Name: "User Two"},
+			update:      &User{Id: "user2", TenantId: "tenant1", Email: "newemail@example.com"},
 			expectError: false,
 		},
 		{
@@ -173,23 +177,25 @@ func TestConstraintTool_Update(t *testing.T) {
 				user1 := &User{Id: "user1", Email: "user1@example.com", TenantId: "tenant1", Name: "User One"}
 				assert.Success(t, store.Create(context.Background(), user1))
 			},
-			toUpdate:    &User{Id: "user2", Email: "user2@example.com", TenantId: "tenant1", Name: "User Two"},
-			update:      &User{Email: "user1@example.com"},
+			toUpdate:    &User{Id: "user2", TenantId: "tenant1", Email: "user2@example.com", Name: "User Two"},
+			update:      &User{Id: "user2", TenantId: "tenant1", Email: "user1@example.com"},
 			expectError: true,
 		},
 		{
 			name:        "update non-constrained field succeeds without validation",
 			setup:       func(store data.Store) {},
-			toUpdate:    &User{Id: "user1", Email: "user@example.com", TenantId: "tenant1", Name: "Original Name"},
-			update:      &User{Name: "Updated Name"},
+			toUpdate:    &User{Id: "user1", TenantId: "tenant1", Email: "user@example.com", Name: "Original Name"},
+			update:      &User{Id: "user1", TenantId: "tenant1", Name: "Updated Name"},
 			expectError: false,
 		},
 	}
 
+	store, client := setupStore(t, &User{})
+	defer deleteTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupStore(t, &User{})
-			defer cleanupTable(t, client)
+			cleanupTable(t, client)
 			tt.setup(store)
 
 			assert.Success(t, store.Create(context.Background(), tt.toUpdate))
@@ -214,69 +220,63 @@ func TestConstraintTool_MultiFieldUnique(t *testing.T) {
 		{
 			name: "create with same email different tenant succeeds",
 			setup: func(store data.Store) {
-				ctx := context.Background()
 				account1 := &Account{Id: "account1", Email: "user@example.com", TenantId: "tenant1", Plan: "premium"}
-				assert.Success(t, store.Create(ctx, account1))
+				assert.Success(t, store.Create(context.Background(), account1))
 			},
 			operation: func(store data.Store) error {
-				ctx := context.Background()
 				account2 := &Account{Id: "account2", Email: "user@example.com", TenantId: "tenant2", Plan: "basic"}
-				return store.Create(ctx, account2)
+				return store.Create(context.Background(), account2)
 			},
 			expectError: false,
 		},
 		{
 			name: "create with same email same tenant fails",
 			setup: func(store data.Store) {
-				ctx := context.Background()
 				account1 := &Account{Id: "account1", Email: "user@example.com", TenantId: "tenant1", Plan: "premium"}
-				assert.Success(t, store.Create(ctx, account1))
+				assert.Success(t, store.Create(context.Background(), account1))
 			},
 			operation: func(store data.Store) error {
-				ctx := context.Background()
 				account2 := &Account{Id: "account2", Email: "user@example.com", TenantId: "tenant1", Plan: "basic"}
-				return store.Create(ctx, account2)
+				return store.Create(context.Background(), account2)
 			},
 			expectError: true,
 		},
 		{
 			name: "update to different email same tenant succeeds",
 			setup: func(store data.Store) {
-				ctx := context.Background()
 				account1 := &Account{Id: "account1", Email: "user1@example.com", TenantId: "tenant1", Plan: "premium"}
-				assert.Success(t, store.Create(ctx, account1))
+				assert.Success(t, store.Create(context.Background(), account1))
 				account2 := &Account{Id: "account2", Email: "user2@example.com", TenantId: "tenant1", Plan: "basic"}
-				assert.Success(t, store.Create(ctx, account2))
+				assert.Success(t, store.Create(context.Background(), account2))
 			},
 			operation: func(store data.Store) error {
-				ctx := context.Background()
 				account2 := &Account{Id: "account2", Email: "different@example.com", TenantId: "tenant1", Plan: "basic"}
-				return store.Update(ctx, account2, &User{Email: "different@example.com"})
+				return store.Update(context.Background(), account2, &User{Id: "account2", TenantId: "tenant1", Email: "different@example.com"})
 			},
 			expectError: false,
 		},
 		{
 			name: "update to duplicate email same tenant fails",
 			setup: func(store data.Store) {
-				ctx := context.Background()
 				account1 := &Account{Id: "account1", Email: "user1@example.com", TenantId: "tenant1", Plan: "premium"}
-				assert.Success(t, store.Create(ctx, account1))
+				assert.Success(t, store.Create(context.Background(), account1))
 				account2 := &Account{Id: "account2", Email: "user2@example.com", TenantId: "tenant1", Plan: "basic"}
-				assert.Success(t, store.Create(ctx, account2))
+				assert.Success(t, store.Create(context.Background(), account2))
 			},
 			operation: func(store data.Store) error {
-				ctx := context.Background()
 				account2 := &Account{Id: "account2", Email: "user2@example.com", TenantId: "tenant1", Plan: "basic"}
-				return store.Update(ctx, account2, &User{Email: "user1@example.com"})
+				return store.Update(context.Background(), account2, &User{Id: "account2", TenantId: "tenant1", Email: "user1@example.com"})
 			},
 			expectError: true,
 		},
 	}
 
+	store, client := setupStore(t, &Account{})
+	defer deleteTable(t, client)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, client := setupStore(t, &Account{})
-			defer cleanupTable(t, client)
+			cleanupTable(t, client)
 			tt.setup(store)
 
 			ge := tt.operation(store)

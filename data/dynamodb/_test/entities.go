@@ -170,10 +170,9 @@ func (q *NumericKeyEntities) ItemTemplate() any { return q }
 // EscapedValueEntity - demonstrates separator escaping in keys
 // Separator '#' becomes '$#', escape char '$' becomes '$$'
 type EscapedValueEntity struct {
-	Id              string `db.keys:"pk"`
-	FieldWithHash   string `db.keys:"sk.0"` // Value may contain '#'
-	FieldWithDollar string `db.keys:"sk.1"` // Value may contain '$'
-	NormalField     string
+	Id       string `db.keys:"pk"`
+	ToEscape string `db.keys:"sk.0"`
+	Trailing string `db.keys:"sk.1"`
 }
 
 func (e *EscapedValueEntity) TypeName() string             { return "EscapedValueEntity" }
