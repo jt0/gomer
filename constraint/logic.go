@@ -24,19 +24,19 @@ func And(constraints ...Constraint) Constraint {
 	}
 
 	return dynamicIfNeeded(New(andOp, constraints, func(toTest any) gomerr.Gomerr {
-		for _, operand := range constraints {
-			if ge := operand.Test(toTest); ge != nil {
-				if nse, ok := ge.(*NotSatisfiedError); ok {
-					if nse.Constraint == nil {
-						nse.Constraint = operand
-					}
-				} else {
-					if _, ok = ge.AttributeLookup("constraint"); !ok {
-						ge = ge.AddAttribute("constraint", operand)
-					}
-				}
-				return ge
+		for _, c := range constraints {
+			ge := c.Test(toTest)
+			if ge == nil {
+				continue
 			}
+			if nse := gomerr.ErrorAs[*NotSatisfiedError](ge); nse != nil {
+				if nse.Constraint == nil {
+					nse.Constraint = c
+				}
+			} else if _, ok := ge.AttributeLookup("constraint"); !ok {
+				ge = ge.AddAttribute("constraint", c)
+			}
+			return ge
 		}
 		return nil
 	}), constraints...)
@@ -52,29 +52,26 @@ func Or(constraints ...Constraint) Constraint {
 
 	return dynamicIfNeeded(New(orOp, constraints, func(toTest any) gomerr.Gomerr {
 		var errors []gomerr.Gomerr
-		for _, operand := range constraints {
-			ge := operand.Test(toTest)
+		for _, c := range constraints {
+			ge := c.Test(toTest)
 			if ge == nil {
 				return nil // any success results in success
 			}
 
-			if nse, ok := ge.(*NotSatisfiedError); ok {
+			if nse := gomerr.ErrorAs[*NotSatisfiedError](ge); nse != nil {
 				if nse.Constraint == nil {
-					nse.Constraint = operand
-				} else if nse.Constraint.Type() == "isNil" || nse.Constraint.Type() == "isZero" || strings.HasPrefix(nse.Constraint.Type(), "fieldTest_") {
+					nse.Constraint = c
+				} else if nct := nse.Constraint.Type(); nct == "isNil" || nct == "isZero" || strings.HasPrefix(nct, "fieldTest_") {
 					// "or(nil,...)" or "or(zero,...)" is a pattern to bypass the remainder of the constraints if the
 					// field is optional. If toTest is not nil, we don't need to include this "failed" constraint in
 					// error(s) we might return.
 					continue
-				} else if _, isDynamicConstraint := operand.(*dynamicConstraint); isDynamicConstraint {
-					nse.Constraint = operand
+				} else if _, isDynamicConstraint := c.(*dynamicConstraint); isDynamicConstraint && c.Type() != "and" && c.Type() != "or" {
+					nse.Constraint = c
 				}
-			} else {
-				if _, ok = ge.AttributeLookup("constraint"); !ok {
-					ge = ge.AddAttribute("constraint", operand)
-				}
+			} else if _, ok := ge.AttributeLookup("constraint"); !ok {
+				ge = ge.AddAttribute("constraint", c)
 			}
-
 			errors = append(errors, ge)
 		}
 		return gomerr.Batcher(errors)

@@ -17,14 +17,14 @@ func nilConstraint(name string, errorIfNil bool) Constraint {
 		ttv := reflect.ValueOf(toTest)
 		if !ttv.IsValid() {
 			if errorIfNil {
-				return NotSatisfied(name[2:])
+				return NotSatisfied(nil)
 			}
 			return nil
 		}
 		switch ttv.Kind() {
 		case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
 			if ttv.IsNil() == errorIfNil {
-				return NotSatisfied(name[2:])
+				return NotSatisfied(nil)
 			}
 			return nil
 		default:
@@ -53,11 +53,14 @@ var (
 func zeroConstraint(name string, errorIfZero bool) Constraint {
 	return New(name, nil, func(toTest any) gomerr.Gomerr {
 		ttv := reflect.ValueOf(toTest)
-		if !ttv.IsValid() && errorIfZero {
-			return NotSatisfied(name[2:])
+		if !ttv.IsValid() {
+			if errorIfZero {
+				return NotSatisfied(nil)
+			}
+			return nil
 		}
 		if ttv.IsZero() == errorIfZero {
-			return NotSatisfied(name[2:])
+			return NotSatisfied(nil)
 		}
 		return nil
 	})
@@ -78,7 +81,7 @@ func NotZero(value *any) Constraint {
 var IsRequired = New("isRequired", nil, func(toTest any) gomerr.Gomerr {
 	ttv, ok := flect.ReadableIndirectValue(toTest)
 	if !ok || ttv.IsZero() {
-		return NotSatisfied(toTest)
+		return NotSatisfied(nil)
 	}
 	return nil
 })
@@ -97,11 +100,11 @@ var (
 func boolConstraint(name string, errorIfTrue bool) Constraint {
 	return New(name, nil, func(toTest any) gomerr.Gomerr {
 		if ttv, ok := flect.ReadableIndirectValue(toTest); !ok {
-			return NotSatisfied(name[2:]) // neither true nor false
+			return NotSatisfied(nil) // neither true nor false
 		} else if ttv.Kind() != reflect.Bool {
 			return gomerr.Unprocessable("test value is not a bool", reflect.TypeOf(toTest))
 		} else if ttv.Bool() == errorIfTrue {
-			return NotSatisfied(name[2:])
+			return NotSatisfied(nil)
 		}
 		return nil
 	})
