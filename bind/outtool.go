@@ -39,11 +39,10 @@ type outApplierProvider struct {
 }
 
 func (ap outApplierProvider) Applier(st reflect.Type, sf reflect.StructField, directive string, scope string) (structs.Applier, gomerr.Gomerr) {
-	if directive == skipField {
+	if directive == skipField || directive == "" {
 		return nil, nil
 	}
 
-	//goland:noinspection GoBoolExpressions
 	omitIfEmpty := ap.emptyValue == omitEmpty
 	if cIndex := strings.LastIndexByte(directive, ','); cIndex != -1 {
 		switch flag := directive[cIndex+1:]; flag {
@@ -57,32 +56,19 @@ func (ap outApplierProvider) Applier(st reflect.Type, sf reflect.StructField, di
 		}
 	}
 
-	if applier, ge := structs.Composite(directive, ap.tool, st, sf); applier != nil || ge != nil {
-		return applier, ge
-	}
-
-	if directive == includeField || directive == "" {
+	if composite, ge := structs.Composite(directive, ap.tool, st, sf); composite != nil || ge != nil {
+		return composite, ge
+	} else if directive == includeField {
 		return outApplier{(*ap.toCase)(sf.Name), omitIfEmpty, ap.tool}, nil
 	} else if firstChar := directive[0]; firstChar == '=' {
 		return structs.ValueApplier{directive[1:]}, nil // don't include the '='
 	} else if firstChar == '$' {
-		if directive[1] == '.' {
-			return structs.StructApplier{directive}, nil
-		} else {
-			tf := structs.GetToolFunction(directive) // include the '$'
-			if tf == nil {
-				return nil, gomerr.Configuration("function not found: " + directive)
-			}
-			return tf, nil
+		return structs.ExpressionApplierProvider(directive)
+	} else if ap.extension != nil {
+		if applier, age := ap.extension.Applier(st, sf, directive, scope); applier != nil || age != nil {
+			return applier, age
 		}
 	}
-
-	if ap.extension != nil {
-		if applier, ge := ap.extension.Applier(st, sf, directive, scope); applier != nil || ge != nil {
-			return applier, ge
-		}
-	}
-
 	return outApplier{directive, omitIfEmpty, ap.tool}, nil
 }
 

@@ -19,13 +19,15 @@ type Person struct {
 
 	FirstName  *string `in:"+" out:"+"`
 	LastName   *string `in:"+" out:"+"`
-	MiddleName *string `in:"" out:""`
+	MiddleName *string `in:"+" out:"+"`
+	Title      *string `in:"" out:""`
+	Suffix     string  `in:"" out:""`
 }
 
 var personActions = map[any]func() resource.AnyAction{PostCollection: func() resource.AnyAction { return resource.CreateAction[*Person]() }}
 
 func init() {
-	resource.Register[*Person](registry, resource.WithActions(personActions), resource.WithStore(stores.PanicStore))
+	resource.Register[*Person](ctx, resource.WithActions(personActions), resource.WithStore(stores.PanicStore))
 }
 
 func TestConfigure_PascalCaseFields(t *testing.T) {
@@ -36,7 +38,7 @@ func TestConfigure_PascalCaseFields(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"FirstName": "Alice", "LastName": "Wonder"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
+	person := resource.NewInstance[*Person](ctx, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -52,7 +54,7 @@ func TestConfigure_CamelCaseFields(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Bruce", "lastName": "Wayne"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
+	person := resource.NewInstance[*Person](ctx, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -69,7 +71,7 @@ func TestConfigure_PascalCaseFields_CamelCaseInput(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Betty", "lastName": "Crocker"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
+	person := resource.NewInstance[*Person](ctx, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -87,7 +89,7 @@ func TestConfigure_MultipleOptions(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "James", "middleName": "Earl", "lastName": "Jones"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
+	person := resource.NewInstance[*Person](ctx, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -101,7 +103,7 @@ func TestConfigure_MultipleOptions(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "James", "middleName": "", "lastName": "Jones"}`)),
 	}
 
-	person2, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
+	person2 := resource.NewInstance[*Person](ctx, subject)
 	ge = BindFromRequest(req2, person2, "test")
 	assert.Success(t, ge)
 
@@ -110,23 +112,24 @@ func TestConfigure_MultipleOptions(t *testing.T) {
 	assert.Equals(t, "Jones", *person2.LastName)
 }
 
-func TestConfigure_OmitEmptyValues(t *testing.T) {
-	// Configure with default OmitEmptyValues (explicitly set for clarity)
-	Configure(CamelCaseFields, OmitEmptyValues)
+func TestConfigure_SkipEmptyDirectives(t *testing.T) {
+	Configure(CamelCaseFields)
 
 	// Test with empty middleName - OmitEmptyValues means pointer should remain nil
 	req := &http.Request{
 		URL:  &url.URL{Path: "/"},
-		Body: io.NopCloser(strings.NewReader(`{"firstName": "James", "middleName": "", "lastName": "Jones"}`)),
+		Body: io.NopCloser(strings.NewReader(`{"firstName": "Alec", "lastName": "Guinness", "":"", "title": "Sir", "suffix": "ignoreme"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
+	person := resource.NewInstance[*Person](ctx, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
-	assert.Equals(t, "James", *person.FirstName)
-	assert.Nil(t, person.MiddleName) // nil because empty value is omitted
-	assert.Equals(t, "Jones", *person.LastName)
+	assert.Equals(t, "Alec", *person.FirstName)
+	assert.Equals(t, "Guinness", *person.LastName)
+	assert.Nil(t, person.MiddleName)    // nil because value isn't in payload
+	assert.Nil(t, person.Title)         // nil because empty directive
+	assert.Equals(t, "", person.Suffix) // zero because empty directive
 }
 
 func TestNewBindingConfiguration_SetAsDefault(t *testing.T) {
@@ -138,7 +141,7 @@ func TestNewBindingConfiguration_SetAsDefault(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Plato"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
+	person := resource.NewInstance[*Person](ctx, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -154,7 +157,7 @@ func TestConfigure_CamelCaseFields_DefaultNaming(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Charlie", "lastName": "Brown"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
+	person := resource.NewInstance[*Person](ctx, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
@@ -163,38 +166,30 @@ func TestConfigure_CamelCaseFields_DefaultNaming(t *testing.T) {
 }
 
 func TestConfigure_RequestOption(t *testing.T) {
-	// Configure with request-specific override for IncludeEmptyValues
-	Configure(
-		CamelCaseFields,
-		RequestOption(IncludeEmptyValues),
-	)
+	Configure(CamelCaseFields, IncludeEmptyValues)
 
 	req := &http.Request{
 		URL:  &url.URL{Path: "/"},
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Edgar", "middleName": "", "lastName": "Poe"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
+	person := resource.NewInstance[*Person](ctx, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
-	assert.Equals(t, "", *person.MiddleName) // IncludeEmptyValues means non-nil pointer to empty string
+	assert.Equals(t, "", *person.MiddleName)
 }
 
 func TestConfigure_ResponseOption(t *testing.T) {
 	// Configure with response-specific override
-	Configure(
-		CamelCaseFields,
-		OmitEmptyValues,
-		ResponseOption(IncludeEmptyValues),
-	)
+	Configure(CamelCaseFields, IncludeEmptyValues)
 
 	req := &http.Request{
 		URL:  &url.URL{Path: "/"},
 		Body: io.NopCloser(strings.NewReader(`{"firstName": "Madonna"}`)),
 	}
 
-	person, _ := resource.NewInstance[*Person](ctxWithRegistry, subject)
+	person := resource.NewInstance[*Person](ctx, subject)
 	ge := BindFromRequest(req, person, "test")
 	assert.Success(t, ge)
 

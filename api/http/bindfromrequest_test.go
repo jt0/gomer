@@ -1,9 +1,7 @@
 package http_test
 
 import (
-	"context"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,10 +15,12 @@ import (
 )
 
 var (
-	subject         = auth.NewSubject(auth.ReadWriteAllFields)
-	actions         = map[any]func() resource.AnyAction{PostCollection: func() resource.AnyAction { return resource.CreateAction[*Greeting]() }}
-	registry        = resource.NewRegistry()
-	ctxWithRegistry = context.WithValue(context.TODO(), resource.RegistryCtxKey, registry)
+	subject = auth.NewSubject(auth.ReadWriteAllFields)
+	actions = map[any]func() resource.AnyAction{PostCollection: func() resource.AnyAction {
+		return resource.CreateAction[*Greeting]()
+	}}
+
+	_, ctx = resource.NewRegistry()
 )
 
 //goland:noinspection GoSnakeCaseUsage
@@ -71,7 +71,7 @@ func (g Greeting) recipient(location int) string {
 }
 
 func TestBindInTypes(t *testing.T) {
-	resource.Register[*Greeting](registry, resource.WithActions(actions), resource.WithStore(stores.PanicStore))
+	resource.Register[*Greeting](ctx, resource.WithActions(actions), resource.WithStore(stores.PanicStore))
 
 	const (
 		hello = "hello"
@@ -91,11 +91,10 @@ func TestBindInTypes(t *testing.T) {
 		{"BindFromBody", Body, &http.Request{URL: &url.URL{Path: "/"}, Body: body("{ \"Style\": \"" + hello + "\", \"Recipient\": \"" + kitty + "\" }")}},
 	}
 
-	greeting, ge := resource.NewInstance[*Greeting](ctxWithRegistry, subject)
-	assert.Success(t, ge)
+	greeting := resource.NewInstance[*Greeting](ctx, subject)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ge = BindFromRequest(tt.request, greeting, "some_scope")
+			ge := BindFromRequest(tt.request, greeting, "some_scope")
 			assert.Success(t, ge)
 			assert.Equals(t, hello, greeting.style(tt.location))
 			assert.Equals(t, kitty, greeting.recipient(tt.location))
@@ -104,5 +103,5 @@ func TestBindInTypes(t *testing.T) {
 }
 
 func body(input string) io.ReadCloser {
-	return ioutil.NopCloser(strings.NewReader(input))
+	return io.NopCloser(strings.NewReader(input))
 }

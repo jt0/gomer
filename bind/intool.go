@@ -36,38 +36,29 @@ type inApplierProvider struct {
 }
 
 func (ap inApplierProvider) Applier(st reflect.Type, sf reflect.StructField, directive string, scope string) (structs.Applier, gomerr.Gomerr) {
-	if directive == skipField {
+	if directive == skipField || directive == "" {
 		return nil, nil
 	}
 
-	//goland:noinspection GoBoolExpressions
-	omitIfEmpty := ap.emptyValue == omitEmpty
-
-	if applier, ge := structs.Composite(directive, ap.tool, st, sf); applier != nil || ge != nil {
-		return applier, ge
-	}
-
-	if directive == includeField || directive == "" {
-		return inApplier{source: (*ap.toCase)(sf.Name), omitIfEmpty: omitIfEmpty, tool: ap.tool}, nil
+	if composite, ge := structs.Composite(directive, ap.tool, st, sf); composite != nil || ge != nil {
+		return composite, ge
+	} else if directive == includeField {
+		return inApplier{source: (*ap.toCase)(sf.Name), tool: ap.tool}, nil
 	} else if firstChar := directive[0]; firstChar == '=' {
 		return structs.ValueApplier{directive[1:]}, nil // don't include the '='
 	} else if firstChar == '$' {
-		return structs.ExpressionApplierProvider(st, sf, directive)
-	}
-
-	if ap.extension != nil {
-		if applier, ge := ap.extension.Applier(st, sf, directive, scope); applier != nil || ge != nil {
-			return applier, ge
+		return structs.ExpressionApplierProvider(directive)
+	} else if ap.extension != nil {
+		if applier, age := ap.extension.Applier(st, sf, directive, scope); applier != nil || age != nil {
+			return applier, age
 		}
 	}
-
-	return inApplier{source: directive, omitIfEmpty: omitIfEmpty, tool: ap.tool}, nil
+	return inApplier{source: directive, tool: ap.tool}, nil
 }
 
 type inApplier struct {
-	source      string
-	omitIfEmpty bool
-	tool        *structs.Tool
+	source string
+	tool   *structs.Tool
 }
 
 var (
