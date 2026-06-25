@@ -49,8 +49,7 @@ func RenderErrorMiddleware(renderer func(gomerr.Gomerr) StatusCoder) func(http.H
 
 			if ge := gomerr.ErrorAs[gomerr.Gomerr](rw.err); ge != nil {
 				if ue := gomerr.ErrorAs[*UnroutableError](ge); ue != nil {
-					ue.Method = r.Method
-					ue.Path = r.URL.Path
+					ue.Route = r.Method + " " + r.URL.Path
 				}
 				rendered := renderer(ge)
 				bytes, statusCode := BindToResponse(reflect.ValueOf(rendered), rw.Header(), "", r.Header.Get("Accept-Language"), rendered.StatusCode())

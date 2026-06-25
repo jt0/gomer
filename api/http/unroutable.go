@@ -1,4 +1,4 @@
-package rest
+package http
 
 import (
 	"github.com/jt0/gomer/gomerr"
@@ -6,8 +6,7 @@ import (
 
 type UnroutableError struct {
 	gomerr.Gomerr
-	Method string
-	Path   string
+	Route string
 }
 
 func Unroutable() *UnroutableError {
