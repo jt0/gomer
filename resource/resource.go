@@ -6,6 +6,7 @@ import (
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/log"
 )
 
 // Resource is the base interface for all domain resources. The type parameter T
@@ -14,6 +15,7 @@ type Resource[T any] interface {
 	Subject() auth.Subject
 	DoAction(context.Context, Action[T]) (T, gomerr.Gomerr)
 	RegisteredType() RegisteredType
+	MaxActionRetries() int
 
 	registeredType() *registeredType
 	initialize(rt *registeredType, sub auth.Subject)
@@ -37,20 +39,19 @@ func (b *BaseResource[T]) Self() T {
 
 func (b *BaseResource[T]) DoAction(ctx context.Context, action Action[T]) (T, gomerr.Gomerr) {
 	var zero T
-
 	if ge := action.Pre(ctx, b.self); ge != nil {
 		return zero, ge
 	}
 
 	ge := action.Do(ctx, b.self)
-	for i := 0; i < 2 && ge != nil; i++ { // up to 2 retries
+	for i, maxRetries := 1, b.self.MaxActionRetries(); i <= maxRetries && ge != nil; i++ {
 		if ge = action.Retry(ctx, b.self, ge); ge != nil {
-			break
+			return zero, action.OnDoFailure(ctx, b.self, ge)
 		}
 		ge = action.Do(ctx, b.self)
 	}
 	if ge != nil {
-		return zero, action.OnDoFailure(ctx, b.self, ge)
+		log.Error("exceeded max retry count; validate logic and override if needed", "maxRetries", b.self.MaxActionRetries())
 	}
 
 	return action.OnDoSuccess(ctx, b.self)
@@ -58,6 +59,12 @@ func (b *BaseResource[T]) DoAction(ctx context.Context, action Action[T]) (T, go
 
 func (b *BaseResource[T]) RegisteredType() RegisteredType {
 	return b.rt
+}
+
+const DefaultMaxActionRetries = 3
+
+func (b *BaseResource[T]) MaxActionRetries() int {
+	return DefaultMaxActionRetries
 }
 
 func (b *BaseResource[T]) registeredType() *registeredType {

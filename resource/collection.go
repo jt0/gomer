@@ -20,8 +20,8 @@ type Collection[I Instance[I]] struct {
 	Resource[*Collection[I]]
 	proto      I       // Instance used as proto for query
 	Items      []I     `out:"+,includeempty"`
-	NextToken  *string `in:"query.next_token" out:"+"`
-	MaxResults int     `in:"query.max_results" validate:"intbetween(1,100)"` // TODO:  "intbetween(1,$.MaximumPageSize())
+	NextToken  *string `out:"+"`
+	MaxResults int
 
 	// TODO: move to `data` package
 	consistencyType dynamodb.ConsistencyType
@@ -90,6 +90,11 @@ func (c *Collection[I]) SetResults(items []any) {
 }
 
 func (c *Collection[I]) NextPageToken() *string {
+	if c.NextToken == nil {
+		if i, ok := any(c.proto).(interface{ NextPageToken() *string }); ok {
+			return i.NextPageToken()
+		}
+	}
 	return c.NextToken
 }
 
@@ -98,13 +103,20 @@ func (c *Collection[I]) SetNextPageToken(token *string) {
 }
 
 func (c *Collection[I]) MaximumPageSize() int {
-	//	if b.MaxResults == nil || *b.MaxResults > DefaultMaxMaxResults {
-	//		return DefaultMaxResults
-	//	}
-	if c.MaxResults == 0 {
-		return data.MaxResultsDefault
+	mps := c.MaxResults
+	if mps == 0 {
+		if i, ok := any(c.proto).(interface{ MaximumPageSize() int }); ok {
+			mps = i.MaximumPageSize()
+		}
 	}
-	return c.MaxResults
+	if mps > 0 && mps <= data.MaxResultsDefault { // TODO: MaxMaxResults
+		return mps
+	}
+	return data.MaxResultsDefault
+}
+
+func (c *Collection[I]) SetMaximumPageSize(pageSize int) {
+	c.MaxResults = pageSize
 }
 
 func (c *Collection[I]) ConsistencyType() dynamodb.ConsistencyType {
