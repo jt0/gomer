@@ -12,7 +12,7 @@ type KeyFieldMismatchError struct {
 	ConflictValue string
 	ExistingKey   string
 	ConflictKey   string
-	Persistable   data.Persistable `gomerr:"include_type"`
+	Persistable   data.Persistable
 }
 
 func KeyFieldMismatch(fieldName, existingValue, conflictValue, existingKey, conflictKey string, persistable data.Persistable) *KeyFieldMismatchError {

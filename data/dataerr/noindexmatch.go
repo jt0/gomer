@@ -8,7 +8,7 @@ import (
 type NoIndexMatchError struct {
 	gomerr.Gomerr
 	AvailableIndexes map[string]any
-	Queryable        data.Queryable `gomerr:"include_type"`
+	Queryable        data.Queryable
 }
 
 func NoIndexMatch(availableIndexes map[string]any, queryable data.Queryable) *NoIndexMatchError {

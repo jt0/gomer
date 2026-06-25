@@ -3,7 +3,7 @@ package gomerr
 type UnprocessableError struct {
 	Gomerr
 	Reason string
-	Value  any `gomerr:"include_type"`
+	Value  any
 }
 
 func Unprocessable(reason string, value any) *UnprocessableError {

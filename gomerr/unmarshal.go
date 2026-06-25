@@ -3,8 +3,8 @@ package gomerr
 type UnmarshalError struct {
 	Gomerr
 	What   string
-	Data   any `gomerr:"include_type"`
-	Target any `gomerr:"include_type"`
+	Data   any
+	Target any
 }
 
 func Unmarshal(what string, data, target any) *UnmarshalError {

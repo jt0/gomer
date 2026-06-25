@@ -266,11 +266,6 @@ func (g *gomerr) ToMap() map[string]any {
 
 		fieldKey := ft.Name
 		fi := fv.Interface()
-		if tag := ft.Tag.Get("gomerr"); tag != "" {
-			if tag == "include_type" {
-				fieldKey += " (" + fv.Type().String() + ")"
-			}
-		}
 		if s, ok := fi.(interface{ String() string }); ok {
 			fi = s.String()
 		}

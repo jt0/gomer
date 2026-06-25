@@ -9,7 +9,7 @@ type KeyValueNotFoundError struct {
 	gomerr.Gomerr
 	KeyName     string
 	KeyFields   []string
-	Persistable data.Persistable `gomerr:"include_type"`
+	Persistable data.Persistable
 }
 
 func KeyValueNotFound(keyName string, keyFields []string, persistable data.Persistable) *KeyValueNotFoundError {

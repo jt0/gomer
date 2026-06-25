@@ -10,7 +10,7 @@ import (
 type StoreError struct {
 	gomerr.Gomerr
 	Operation string
-	Data      any `gomerr:"include_type"`
+	Data      any
 }
 
 func Store(operation string, data any, ge gomerr.Gomerr) gomerr.Gomerr {

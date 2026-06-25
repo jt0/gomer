@@ -3,7 +3,7 @@ package gomerr
 type MarshalError struct {
 	Gomerr
 	What  string
-	Value any `gomerr:"include_type"`
+	Value any
 }
 
 func Marshal(what string, value any) *MarshalError {

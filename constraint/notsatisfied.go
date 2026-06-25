@@ -6,7 +6,7 @@ import (
 
 type NotSatisfiedError struct {
 	gomerr.Gomerr
-	ToTest     any `gomerr:"include_type"` // Needs to be first (after gomerr.Gomerr) to populate properly via gomerr.Build()
+	ToTest     any
 	Target     string
 	Constraint Constraint
 }
