@@ -12,14 +12,13 @@ import (
 
 // NewInstance creates a new instance of type I.
 // Retrieves the Registry from context automatically.
-func NewInstance[I Instance[I]](ctx context.Context, sub auth.Subject) (I, gomerr.Gomerr) {
-	var zero I
+func NewInstance[I Instance[I]](ctx context.Context, sub auth.Subject) I {
 	if r, _ := ctx.Value(RegistryCtxKey).(*Registry); r == nil {
-		return zero, gomerr.Configuration("no registry in context")
+		panic("no registry in context")
 	} else if rt := r.registeredTypes[reflect.TypeFor[I]()]; rt == nil {
-		return zero, gomerr.Unprocessable("unknown instance type", reflect.TypeFor[I]())
+		panic("type not registered: " + reflect.TypeFor[I]().String())
 	} else {
-		return rt.newInstance(sub).(I), nil
+		return rt.newInstance(sub).(I)
 	}
 }
 
@@ -141,7 +140,7 @@ func (b *BaseInstance[I]) Read(ctx context.Context) (I, gomerr.Gomerr) {
 }
 
 func (b *BaseInstance[I]) Update(ctx context.Context) (I, gomerr.Gomerr) {
-	return b.DoAction(ctx, UpdateAction[I](ReadAction[I]()))
+	return b.DoAction(ctx, UpdateAction[I](nil))
 }
 
 func (b *BaseInstance[I]) Delete(ctx context.Context) (I, gomerr.Gomerr) {

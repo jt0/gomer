@@ -215,6 +215,11 @@ func (*updateAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 }
 
 func (a *updateAction[I]) Pre(ctx context.Context, update I) gomerr.Gomerr {
+	if a.readAction == nil {
+		a.current = update
+		return update.PreUpdate(ctx, update)
+	}
+
 	rt := update.registeredType()
 
 	// Create a new instance to hold current state

@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"context"
 	"reflect"
 	"strings"
 
@@ -9,46 +10,48 @@ import (
 	"github.com/jt0/gomer/gomerr"
 )
 
-type Option func(*registeredType)
+type registryCtxKey struct{}
 
-// WithParent establishes a parent-child relationship with the specified resource type. Parents must be
-// registered before their children.
-func WithParent[P Instance[P]]() Option {
-	return func(rt *registeredType) {
-		rt.parentType = reflect.TypeFor[P]()
-	}
+// RegistryCtxKey is the context key for storing/retrieving a Registry.
+var RegistryCtxKey = registryCtxKey{}
+
+// Registry holds all registered resource types.
+type Registry struct {
+	registeredTypes map[reflect.Type]*registeredType
+	rootTypes       []RegisteredType
 }
 
-// WithActions specifies the actions available for this resource.
-func WithActions(actions map[any]func() AnyAction) Option {
-	return func(rt *registeredType) {
-		rt.actions = actions
-	}
+// NewRegistry creates a new registry for resource registration.
+func NewRegistry() (*Registry, context.Context) {
+	r := &Registry{registeredTypes: make(map[reflect.Type]*registeredType)}
+	ctx := context.WithValue(context.Background(), RegistryCtxKey, r)
+	return r, ctx
 }
 
-// WithStore specifies the data store for this resource. If not provided, inherits from parent (if any).
-func WithStore(store data.Store) Option {
-	return func(rt *registeredType) {
-		rt.store = store
-	}
+// RootTypes returns all root-level registered resources.
+func (r *Registry) RootTypes() []RegisteredType {
+	return r.rootTypes
 }
 
-// WithInstanceName overrides the singular path name derived from the type name.
-func WithInstanceName(name string) Option {
-	return func(rt *registeredType) {
-		rt.instanceName = name
-	}
-}
-
-// WithCollectionName overrides the plural/collection path name.
-func WithCollectionName(name string) Option {
-	return func(rt *registeredType) {
-		rt.collectionName = name
-	}
+type RegisteredType interface {
+	InstanceName() string
+	CollectionName() string
+	Actions() map[any]func() AnyAction
+	Parent() RegisteredType
+	Children() []RegisteredType
+	NewInstance(auth.Subject) any
+	NewCollection(proto any) any
+	Store() data.Store
 }
 
 // Register registers an instance type with the registry.
-func Register[I Instance[I]](r *Registry, opts ...Option) {
+func Register[I Instance[I]](ctx context.Context, opts ...Option) {
+	a := ctx.Value(RegistryCtxKey)
+	r, ok := a.(*Registry)
+	if !ok {
+		panic("context does not contain a Registry")
+	}
+
 	rt := &registeredType{
 		instanceType: reflect.TypeFor[I](),
 		baseOffset:   findBaseResourceOffset[I](),
@@ -98,6 +101,44 @@ func Register[I Instance[I]](r *Registry, opts ...Option) {
 	r.registeredTypes[rt.instanceType] = rt
 
 	return
+}
+
+type Option func(*registeredType)
+
+// WithParent establishes a parent-child relationship with the specified resource type. Parents must be
+// registered before their children.
+func WithParent[P Instance[P]]() Option {
+	return func(rt *registeredType) {
+		rt.parentType = reflect.TypeFor[P]()
+	}
+}
+
+// WithActions specifies the actions available for this resource.
+func WithActions(actions map[any]func() AnyAction) Option {
+	return func(rt *registeredType) {
+		rt.actions = actions
+	}
+}
+
+// WithStore specifies the data store for this resource. If not provided, inherits from parent (if any).
+func WithStore(store data.Store) Option {
+	return func(rt *registeredType) {
+		rt.store = store
+	}
+}
+
+// WithInstanceName overrides the singular path name derived from the type name.
+func WithInstanceName(name string) Option {
+	return func(rt *registeredType) {
+		rt.instanceName = name
+	}
+}
+
+// WithCollectionName overrides the plural/collection path name.
+func WithCollectionName(name string) Option {
+	return func(rt *registeredType) {
+		rt.collectionName = name
+	}
 }
 
 // findBaseResourceOffset finds the offset of BaseResource[I] within the instance struct.
@@ -175,38 +216,4 @@ func (m *registeredType) NewCollection(proto any) any {
 
 func (m *registeredType) Store() data.Store {
 	return m.store
-}
-
-type RegisteredType interface {
-	InstanceName() string
-	CollectionName() string
-	Actions() map[any]func() AnyAction
-	Parent() RegisteredType
-	Children() []RegisteredType
-	NewInstance(auth.Subject) any
-	NewCollection(proto any) any
-	Store() data.Store
-}
-
-type registryCtxKey struct{}
-
-// RegistryCtxKey is the context key for storing/retrieving a Registry.
-var RegistryCtxKey = registryCtxKey{}
-
-// Registry holds all registered resource types.
-type Registry struct {
-	registeredTypes map[reflect.Type]*registeredType
-	rootTypes       []RegisteredType
-}
-
-// NewRegistry creates a new registry for resource registration.
-func NewRegistry() *Registry {
-	return &Registry{
-		registeredTypes: make(map[reflect.Type]*registeredType),
-	}
-}
-
-// RootTypes returns all root-level registered resources.
-func (r *Registry) RootTypes() []RegisteredType {
-	return r.rootTypes
 }
