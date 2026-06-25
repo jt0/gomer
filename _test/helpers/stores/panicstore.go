@@ -11,6 +11,10 @@ var PanicStore panicStore
 
 type panicStore struct{}
 
+func (panicStore) AddPersistables(...data.Persistable) gomerr.Gomerr {
+	panic("As promised")
+}
+
 func (panicStore) Create(context.Context, data.Persistable) gomerr.Gomerr {
 	panic("As promised")
 }

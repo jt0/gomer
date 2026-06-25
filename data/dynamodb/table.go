@@ -22,8 +22,17 @@ import (
 	"github.com/jt0/gomer/flect"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
+	"github.com/jt0/gomer/log"
 	"github.com/jt0/gomer/structs"
 )
+
+func Stores() map[string]data.Store {
+	stores := make(map[string]data.Store, len(tables))
+	for k, t := range tables {
+		stores[k] = t
+	}
+	return stores
+}
 
 type table struct {
 	index
@@ -55,7 +64,7 @@ type Configuration struct {
 	ValidateKeyFieldConsistency bool
 }
 
-var tables = make(map[string]data.Store)
+var tables = make(map[string]*table)
 
 type ConsistencyType int
 
@@ -78,7 +87,7 @@ type ConsistencyTyper interface {
 
 type ItemResolver func(any) (any, gomerr.Gomerr)
 
-func Store(tableName string, config *Configuration /* resolver data.ItemResolver,*/, persistables ...data.Persistable) (store data.Store, ge gomerr.Gomerr) {
+func Store(tableName string, config *Configuration /* resolver data.ItemResolver,*/) (store data.Store, ge gomerr.Gomerr) {
 	t := &table{
 		tableName:                   &tableName,
 		index:                       index{canReadConsistently: true},
@@ -91,6 +100,18 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 		nextTokenizer:               nextTokenizer{cipher: config.NextTokenCipher},
 		failDeleteIfNotPresent:      config.FailDeleteIfNotPresent,
 		validateKeyFieldConsistency: config.ValidateKeyFieldConsistency,
+	}
+
+	var validOrDefaultChar = func(ch byte, _default byte) (byte, gomerr.Gomerr) {
+		if ch != 0 {
+			for _, sch := range []byte(SymbolChars) {
+				if ch == sch {
+					return ch, nil
+				}
+			}
+			return 0, gomerr.Configuration("character " + string(ch) + " not in the valid set: " + SymbolChars)
+		}
+		return _default, nil
 	}
 
 	if t.valueSeparatorChar, ge = validOrDefaultChar(config.ValueSeparatorChar, ValueSeparatorCharDefault); ge != nil {
@@ -110,38 +131,19 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 		return nil, ge
 	}
 
-	if ge = t.prepare(persistables); ge != nil {
+	if ge = t.prepare(); ge != nil {
 		return nil, ge
 	}
-
 	tables[tableName] = t
 
 	return t, nil
 }
 
-func validOrDefaultChar(ch byte, _default byte) (byte, gomerr.Gomerr) {
-	if ch != 0 {
-		for _, sch := range []byte(SymbolChars) {
-			if ch == sch {
-				return ch, nil
-			}
-		}
-		return 0, gomerr.Configuration("character " + string(ch) + " not in the valid set: " + SymbolChars)
-	} else {
-		return _default, nil
-	}
-}
-
-func Stores() map[string]data.Store {
-	return tables
-}
-
-func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
+func (t *table) prepare() gomerr.Gomerr {
 	input := &dynamodb.DescribeTableInput{TableName: t.tableName}
 	output, err := t.ddb.DescribeTable(context.Background(), input)
 	if err != nil {
-		var notFoundErr *types.ResourceNotFoundException
-		if errors.As(err, &notFoundErr) {
+		if _, ok := errors.AsType[*types.ResourceNotFoundException](err); ok {
 			return gomerr.Unprocessable("table", *t.tableName).Wrap(err)
 		}
 
@@ -189,14 +191,17 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 		t.indexes[*gsid.IndexName] = gsi
 	}
 
-	for _, persistable := range persistables {
-		pType := reflect.TypeOf(persistable)
+	t.constraintTool = NewConstraintTool(t)
+
+	return nil
+}
+
+func (t *table) AddPersistables(persistables ...data.Persistable) gomerr.Gomerr {
+	for _, p := range persistables {
+		pType := reflect.TypeOf(p)
 		pElem := pType.Elem()
 
-		unqualifiedPersistableName := pElem.String()
-		unqualifiedPersistableName = unqualifiedPersistableName[strings.Index(unqualifiedPersistableName, ".")+1:]
-
-		pt, ge := newPersistableType(t, unqualifiedPersistableName, pElem)
+		pt, ge := newPersistableType(t, p.TypeName(), pElem)
 		if ge != nil {
 			return ge
 		}
@@ -206,11 +211,11 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 			for _, attribute := range idx.keyAttributes() {
 				// NB: require types to declare all key fields, even if name matches what's defined by ddb
 				// TODO: support 'KeyField string `db.keys=""`' to avoid re-typing field name
-				if keyFields := attribute.keyFieldsByPersistable[unqualifiedPersistableName]; keyFields != nil {
+				if keyFields := attribute.keyFieldsByPersistable[p.TypeName()]; keyFields != nil {
 					for i, kf := range keyFields {
 						if kf == nil {
 							return gomerr.Configuration(fmt.Sprintf("index %s: key field %s.%d missing for type %s ",
-								idx.friendlyName(), attribute.name, i, unqualifiedPersistableName),
+								idx.friendlyName(), attribute.name, i, p.TypeName()),
 							).AddAttribute("keyFields", keyFields)
 						}
 					}
@@ -218,16 +223,12 @@ func (t *table) prepare(persistables []data.Persistable) gomerr.Gomerr {
 			}
 		}
 
-		t.persistableTypes[unqualifiedPersistableName] = pt
-	}
-
-	t.constraintTool = NewConstraintTool(t)
-	for _, p := range persistables {
-		if ge := structs.Preprocess(p, t.constraintTool); ge != nil {
+		if ge = structs.Preprocess(p, t.constraintTool); ge != nil {
 			return ge.AddAttribute("typeName", p.TypeName())
 		}
-	}
 
+		t.persistableTypes[p.TypeName()] = pt
+	}
 	return nil
 }
 
@@ -249,7 +250,7 @@ func (t *table) Create(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 	return
 }
 
-func (t *table) Update(ctx context.Context, p data.Persistable, update data.Persistable) (ge gomerr.Gomerr) {
+func (t *table) Update(ctx context.Context, p data.Persistable, u data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
 			ge = dataerr.Store("Update", p, ge)
@@ -258,18 +259,15 @@ func (t *table) Update(ctx context.Context, p data.Persistable, update data.Pers
 
 	// TODO:p1 support partial update vs put()
 
-	validateConstraints := false
-	pt := t.persistableTypes[p.TypeName()]
-
-	if update != nil {
-		uv := reflect.ValueOf(update).Elem()
-		pv := reflect.ValueOf(p).Elem()
-		validateConstraints = mergeFields(pv, uv, pt)
+	validate := false
+	if p != u && u != nil {
+		validate, ge = t.mergeFields(reflect.ValueOf(p).Elem(), reflect.ValueOf(u).Elem(), t.persistableTypes[p.TypeName()])
+		if ge != nil {
+			return
+		}
 	}
 
-	ge = t.put(ctx, p, validateConstraints, false)
-
-	return
+	return t.put(ctx, p, validate, false)
 }
 
 var conditionalCheckFailure = constraint.New("uniqueKeys", nil, func(toTest any) gomerr.Gomerr {
@@ -330,8 +328,7 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 			return gomerr.Dependency("DynamoDB", input).Wrap(err)
 		}
 
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) {
+		if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 			switch apiErr.ErrorCode() {
 			case "RequestLimitExceeded", "ProvisionedThroughputExceededException":
 				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(err)
@@ -438,19 +435,15 @@ func (t *table) readOne(ctx context.Context, p data.Persistable, key map[string]
 	}
 	output, err := t.ddb.GetItem(ctx, input)
 	if err != nil {
-		var notFoundErr *types.ResourceNotFoundException
-		if errors.As(err, &notFoundErr) {
+		if _, ok := errors.AsType[*types.ResourceNotFoundException](err); ok {
 			return dataerr.PersistableNotFound(p).Wrap(err)
 		}
-
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) {
+		if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 			switch apiErr.ErrorCode() {
 			case "RequestLimitExceeded", "ProvisionedThroughputExceededException":
 				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(err)
 			}
 		}
-
 		return gomerr.Dependency("DynamoDB", input).Wrap(err)
 	}
 
@@ -542,8 +535,7 @@ func (t *table) Delete(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 			return dataerr.PersistableNotFound(p).Wrap(err)
 		}
 
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) {
+		if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 			switch apiErr.ErrorCode() {
 			case "RequestLimitExceeded", "ProvisionedThroughputExceededException":
 				return limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(err)
@@ -582,7 +574,7 @@ func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) 
 		return ge
 	}
 
-	nt, ge := t.nextTokenizer.tokenize(ctx, q, output.LastEvaluatedKey)
+	nt, ge := t.nextTokenizer.Tokenize(ctx, q, output.LastEvaluatedKey)
 	if ge != nil {
 		return gomerr.Internal("unable to generate nextToken").Wrap(ge)
 	}
@@ -702,7 +694,7 @@ type UniqueConstraint struct {
 }
 
 // buildQueryInput Builds the DynamoDB QueryInput types based on the provided queryable. See indexFor and
-// nextTokenizer.untokenize for possible error types.
+// nextTokenizer.Untokenize for possible error types.
 func (t *table) buildQueryInput(ctx context.Context, q data.Queryable) (*dynamodb.QueryInput, gomerr.Gomerr) {
 	idx, ascending, consistent, ge := indexFor(t, q)
 	if ge != nil {
@@ -722,21 +714,70 @@ func (t *table) buildQueryInput(ctx context.Context, q data.Queryable) (*dynamod
 	// TODO: need to provide a way to sanitize, both when saving and querying data, the delimiter char
 	if idx.sk != nil {
 		if eav := idx.sk.attributeValue(qElem, q.TypeName(), t.valueSeparatorChar, t.queryWildcardChar); eav != nil {
-			if s, ok := eav.(*types.AttributeValueMemberS); ok {
-				if len(s.Value) > 0 && (s.Value[len(s.Value)-1] == t.queryWildcardChar || s.Value[len(s.Value)-1] == t.valueSeparatorChar) {
-					s.Value = s.Value[:len(s.Value)-1] // remove the last char
-					keyConditionExpression += " AND begins_with(" + safeName(idx.sk.name, expressionAttributeNames) + ",:sk)"
+			switch av := eav.(type) {
+			case *types.AttributeValueMemberS:
+				if v := av.Value; v[len(v)-1] == t.queryWildcardChar || v[len(v)-1] == t.valueSeparatorChar {
+					// Remove the last char and apply begins_with if non-zero. If it is zero, then exclude
+					// the sort key altogether.
+					if v = v[:len(v)-1]; v != "" {
+						keyConditionExpression += " AND begins_with(" + safeName(idx.sk.name, expressionAttributeNames) + ",:sk)"
+						av.Value = v
+						expressionAttributeValues[":sk"] = av
+					}
 				} else {
 					keyConditionExpression += " AND " + safeName(idx.sk.name, expressionAttributeNames) + "=:sk"
+					expressionAttributeValues[":sk"] = av
 				}
+			default:
+				keyConditionExpression += " AND " + safeName(idx.sk.name, expressionAttributeNames) + "=:sk"
+				expressionAttributeValues[":sk"] = eav
 			}
-			expressionAttributeValues[":sk"] = eav
 		}
 	}
 
 	var fe string
 	if fe, ge = t.filterExpression(q, idx, expressionAttributeNames, expressionAttributeValues); ge != nil {
 		return nil, ge
+	}
+
+	if log.DebugEnabled() {
+		avToStr := func(v types.AttributeValue) string {
+			switch tv := v.(type) {
+			case *types.AttributeValueMemberS:
+				return tv.Value
+			case *types.AttributeValueMemberN:
+				return tv.Value
+			default:
+				return ""
+			}
+		}
+
+		attrs := make([]any, 0, 2*len(expressionAttributeValues)+2)
+
+		var idxName string
+		if idx.name == nil {
+			idxName = "tbl"
+		} else {
+			idxName = *idx.name
+		}
+
+		attrs = append(attrs, "idx", idxName, "exp", keyConditionExpression, ":pk", avToStr(expressionAttributeValues[":pk"]))
+
+		if av, ok := expressionAttributeValues[":sk"]; ok {
+			attrs = append(attrs, ":sk", avToStr(av))
+		}
+
+		if fe != "" {
+			attrs = append(attrs, "filter", fe)
+			for k, av := range expressionAttributeValues {
+				if k == ":pk" || k == ":sk" {
+					continue
+				}
+				attrs = append(attrs, k, avToStr(av))
+			}
+		}
+
+		log.Debug("[gomer.dynamodb] query", attrs...)
 	}
 
 	// for _, attribute := range q.ResponseFields() {
@@ -754,7 +795,7 @@ func (t *table) buildQueryInput(ctx context.Context, q data.Queryable) (*dynamod
 	// 	projectionExpressionPtr = &projectionExpression
 	// }
 
-	exclusiveStartKey, ge := t.nextTokenizer.untokenize(ctx, q)
+	exclusiveStartKey, ge := t.nextTokenizer.Untokenize(ctx, q)
 	if ge != nil {
 		return nil, ge
 	}
@@ -835,17 +876,14 @@ func (t *table) filterExpression(q data.Queryable, idx *index, expressionAttribu
 func (t *table) runQuery(ctx context.Context, input *dynamodb.QueryInput) (*dynamodb.QueryOutput, gomerr.Gomerr) {
 	output, err := t.ddb.Query(ctx, input)
 	if err != nil {
-		var notFoundErr *types.ResourceNotFoundException
-		if errors.As(err, &notFoundErr) {
+		if _, ok := errors.AsType[*types.ResourceNotFoundException](err); ok {
 			if input.IndexName != nil {
 				return nil, gomerr.Unprocessable("table Index", *input.IndexName).Wrap(err)
-			} else {
-				return nil, gomerr.Unprocessable("table", *t.tableName).Wrap(err)
 			}
+			return nil, gomerr.Unprocessable("table", *t.tableName).Wrap(err)
 		}
 
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) {
+		if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 			switch apiErr.ErrorCode() {
 			case "RequestLimitExceeded", "ProvisionedThroughputExceededException":
 				return nil, limit.UnquantifiedExcess("DynamoDB", "throughput").Wrap(err)
@@ -861,9 +899,8 @@ func (t *table) runQuery(ctx context.Context, input *dynamodb.QueryInput) (*dyna
 func (t *table) consistencyType(p data.Persistable) ConsistencyType {
 	if ct, ok := p.(ConsistencyTyper); ok {
 		return ct.ConsistencyType()
-	} else {
-		return t.defaultConsistencyType
 	}
+	return t.defaultConsistencyType
 }
 
 func (t *table) limit(maximumPageSize int) *int32 {
@@ -872,12 +909,10 @@ func (t *table) limit(maximumPageSize int) *int32 {
 		maxLimit32 := int32(*t.maxLimit)
 		if mps32 <= maxLimit32 {
 			return &mps32
-		} else {
-			return &maxLimit32
 		}
+		return &maxLimit32
 	} else if t.defaultLimit != nil {
-		defaultLimit32 := int32(*t.defaultLimit)
-		return &defaultLimit32
+		return new(int32(*t.defaultLimit))
 	}
 	return nil
 }

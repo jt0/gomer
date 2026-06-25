@@ -7,6 +7,7 @@ import (
 )
 
 type Store interface {
+	AddPersistables(...Persistable) gomerr.Gomerr
 	Create(ctx context.Context, p Persistable) gomerr.Gomerr
 	Read(ctx context.Context, p Persistable) gomerr.Gomerr
 	Update(ctx context.Context, p Persistable, update Persistable) gomerr.Gomerr
