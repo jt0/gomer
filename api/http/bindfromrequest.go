@@ -76,7 +76,9 @@ func BindFromRequest(request *http.Request, resource any, scope string) gomerr.G
 	}
 
 	if hasInBodyBinding[resourceType.Elem().String()] {
-		tc.Put(bodyBytesKey, bodyBytes)
+		if len(bodyBytes) > 0 {
+			tc.Put(bodyBytesKey, bodyBytes)
+		}
 	} else {
 		unmarshaled := make(map[string]any)
 
@@ -208,7 +210,9 @@ func (b bindRequestHeaderApplier) Apply(_ reflect.Value, fv reflect.Value, tc st
 type bodyInApplier struct{}
 
 func (bodyInApplier) Apply(_ reflect.Value, fv reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
-	fv.Set(reflect.ValueOf(tc.Get(bodyBytesKey)))
+	if bytes, ok := tc.Lookup(bodyBytesKey); ok {
+		fv.Set(reflect.ValueOf(bytes))
+	}
 	return nil
 }
 
