@@ -65,8 +65,21 @@ func BindFromRequest(request *http.Request, resource any, scope string) gomerr.G
 	rv := reflect.ValueOf(resource)
 	resourceType := rv.Type()
 
+	path := request.URL.RawPath
+	if path == "" {
+		path = request.URL.Path
+	}
+	var pps []string
+	for pp := range strings.SplitSeq(strings.Trim(path, "/"), "/") { // remove any leading or trailing slashes
+		var err error
+		if pp, err = url.PathUnescape(pp); err != nil {
+			return Unroutable()
+		}
+		pps = append(pps, pp)
+	}
+
 	tc := structs.ToolContextWithScope(scope).
-		With(pathPartsKey, strings.Split(strings.Trim(request.URL.Path, "/"), "/")). // remove any leading or trailing slashes
+		With(pathPartsKey, pps).
 		With(queryParamsKey, request.URL.Query()).
 		With(headersKey, request.Header)
 
