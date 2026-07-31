@@ -285,21 +285,21 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 		}
 	}
 
-	av, err := attributevalue.MarshalMap(p)
+	avm, err := attributevalue.MarshalMap(p)
 	if err != nil {
 		return gomerr.Marshal(p.TypeName(), p).Wrap(err)
 	}
 
 	pt := t.persistableTypes[p.TypeName()]
-	pt.convertFieldNamesToDbNames(&av)
+	pt.convertFieldNamesToDbNames(&avm)
 
 	for _, i := range t.indexes {
-		_ = i.populateKeyValues(av, p, t.valueSeparatorChar, false)
+		_ = i.populateKeyValues(avm, p, t.valueSeparatorChar, false)
 	}
 
 	// Remove key fields from attributes - they're stored in composite keys only
-	// TODO:p0 this should be opt-in or performed only if STD is being used with names not present in the persistable type
-	pt.removeKeyFieldsFromAttributes(&av)
+	// TODO:p1 this should be configurable or performed only if STD is being used with names not present in the persistable
+	pt.removeKeyFieldsFromAttributes(&avm)
 
 	// TODO: here we could compare the current av map w/ one we stashed into the object somewhere
 
@@ -314,8 +314,26 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 
 	// TODO:p1 optimistic locking
 
+	if log.DebugEnabled() {
+		attrs := append([]any{}, "pk", avToStr(avm[t.pk.name]))
+		if t.sk != nil {
+			attrs = append(attrs, "sk", avToStr(avm[t.sk.name]))
+		}
+		for an, av := range avm {
+			if strings.HasSuffix(an, "_sk") {
+				attrs = append(attrs, "an", avToStr(av))
+			}
+		}
+		if ensureUniqueId {
+			attrs = append(attrs, "condition", *uniqueIdConditionExpression)
+			log.Debug("[gomer.ddb] create", attrs...)
+		} else {
+			log.Debug("[gomer.ddb] update", attrs...)
+		}
+	}
+
 	input := &dynamodb.PutItemInput{
-		Item:                av,
+		Item:                avm,
 		TableName:           t.tableName,
 		ConditionExpression: uniqueIdConditionExpression,
 	}
@@ -433,6 +451,15 @@ func (t *table) readOne(ctx context.Context, p data.Persistable, key map[string]
 		ConsistentRead: consistentRead(t.consistencyType(p), true),
 		TableName:      t.tableName,
 	}
+
+	if log.DebugEnabled() {
+		attrs := append([]any{}, t.pk.name, avToStr(key[t.pk.name]))
+		if t.sk != nil {
+			attrs = append(attrs, t.sk.name, avToStr(key[t.sk.name]))
+		}
+		log.Debug("[gomer.ddb] get", attrs...)
+	}
+
 	output, err := t.ddb.GetItem(ctx, input)
 	if err != nil {
 		if _, ok := errors.AsType[*types.ResourceNotFoundException](err); ok {
@@ -527,11 +554,20 @@ func (t *table) Delete(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 		TableName:           t.tableName,
 		ConditionExpression: existenceCheckExpression,
 	}
+
+	if log.DebugEnabled() {
+		attrs := append([]any{}, "pk", avToStr(key["pk"]))
+		if av, ok := key["sk"]; ok {
+			attrs = append(attrs, "sk", avToStr(av))
+		}
+		log.Debug("[gomer.ddb] delete", attrs...)
+	}
+
 	_, err := t.ddb.DeleteItem(ctx, input)
 	if err != nil {
-		var notFoundErr *types.ResourceNotFoundException
-		var condCheckErr *types.ConditionalCheckFailedException
-		if errors.Is(err, notFoundErr) || errors.Is(err, condCheckErr) {
+		if _, ok := errors.AsType[*types.ResourceNotFoundException](err); ok {
+			return dataerr.PersistableNotFound(p).Wrap(err)
+		} else if _, ok = errors.AsType[*types.ConditionalCheckFailedException](err); ok {
 			return dataerr.PersistableNotFound(p).Wrap(err)
 		}
 
@@ -741,32 +777,16 @@ func (t *table) buildQueryInput(ctx context.Context, q data.Queryable) (*dynamod
 	}
 
 	if log.DebugEnabled() {
-		avToStr := func(v types.AttributeValue) string {
-			switch tv := v.(type) {
-			case *types.AttributeValueMemberS:
-				return tv.Value
-			case *types.AttributeValueMemberN:
-				return tv.Value
-			default:
-				return ""
-			}
-		}
-
-		attrs := make([]any, 0, 2*len(expressionAttributeValues)+2)
-
-		var idxName string
-		if idx.name == nil {
-			idxName = "tbl"
-		} else {
+		idxName := "table"
+		if idx.name != nil {
 			idxName = *idx.name
 		}
 
+		attrs := make([]any, 0, 2*len(expressionAttributeValues)+2)
 		attrs = append(attrs, "idx", idxName, "exp", keyConditionExpression, ":pk", avToStr(expressionAttributeValues[":pk"]))
-
 		if av, ok := expressionAttributeValues[":sk"]; ok {
 			attrs = append(attrs, ":sk", avToStr(av))
 		}
-
 		if fe != "" {
 			attrs = append(attrs, "filter", fe)
 			for k, av := range expressionAttributeValues {
@@ -776,8 +796,7 @@ func (t *table) buildQueryInput(ctx context.Context, q data.Queryable) (*dynamod
 				attrs = append(attrs, k, avToStr(av))
 			}
 		}
-
-		log.Debug("[gomer.dynamodb] query", attrs...)
+		log.Debug("[gomer.ddb] query", attrs...)
 	}
 
 	// for _, attribute := range q.ResponseFields() {
@@ -942,5 +961,16 @@ func consistentRead(consistencyType ConsistencyType, canReadConsistently bool) *
 		return &canReadConsistently
 	default:
 		return nil
+	}
+}
+
+func avToStr(v types.AttributeValue) string {
+	switch tv := v.(type) {
+	case *types.AttributeValueMemberS:
+		return tv.Value
+	case *types.AttributeValueMemberN:
+		return tv.Value
+	default:
+		return ""
 	}
 }
