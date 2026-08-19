@@ -60,8 +60,7 @@ func resolver(pt reflect.Type) func(any) (any, gomerr.Gomerr) {
 }
 
 func (pt *persistableType) processFields(structType reflect.Type, fieldPath string, table *table, errors []gomerr.Gomerr) []gomerr.Gomerr {
-	for i := 0; i < structType.NumField(); i++ {
-		field := structType.Field(i)
+	for field := range structType.Fields() {
 		fieldName := field.Name
 
 		if field.Type.Kind() == reflect.Struct && field.Anonymous {
@@ -132,15 +131,17 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 	}
 
 	var resetsComplete bool
-	for _, keyStatement := range strings.Split(strings.ReplaceAll(tag, " ", ""), ",") {
+	for keyStatement := range strings.SplitSeq(strings.ReplaceAll(tag, " ", ""), ",") {
 		groups := ddbKeyStatementRegexp.FindStringSubmatch(keyStatement)
 		if groups == nil {
-			return append(errors, gomerr.Configuration("invalid `db.keys` value: "+keyStatement).AddAttribute("field", fieldName))
+			errors = append(errors, gomerr.Configuration("invalid `db.keys` value: "+keyStatement).AddAttribute("field", fieldName))
+			continue
 		}
 
 		idx, ok := indexes[groups[3]]
 		if !ok {
-			return append(errors, gomerr.Configuration("undefined index: "+groups[3]).AddAttribute("field", fieldName))
+			errors = append(errors, gomerr.Configuration("undefined index: "+groups[3]).AddAttribute("field", fieldName))
+			continue
 		}
 
 		var key *keyAttribute
@@ -158,7 +159,8 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 		kfName := fieldName   // Use local variable to avoid modifying parameter across iterations
 		if groups[6] == "_" { // Underscore indicates the fields in idx's key should be re-evaluated as key fields
 			if resetsComplete {
-				return append(errors, gomerr.Configuration("resets must be ordered first in a tag: "+tag).AddAttribute("field", fieldName))
+				errors = append(errors, gomerr.Configuration("resets must be ordered first in a tag: "+tag).AddAttribute("field", fieldName))
+				continue
 			}
 			notKeyFields := make(map[string]struct{})
 			for _, field := range key.keyFieldsByPersistable[pt.name] {
@@ -184,7 +186,11 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 		// TODO: Determine scenarios where skLength/skMissing don't map to desired behavior. May need preferred
 		//       priority levels to compensate
 		kf := keyField{name: kfName, preferred: groups[1] == "!", ascending: groups[2] != "-"}
-		key.keyFieldsByPersistable[pt.name] = insertAtIndex(key.keyFieldsByPersistable[pt.name], &kf, partIndex)
+		var ge gomerr.Gomerr
+		key.keyFieldsByPersistable[pt.name], ge = insertAtIndex(key.keyFieldsByPersistable[pt.name], &kf, partIndex)
+		if ge != nil {
+			errors = append(errors, ge)
+		}
 	}
 
 	return errors
@@ -197,13 +203,16 @@ func identifyKeyFields(indexes map[string]*index, resetKey *keyAttribute, persis
 				continue
 			}
 			for _, field := range ka.keyFieldsByPersistable[persistable] {
+				if field == nil {
+					continue
+				}
 				delete(notKeyFields, field.name)
 			}
 		}
 	}
 }
 
-func insertAtIndex(slice []*keyField, value *keyField, index int) []*keyField {
+func insertAtIndex(slice []*keyField, value *keyField, index int) ([]*keyField, gomerr.Gomerr) {
 	if slice == nil || cap(slice) == 0 {
 		slice = make([]*keyField, 0, index+1)
 	}
@@ -212,7 +221,7 @@ func insertAtIndex(slice []*keyField, value *keyField, index int) []*keyField {
 	capKeyFields := cap(slice)
 	if index < lenKeyFields {
 		if slice[index] != nil {
-			panic(fmt.Sprintf("already found value '%v' at index %d", slice[index], index))
+			return nil, gomerr.Configuration(fmt.Sprintf("already found value '%v' at index %d", *slice[index], index))
 		}
 	} else if index < capKeyFields {
 		slice = slice[0 : index+1]
@@ -222,7 +231,7 @@ func insertAtIndex(slice []*keyField, value *keyField, index int) []*keyField {
 
 	slice[index] = value
 
-	return slice
+	return slice, nil
 }
 
 func (pt *persistableType) dbNameToFieldName(dbName string) string {

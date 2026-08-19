@@ -340,10 +340,7 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 	_, err = t.ddb.PutItem(ctx, input) // TODO:p3 look at result data to track capacity or other info?
 	if err != nil {
 		if ge := conditionalCheckFailure.Test(err); ge != nil {
-			if ensureUniqueId {
-				return ge.AddAttribute("persistable", p)
-			}
-			return gomerr.Dependency("DynamoDB", input).Wrap(err)
+			return ge
 		}
 
 		if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
@@ -723,10 +720,6 @@ func toQueryable(p data.Persistable, fields []string) (data.Queryable, gomerr.Go
 		}
 	}
 	return q, nil
-}
-
-type UniqueConstraint struct {
-	constraint.Constraint
 }
 
 // buildQueryInput Builds the DynamoDB QueryInput types based on the provided queryable. See indexFor and

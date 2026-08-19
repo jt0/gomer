@@ -8,6 +8,7 @@ import (
 	. "github.com/jt0/gomer/api/http"
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/log"
 	"github.com/jt0/gomer/resource"
 	"github.com/jt0/gomer/structs"
 )
@@ -113,6 +114,7 @@ func buildRoutes(mux *http.ServeMux, rt resource.RegisteredType, parentPath stri
 		path[resource.InstanceCategory] = parentPath + "/" + strings.ToLower(instancePathName)
 	}
 
+	var patterns []string
 	for key, actionFunc := range rt.Actions() {
 		op := key.(Op)
 
@@ -129,6 +131,11 @@ func buildRoutes(mux *http.ServeMux, rt resource.RegisteredType, parentPath stri
 		// Register with method and path pattern
 		pattern := op.Method() + " " + relativePath
 		mux.Handle(pattern, handler(rt, actionFunc, successStatus))
+		patterns = append(patterns, pattern)
+	}
+
+	if len(patterns) > 0 {
+		log.Debug("adding routes", "resource", rt.InstanceName(), "patterns", patterns)
 	}
 
 	// Prepend this resource's context to ancestors for children (closest ancestor first)
