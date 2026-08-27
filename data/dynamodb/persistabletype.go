@@ -127,7 +127,7 @@ var ddbKeyStatementRegexp = regexp.MustCompile(`(!)?([+-])?(?:([\w-.]+):)?(pk|sk
 // correctly against that type. Resets must appear before any non-reset statements in the tag.
 func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes map[string]*index, errors []gomerr.Gomerr) []gomerr.Gomerr {
 	if tag == "" {
-		return nil
+		return errors
 	}
 
 	var resetsComplete bool
@@ -189,7 +189,7 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 		var ge gomerr.Gomerr
 		key.keyFieldsByPersistable[pt.name], ge = insertAtIndex(key.keyFieldsByPersistable[pt.name], &kf, partIndex)
 		if ge != nil {
-			errors = append(errors, ge)
+			errors = append(errors, ge.AddAttribute("field", fieldName).AddAttribute("idx", idx.friendlyName()))
 		}
 	}
 
@@ -221,7 +221,7 @@ func insertAtIndex(slice []*keyField, value *keyField, index int) ([]*keyField, 
 	capKeyFields := cap(slice)
 	if index < lenKeyFields {
 		if slice[index] != nil {
-			return nil, gomerr.Configuration(fmt.Sprintf("already found value '%v' at index %d", *slice[index], index))
+			return nil, gomerr.Configuration(fmt.Sprintf("already found value '%v' at index %d", (*slice[index]).name, index))
 		}
 	} else if index < capKeyFields {
 		slice = slice[0 : index+1]

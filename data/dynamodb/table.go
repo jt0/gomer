@@ -216,7 +216,7 @@ func (t *table) AddPersistables(persistables ...data.Persistable) gomerr.Gomerr 
 						if kf == nil {
 							return gomerr.Configuration(fmt.Sprintf("index %s: key field %s.%d missing for type %s ",
 								idx.friendlyName(), attribute.name, i, p.TypeName()),
-							).AddAttribute("keyFields", keyFields)
+							).AddAttribute("keyFields", toNames(keyFields))
 						}
 					}
 				}
@@ -230,6 +230,18 @@ func (t *table) AddPersistables(persistables ...data.Persistable) gomerr.Gomerr 
 		t.persistableTypes[p.TypeName()] = pt
 	}
 	return nil
+}
+
+func toNames(keyFields []*keyField) []string {
+	var kfNames []string
+	for _, k := range keyFields {
+		if k == nil {
+			kfNames = append(kfNames, "?")
+		} else {
+			kfNames = append(kfNames, k.name)
+		}
+	}
+	return kfNames
 }
 
 func (t *table) Name() string {
