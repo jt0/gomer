@@ -339,8 +339,18 @@ func (*listAction[I]) Retry(ctx context.Context, c *Collection[I], ge gomerr.Gom
 	return c.RetryList(ctx, ge)
 }
 
+type postLister[I Instance[I]] interface {
+	PostList(context.Context, *Collection[I]) gomerr.Gomerr
+}
+
 func (*listAction[I]) OnDoSuccess(ctx context.Context, c *Collection[I]) (*Collection[I], gomerr.Gomerr) {
-	return c, c.PostList(ctx)
+	if ge := c.PostList(ctx); ge != nil {
+		return nil, ge
+	}
+	if pl, ok := any(c.proto).(postLister[I]); ok {
+		return c, pl.PostList(ctx, c)
+	}
+	return c, nil
 }
 
 func (*listAction[I]) OnDoFailure(_ context.Context, _ *Collection[I], ge gomerr.Gomerr) gomerr.Gomerr {
