@@ -131,18 +131,22 @@ func (*BaseInstance[I]) PreList(context.Context) gomerr.Gomerr {
 
 // CRUD convenience methods
 
-func (b *BaseInstance[I]) Create(ctx context.Context) (I, gomerr.Gomerr) {
-	return b.DoAction(ctx, CreateAction[I]())
+func (b *BaseInstance[I]) Create(ctx context.Context) gomerr.Gomerr {
+	_, ge := b.DoAction(ctx, CreateAction[I]())
+	return ge
 }
 
-func (b *BaseInstance[I]) Read(ctx context.Context) (I, gomerr.Gomerr) {
-	return b.DoAction(ctx, ReadAction[I]())
+func (b *BaseInstance[I]) Read(ctx context.Context) gomerr.Gomerr {
+	_, ge := b.DoAction(ctx, ReadAction[I]())
+	return ge
 }
 
-func (b *BaseInstance[I]) Update(ctx context.Context) (I, gomerr.Gomerr) {
-	return b.DoAction(ctx, UpdateAction[I](nil))
+func (b *BaseInstance[I]) Update(ctx context.Context) gomerr.Gomerr {
+	_, ge := b.DoAction(ctx, UpdateAction[I](nil))
+	return ge
 }
 
-func (b *BaseInstance[I]) Delete(ctx context.Context) (I, gomerr.Gomerr) {
-	return b.DoAction(ctx, DeleteAction[I]())
+func (b *BaseInstance[I]) Delete(ctx context.Context) gomerr.Gomerr {
+	_, ge := b.DoAction(ctx, DeleteAction[I]())
+	return ge
 }
