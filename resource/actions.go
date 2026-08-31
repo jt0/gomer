@@ -76,8 +76,8 @@ func (*createAction[I]) OnDoSuccess(ctx context.Context, i I) (I, gomerr.Gomerr)
 	return i, i.PostCreate(ctx)
 }
 
-func (*createAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
-	return ge
+func (*createAction[I]) OnDoFailure(ctx context.Context, i I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return i.CreateError(ctx, ge)
 }
 
 func (a *createAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr) {
@@ -184,8 +184,8 @@ func (*readAction[I]) OnDoSuccess(ctx context.Context, i I) (I, gomerr.Gomerr) {
 	return i, i.PostRead(ctx)
 }
 
-func (*readAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
-	return ge
+func (*readAction[I]) OnDoFailure(ctx context.Context, i I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return i.ReadError(ctx, ge)
 }
 
 func (a *readAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr) {
@@ -254,8 +254,8 @@ func (a *updateAction[I]) OnDoSuccess(ctx context.Context, update I) (I, gomerr.
 	return a.current, a.current.PostUpdate(ctx, update)
 }
 
-func (a *updateAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
-	return ge
+func (a *updateAction[I]) OnDoFailure(ctx context.Context, i I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return i.UpdateError(ctx, ge)
 }
 
 func (a *updateAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr) {
@@ -297,8 +297,8 @@ func (*deleteAction[I]) OnDoSuccess(ctx context.Context, i I) (I, gomerr.Gomerr)
 	return i, i.PostDelete(ctx)
 }
 
-func (*deleteAction[I]) OnDoFailure(_ context.Context, _ I, ge gomerr.Gomerr) gomerr.Gomerr {
-	return ge
+func (*deleteAction[I]) OnDoFailure(ctx context.Context, i I, ge gomerr.Gomerr) gomerr.Gomerr {
+	return i.DeleteError(ctx, ge)
 }
 
 func (a *deleteAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr) {
@@ -353,37 +353,12 @@ func (*listAction[I]) OnDoSuccess(ctx context.Context, c *Collection[I]) (*Colle
 	return c, nil
 }
 
-func (*listAction[I]) OnDoFailure(_ context.Context, _ *Collection[I], ge gomerr.Gomerr) gomerr.Gomerr {
-	return ge
+func (*listAction[I]) OnDoFailure(ctx context.Context, c *Collection[I], ge gomerr.Gomerr) gomerr.Gomerr {
+	return c.proto.ListError(ctx, ge)
 }
 
 func (a *listAction[T]) ExecuteOn(ctx context.Context, resource any) (any, gomerr.Gomerr) {
 	return resource.(Resource[*Collection[T]]).DoAction(ctx, a)
-}
-
-// OnCreateFailer is implemented by instances that want custom failure handling for create.
-type OnCreateFailer[I Instance[I]] interface {
-	OnCreateFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
-}
-
-// OnReadFailer is implemented by instances that want custom failure handling for read.
-type OnReadFailer[I Instance[I]] interface {
-	OnReadFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
-}
-
-// OnUpdateFailer is implemented by instances that want custom failure handling for update.
-type OnUpdateFailer[I Instance[I]] interface {
-	OnUpdateFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
-}
-
-// OnDeleteFailer is implemented by instances that want custom failure handling for delete.
-type OnDeleteFailer[I Instance[I]] interface {
-	OnDeleteFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
-}
-
-// OnListFailer is implemented by collections that want custom failure handling for list.
-type OnListFailer[I Instance[I]] interface {
-	OnListFailure(context.Context, gomerr.Gomerr) gomerr.Gomerr
 }
 
 // Collectible is implemented by instances that want to be notified when collected.

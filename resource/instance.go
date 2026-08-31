@@ -30,16 +30,21 @@ type Instance[I Resource[I]] interface {
 	PreCreate(context.Context) gomerr.Gomerr
 	RetryCreate(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PostCreate(context.Context) gomerr.Gomerr
+	CreateError(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PreRead(context.Context) gomerr.Gomerr
 	RetryRead(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PostRead(context.Context) gomerr.Gomerr
+	ReadError(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PreUpdate(context.Context, I) gomerr.Gomerr
 	RetryUpdate(context.Context, I, gomerr.Gomerr) gomerr.Gomerr
 	PostUpdate(context.Context, I) gomerr.Gomerr
+	UpdateError(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PreDelete(context.Context) gomerr.Gomerr
 	RetryDelete(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PostDelete(context.Context) gomerr.Gomerr
+	DeleteError(context.Context, gomerr.Gomerr) gomerr.Gomerr
 	PreList(context.Context) gomerr.Gomerr
+	ListError(context.Context, gomerr.Gomerr) gomerr.Gomerr
 }
 
 // BaseInstance provides the default implementation for Instance[I]. Embed this in concrete instance types.
@@ -89,6 +94,10 @@ func (*BaseInstance[I]) PostCreate(context.Context) gomerr.Gomerr {
 	return nil
 }
 
+func (*BaseInstance[I]) CreateError(_ context.Context, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
+}
+
 func (*BaseInstance[I]) PreRead(context.Context) gomerr.Gomerr {
 	return nil
 }
@@ -99,6 +108,10 @@ func (*BaseInstance[I]) RetryRead(_ context.Context, ge gomerr.Gomerr) gomerr.Go
 
 func (*BaseInstance[I]) PostRead(context.Context) gomerr.Gomerr {
 	return nil
+}
+
+func (*BaseInstance[I]) ReadError(_ context.Context, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
 }
 
 func (*BaseInstance[I]) PreUpdate(context.Context, I) gomerr.Gomerr {
@@ -113,6 +126,10 @@ func (*BaseInstance[I]) PostUpdate(context.Context, I) gomerr.Gomerr {
 	return nil
 }
 
+func (*BaseInstance[I]) UpdateError(_ context.Context, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
+}
+
 func (*BaseInstance[I]) PreDelete(context.Context) gomerr.Gomerr {
 	return nil
 }
@@ -125,8 +142,16 @@ func (*BaseInstance[I]) PostDelete(context.Context) gomerr.Gomerr {
 	return nil
 }
 
+func (*BaseInstance[I]) DeleteError(_ context.Context, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
+}
+
 func (*BaseInstance[I]) PreList(context.Context) gomerr.Gomerr {
 	return nil
+}
+
+func (*BaseInstance[I]) ListError(_ context.Context, ge gomerr.Gomerr) gomerr.Gomerr {
+	return ge
 }
 
 // CRUD convenience methods
