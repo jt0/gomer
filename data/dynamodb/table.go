@@ -251,8 +251,7 @@ func (t *table) Name() string {
 func (t *table) Create(ctx context.Context, p data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			// Todo: is this needed or should this just be added to the attributes?
-			ge = dataerr.Store("Create", p, ge)
+			ge = dataerr.Store("Create", ge)
 		}
 	}()
 
@@ -265,7 +264,7 @@ func (t *table) Create(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 func (t *table) Update(ctx context.Context, p data.Persistable, u data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = dataerr.Store("Update", p, ge)
+			ge = dataerr.Store("Update", ge)
 		}
 	}()
 
@@ -327,20 +326,15 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 	// TODO:p1 optimistic locking
 
 	if log.DebugEnabled() {
-		attrs := append([]any{}, "pk", avToStr(avm[t.pk.name]))
+		toLog := append([]any{}, "type", p.TypeName(), "pk", avToStr(avm[t.pk.name]))
 		if t.sk != nil {
-			attrs = append(attrs, "sk", avToStr(avm[t.sk.name]))
-		}
-		for an, av := range avm {
-			if strings.HasSuffix(an, "_sk") {
-				attrs = append(attrs, "an", avToStr(av))
-			}
+			toLog = append(toLog, "sk", avToStr(avm[t.sk.name]))
 		}
 		if ensureUniqueId {
-			attrs = append(attrs, "condition", *uniqueIdConditionExpression)
-			log.Debug("[gomer.ddb] create", attrs...)
+			toLog = append(toLog, "condition", *uniqueIdConditionExpression)
+			log.Debug("[gomer.ddb] create", append(toLog, "table", *t.tableName)...)
 		} else {
-			log.Debug("[gomer.ddb] update", attrs...)
+			log.Debug("[gomer.ddb] update", append(toLog, "table", *t.tableName)...)
 		}
 	}
 
@@ -373,7 +367,7 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 func (t *table) Read(ctx context.Context, p data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = dataerr.Store("Read", p, ge)
+			ge = dataerr.Store("Read", ge)
 		}
 	}()
 
@@ -462,11 +456,11 @@ func (t *table) readOne(ctx context.Context, p data.Persistable, key map[string]
 	}
 
 	if log.DebugEnabled() {
-		attrs := append([]any{}, t.pk.name, avToStr(key[t.pk.name]))
+		toLog := append([]any{}, "type", p.TypeName(), t.pk.name, avToStr(key[t.pk.name]))
 		if t.sk != nil {
-			attrs = append(attrs, t.sk.name, avToStr(key[t.sk.name]))
+			toLog = append(toLog, t.sk.name, avToStr(key[t.sk.name]))
 		}
-		log.Debug("[gomer.ddb] get", attrs...)
+		log.Debug("[gomer.ddb] get", append(toLog, "table", *t.tableName)...)
 	}
 
 	output, err := t.ddb.GetItem(ctx, input)
@@ -538,7 +532,7 @@ func copyFields(dst, src reflect.Value) {
 func (t *table) Delete(ctx context.Context, p data.Persistable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = dataerr.Store("Delete", p, ge)
+			ge = dataerr.Store("Delete", ge)
 		}
 	}()
 
@@ -565,11 +559,11 @@ func (t *table) Delete(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 	}
 
 	if log.DebugEnabled() {
-		attrs := append([]any{}, "pk", avToStr(key["pk"]))
+		toLog := append([]any{}, "type", p.TypeName(), "pk", avToStr(key["pk"]))
 		if av, ok := key["sk"]; ok {
-			attrs = append(attrs, "sk", avToStr(av))
+			toLog = append(toLog, "sk", avToStr(av))
 		}
-		log.Debug("[gomer.ddb] delete", attrs...)
+		log.Debug("[gomer.ddb] delete", append(toLog, "table", *t.tableName)...)
 	}
 
 	_, err := t.ddb.DeleteItem(ctx, input)
@@ -596,7 +590,7 @@ func (t *table) Delete(ctx context.Context, p data.Persistable) (ge gomerr.Gomer
 func (t *table) Query(ctx context.Context, q data.Queryable) (ge gomerr.Gomerr) {
 	defer func() {
 		if ge != nil {
-			ge = dataerr.Store("Query", q, ge)
+			ge = dataerr.Store("Query", ge)
 		}
 	}()
 
@@ -787,21 +781,21 @@ func (t *table) buildQueryInput(ctx context.Context, q data.Queryable) (*dynamod
 			idxName = *idx.name
 		}
 
-		attrs := make([]any, 0, 2*len(expressionAttributeValues)+2)
-		attrs = append(attrs, "idx", idxName, "exp", keyConditionExpression, ":pk", avToStr(expressionAttributeValues[":pk"]))
+		toLog := make([]any, 0, 2*len(expressionAttributeValues)+2)
+		toLog = append(toLog, "type", q.TypeName(), "idx", idxName, "exp", keyConditionExpression, ":pk", avToStr(expressionAttributeValues[":pk"]))
 		if av, ok := expressionAttributeValues[":sk"]; ok {
-			attrs = append(attrs, ":sk", avToStr(av))
+			toLog = append(toLog, ":sk", avToStr(av))
 		}
 		if fe != "" {
-			attrs = append(attrs, "filter", fe)
+			toLog = append(toLog, "filter", fe)
 			for k, av := range expressionAttributeValues {
 				if k == ":pk" || k == ":sk" {
 					continue
 				}
-				attrs = append(attrs, k, avToStr(av))
+				toLog = append(toLog, k, avToStr(av))
 			}
 		}
-		log.Debug("[gomer.ddb] query", attrs...)
+		log.Debug("[gomer.ddb] query", append(toLog, "table", *t.tableName)...)
 	}
 
 	// for _, attribute := range q.ResponseFields() {
@@ -861,12 +855,16 @@ func (t *table) filterExpression(q data.Queryable, idx *index, expressionAttribu
 		}
 	}
 
+	return t._filterExpression(qv, idx, expressionAttributeNames, expressionAttributeValues, keyFields)
+}
+
+func (t *table) _filterExpression(qv reflect.Value, idx *index, expressionAttributeNames map[string]string, expressionAttributeValues map[string]types.AttributeValue, keyFields map[string]bool) (string, gomerr.Gomerr) {
 	var exp string
 	qt := qv.Type()
 	for i := 0; i < qt.NumField(); i++ {
 		var qfv reflect.Value
 		var sf reflect.StructField
-		if sf = qt.Field(i); keyFields[sf.Name] {
+		if sf = qt.Field(i); !sf.IsExported() || keyFields[sf.Name] || sf.Tag.Get("structs") == "ignore" {
 			continue
 		} else if qfv = qv.Field(i); qfv.IsZero() {
 			continue
@@ -875,6 +873,19 @@ func (t *table) filterExpression(q data.Queryable, idx *index, expressionAttribu
 			qfv = qfv.Elem()
 		}
 		if qfv.Kind() == reflect.Struct {
+			if sf.Anonymous {
+				subExp, ge := t._filterExpression(qfv, idx, expressionAttributeNames, expressionAttributeValues, keyFields)
+				if ge != nil {
+					return "", ge
+				} else if len(subExp) == 0 {
+					continue
+				}
+				if len(exp) > 0 {
+					exp += " AND " + subExp
+				} else {
+					exp = subExp
+				}
+			}
 			continue
 		}
 		s := fmt.Sprint(qfv.Interface())
@@ -893,7 +904,6 @@ func (t *table) filterExpression(q data.Queryable, idx *index, expressionAttribu
 		}
 		expressionAttributeValues[filterAlias] = &types.AttributeValueMemberS{Value: s}
 	}
-
 	return exp, nil
 }
 
