@@ -332,10 +332,33 @@ func (*listAction[I]) Pre(ctx context.Context, c *Collection[I]) gomerr.Gomerr {
 }
 
 func (*listAction[I]) Do(ctx context.Context, c *Collection[I]) gomerr.Gomerr {
-	return c.Query(ctx)
+	if ge := c.Query(ctx); ge != nil {
+		return ge
+	}
+	if len(c.Items) == 0 {
+		// If no results and the proto implements RetryList, return a sentinel to
+		// trigger a retry
+		if _, ok := any(c.proto).(RetryLister[I]); ok {
+			return gomerr.NotAnError
+		}
+	}
+	return nil
+}
+
+type RetryLister[I Instance[I]] interface {
+	RetryList(context.Context, *Collection[I], gomerr.Gomerr) gomerr.Gomerr
 }
 
 func (*listAction[I]) Retry(ctx context.Context, c *Collection[I], ge gomerr.Gomerr) gomerr.Gomerr {
+	// If not the sentinel error, return the error directly
+	if !errors.Is(ge, gomerr.NotAnError) {
+		return ge
+	}
+	if rl, ok := any(c.proto).(RetryLister[I]); ok {
+		if ge = rl.RetryList(ctx, c, ge); ge != nil {
+			return ge
+		}
+	}
 	return c.RetryList(ctx, ge)
 }
 
