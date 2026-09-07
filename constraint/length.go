@@ -66,15 +66,7 @@ func MaxLength(max *uint64) Constraint {
 	})
 }
 
-var (
-	uintZero = uint64(0)
-	uintOne  = uint64(1)
-
-	Empty    = MaxLength(&uintZero)
-	NonEmpty = MinLength(&uintOne)
-
-	zeroLength = reflect.ValueOf([]any{})
-)
+var zeroLength = reflect.ValueOf([]any{})
 
 func lenable(kind reflect.Kind) bool {
 	return kind == reflect.Array || kind == reflect.Chan || kind == reflect.Map || kind == reflect.Slice || kind == reflect.String

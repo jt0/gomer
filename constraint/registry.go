@@ -81,8 +81,6 @@ import (
 // is provided for a *any parameter, it is stored as-is and type-coerced at comparison time.
 
 var built = map[string]Constraint{
-	"empty":    Empty,
-	"nonempty": NonEmpty,
 	"isregexp": IsRegexp,
 	"nil":      IsNil,
 	"notnil":   IsNotNil,
@@ -376,7 +374,7 @@ func splitTopLevel(s string) []string {
 }
 
 var (
-	constraintType     = reflect.TypeOf((*Constraint)(nil)).Elem()
+	constraintType     = reflect.TypeFor[Constraint]()
 	nilConstraintValue = reflect.New(constraintType).Elem()
 )
 
@@ -409,7 +407,7 @@ func parameterValue(pType reflect.Type, pString string, dynamicValues map[string
 	// Dynamic parameter
 	// TODO: generalize to add support for functions (e.g. $now)
 	if strings.HasPrefix(pString, "$.") {
-		if pType.Kind() != reflect.Ptr {
+		if pType.Kind() != reflect.Pointer {
 			return reflect.Value{}, gomerr.Configuration(fmt.Sprintf("dynamic value '%s' requires a pointer (or pointer-safe any) input parameter type, found '%s'", pString, pType))
 		}
 
@@ -421,7 +419,7 @@ func parameterValue(pType reflect.Type, pString string, dynamicValues map[string
 
 	// Static parameter
 	pv := reflect.New(pType).Elem()
-	if pType.Kind() == reflect.Ptr && pType.Elem().Kind() == reflect.Interface {
+	if pType.Kind() == reflect.Pointer && pType.Elem().Kind() == reflect.Interface {
 		// *any parameter with a static value: wrap the string in a *any
 		var v any = pString
 		pv.Set(reflect.ValueOf(&v))

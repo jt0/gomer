@@ -30,25 +30,25 @@ func IndirectInterface(v any) (indirect any, ok bool) {
 // reading its kind, calling type-specific accessors (.Int(), .String(), etc.), or passing
 // to other reflection APIs. Accepts both raw values and reflect.Value inputs. Returns
 // (invalid, false) if the value is nil or otherwise unreadable.
+//
+// Pointers are followed to any depth, so the returned value is never itself a pointer, and a
+// nil at any level yields ok == false. Note that an interface is not a pointer: a *any is
+// dereferenced to the any, not to the value the any holds. Callers holding a *any should pass
+// *v rather than v so that the concrete value is what gets inspected.
 func ReadableIndirectValue(v any) (indirectValue reflect.Value, ok bool) {
 	vv, ok := v.(reflect.Value)
 	if !ok {
 		vv = reflect.ValueOf(v)
 	}
 
-	vv = reflect.Indirect(vv)
-	if !vv.IsValid() {
-		return vv, false
-	}
-
-	if vv.Kind() == reflect.Ptr {
+	for vv.Kind() == reflect.Pointer {
 		if vv.IsNil() {
 			return vv, false
 		}
-		return vv.Elem(), true
+		vv = vv.Elem()
 	}
 
-	return vv, true
+	return vv, vv.IsValid()
 }
 
 // IndirectType returns the element type if v is a pointer type, otherwise returns the type

@@ -3,6 +3,7 @@ package constraint
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -101,12 +102,11 @@ func (c *constraint) Test(toTest any) gomerr.Gomerr {
 func (c *constraint) String() string {
 	if c.params == nil {
 		return c.Type()
-	} else {
-		return fmt.Sprintf("%s(%s)", c.type_, parametersToString(c.params))
 	}
+	return fmt.Sprintf("%s(%s)", c.type_, parametersToString(c.params))
 }
 
-var timeType = reflect.TypeOf((*time.Time)(nil)).Elem()
+var timeType = reflect.TypeFor[time.Time]()
 
 func parametersToString(params any) string {
 	var pv reflect.Value
@@ -123,7 +123,7 @@ func parametersToString(params any) string {
 	}
 
 	switch pv.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if pv.IsNil() {
 			return "<nil>"
 		}
@@ -131,7 +131,7 @@ func parametersToString(params any) string {
 	case reflect.Array, reflect.Slice:
 		pvLen := pv.Len()
 		ss := make([]string, pvLen)
-		for i := 0; i < pvLen; i++ {
+		for i := range pvLen {
 			ss[i] = parametersToString(pv.Index(i))
 		}
 		return strings.Join(ss, ", ")
@@ -161,14 +161,7 @@ func dynamicIfNeeded(newConstraint Constraint, constraints ...Constraint) Constr
 			for k, vs := range dc.dynamicValues {
 				existing := collectedDynamicValues[k]
 				for _, v := range vs {
-					found := false
-					for _, ev := range existing {
-						if ev == v {
-							found = true
-							break
-						}
-					}
-					if !found {
+					if !slices.Contains(existing, v) {
 						existing = append(existing, v)
 					}
 				}

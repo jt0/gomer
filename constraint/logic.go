@@ -61,7 +61,7 @@ func Or(constraints ...Constraint) Constraint {
 			if nse := gomerr.ErrorAs[*NotSatisfiedError](ge); nse != nil {
 				if nse.Constraint == nil {
 					nse.Constraint = c
-				} else if nct := nse.Constraint.Type(); nct == "isNil" || nct == "isZero" || strings.HasPrefix(nct, "fieldTest_") {
+				} else if nct := nse.Constraint.Type(); nct == "nil" || nct == "zero" || strings.HasPrefix(nct, "fieldTest_") {
 					// "or(nil,...)" or "or(zero,...)" is a pattern to bypass the remainder of the constraints if the
 					// field is optional. If toTest is not nil, we don't need to include this "failed" constraint in
 					// error(s) we might return.
