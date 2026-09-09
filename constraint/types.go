@@ -32,10 +32,7 @@ func Struct(validationTool *structs.Tool) Constraint {
 
 		// TODO:p1 support scope
 		// TODO:p1 should need to have validationTool?
-		if ge := structs.ApplyTools(toTest, structs.EnsureContext(), validationTool); ge != nil {
-			return ge
-		}
-		return nil
+		return structs.ApplyTools(toTest, structs.EnsureContext(), validationTool)
 	})
 }
 
@@ -58,11 +55,11 @@ func Union(validationTool *structs.Tool) Constraint {
 		if !found.IsValid() {
 			return NotSatisfied("none")
 		}
-
-		if ge := structs.ApplyTools(found, structs.EnsureContext(), validationTool); ge != nil {
-			return ge
+		if reflect.Indirect(found).Kind() == reflect.Struct {
+			toTest = found
 		}
-		return nil
+		// TODO:p1 support scope
+		return structs.ApplyTools(toTest, structs.EnsureContext(), validationTool)
 	})
 }
 
