@@ -214,6 +214,10 @@ func (*updateAction[I]) FieldAccessPermissions() auth.AccessPermissions {
 	return auth.UpdatePermission
 }
 
+type fromUpdateKey struct{}
+
+var FromUpdate = fromUpdateKey{}
+
 func (a *updateAction[I]) Pre(ctx context.Context, update I) gomerr.Gomerr {
 	if a.readAction == nil {
 		a.current = update
@@ -233,7 +237,7 @@ func (a *updateAction[I]) Pre(ctx context.Context, update I) gomerr.Gomerr {
 	}
 
 	// Read current state
-	a.current, ge = current.DoAction(ctx, a.readAction)
+	a.current, ge = current.DoAction(context.WithValue(ctx, FromUpdate, true), a.readAction)
 	if ge != nil {
 		return ge
 	}
