@@ -1,8 +1,10 @@
+*.test
+*.out
+*.iml
+
 go.sum
 go.work
 go.work.sum
 
 .*
 !.gitignore
-
-*.iml

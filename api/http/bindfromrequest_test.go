@@ -94,7 +94,7 @@ func TestBindInTypes(t *testing.T) {
 	greeting := resource.NewInstance[*Greeting](ctx, subject)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ge := BindFromRequest(tt.request, greeting, "some_scope")
+			ge := BindAndValidateFromRequest(tt.request, greeting, "some_scope")
 			assert.Success(t, ge)
 			assert.Equals(t, hello, greeting.style(tt.location))
 			assert.Equals(t, kitty, greeting.recipient(tt.location))

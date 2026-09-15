@@ -39,7 +39,7 @@ func TestConfigure_PascalCaseFields(t *testing.T) {
 	}
 
 	person := resource.NewInstance[*Person](ctx, subject)
-	ge := BindFromRequest(req, person, "test")
+	ge := BindAndValidateFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
 	assert.Equals(t, "Alice", *person.FirstName)
@@ -55,7 +55,7 @@ func TestConfigure_CamelCaseFields(t *testing.T) {
 	}
 
 	person := resource.NewInstance[*Person](ctx, subject)
-	ge := BindFromRequest(req, person, "test")
+	ge := BindAndValidateFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
 	assert.Equals(t, "Bruce", *person.FirstName)
@@ -72,7 +72,7 @@ func TestConfigure_PascalCaseFields_CamelCaseInput(t *testing.T) {
 	}
 
 	person := resource.NewInstance[*Person](ctx, subject)
-	ge := BindFromRequest(req, person, "test")
+	ge := BindAndValidateFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
 	assert.Nil(t, person.FirstName) // nil since field case is different from expected
@@ -90,7 +90,7 @@ func TestConfigure_MultipleOptions(t *testing.T) {
 	}
 
 	person := resource.NewInstance[*Person](ctx, subject)
-	ge := BindFromRequest(req, person, "test")
+	ge := BindAndValidateFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
 	assert.Equals(t, "James", *person.FirstName)
@@ -104,7 +104,7 @@ func TestConfigure_MultipleOptions(t *testing.T) {
 	}
 
 	person2 := resource.NewInstance[*Person](ctx, subject)
-	ge = BindFromRequest(req2, person2, "test")
+	ge = BindAndValidateFromRequest(req2, person2, "test")
 	assert.Success(t, ge)
 
 	assert.Equals(t, "James", *person2.FirstName)
@@ -122,7 +122,7 @@ func TestConfigure_SkipEmptyDirectives(t *testing.T) {
 	}
 
 	person := resource.NewInstance[*Person](ctx, subject)
-	ge := BindFromRequest(req, person, "test")
+	ge := BindAndValidateFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
 	assert.Equals(t, "Alec", *person.FirstName)
@@ -142,7 +142,7 @@ func TestNewBindingConfiguration_SetAsDefault(t *testing.T) {
 	}
 
 	person := resource.NewInstance[*Person](ctx, subject)
-	ge := BindFromRequest(req, person, "test")
+	ge := BindAndValidateFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
 	assert.Equals(t, "Plato", *person.FirstName)
@@ -158,7 +158,7 @@ func TestConfigure_CamelCaseFields_DefaultNaming(t *testing.T) {
 	}
 
 	person := resource.NewInstance[*Person](ctx, subject)
-	ge := BindFromRequest(req, person, "test")
+	ge := BindAndValidateFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
 	assert.Equals(t, "Charlie", *person.FirstName)
@@ -174,7 +174,7 @@ func TestConfigure_RequestOption(t *testing.T) {
 	}
 
 	person := resource.NewInstance[*Person](ctx, subject)
-	ge := BindFromRequest(req, person, "test")
+	ge := BindAndValidateFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
 	assert.Equals(t, "", *person.MiddleName)
@@ -190,7 +190,7 @@ func TestConfigure_ResponseOption(t *testing.T) {
 	}
 
 	person := resource.NewInstance[*Person](ctx, subject)
-	ge := BindFromRequest(req, person, "test")
+	ge := BindAndValidateFromRequest(req, person, "test")
 	assert.Success(t, ge)
 
 	assert.Equals(t, "Madonna", *person.FirstName)

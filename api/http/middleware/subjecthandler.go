@@ -1,18 +1,20 @@
-package rest
+package middleware
 
 import (
 	"context"
 	"errors"
 	"net/http"
 
+	api "github.com/jt0/gomer/api/http"
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/log"
 )
 
-var Subject = NilSubject
-
-func NilSubject(*http.Request) auth.Subject {
+// RequestSubject returns the auth.Subject from the provided request. If the
+// SubjectHandler middleware isn't used, or the middleware's SubjectProvider
+// returns an error, this function returns nil.
+var RequestSubject = func(*http.Request) auth.Subject {
 	return nil
 }
 
@@ -25,26 +27,26 @@ func SubjectHandler(subjectProvider SubjectProvider) func(http.Handler) http.Han
 		}
 	}
 
-	Subject = SubjectHandlerSubject
+	RequestSubject = requestSubjectFromContext
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			rw := w.(*ResponseWriter)
+			rw, ok := w.(*api.ResponseWriter)
+			if !ok {
+				rw = &api.ResponseWriter{}
+				defer rw.WriteTo(w)
+				w = rw
+			}
 
 			subject, ge := subjectProvider(r)
 			if ge != nil {
 				rw.WriteError(ge)
-				return // Don't call next handler
+				return
 			}
 
-			// Store subject in context
-			r = r.WithContext(context.WithValue(r.Context(), subjectKey{}, subject))
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), subjectKey{}, subject)))
 
-			// Call next handler
-			next.ServeHTTP(w, r)
-
-			// Post-processing: Release subject
-			ge = subject.Release(rw.err != nil && !errors.Is(rw.err, gomerr.NotAnError))
+			ge = subject.Release(rw.Error() != nil && !errors.Is(rw.Error(), gomerr.NotAnError))
 			if ge != nil {
 				log.Logger().Warn("failed to release subject", "error", ge)
 			}
@@ -54,6 +56,6 @@ func SubjectHandler(subjectProvider SubjectProvider) func(http.Handler) http.Han
 
 type subjectKey struct{}
 
-func SubjectHandlerSubject(r *http.Request) auth.Subject {
+func requestSubjectFromContext(r *http.Request) auth.Subject {
 	return r.Context().Value(subjectKey{}).(auth.Subject)
 }

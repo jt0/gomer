@@ -90,6 +90,43 @@
 //	// CreateMode is required when AccessMode is "read_write"
 //	CreateMode *string `validate:"or(field($.AccessMode,neq,read_write),required)"`
 //
+// # Struct-Level Constraints
+//
+// A directive on a blank field named "_" is handed the enclosing struct rather than a field
+// value. Use it for rules that span several fields, where no single field owns the rule:
+//
+//	type StringSetting struct {
+//	    _       struct{} `validate:"$oneConstraintRequired"`
+//	    Pattern *string
+//	    Enum    []string
+//	}
+//
+// The constraint's test function receives the struct value, so it asserts on the struct type
+// rather than a field type:
+//
+//	constraint.Register("$oneConstraintRequired",
+//	    constraint.New("oneConstraintRequired", nil, func(toTest any) gomerr.Gomerr {
+//	        ss, ok := toTest.(StringSetting)
+//	        if !ok {
+//	            return gomerr.Unprocessable("expected a StringSetting", toTest)
+//	        }
+//	        if ss.Pattern == nil && ss.Enum == nil {
+//	            return constraint.NotSatisfied(toTest)
+//	        }
+//	        return nil
+//	    }))
+//
+// Go forbids reading a blank field, but reflect still reports its name and tag, and that is all
+// the directive needs. Declare it first, because Go pads a struct whose last field is zero-sized.
+//
+// The rule must live on the struct it describes. "struct" and "union" apply the validation tool
+// to the nested value itself, so a directive sitting on the field that holds the struct is never
+// evaluated and fails silently:
+//
+//	type Definition struct {
+//	    String *StringSetting `validate:"$oneConstraintRequired,struct"` // never runs
+//	}
+//
 // # Custom Constraints
 //
 // Register custom constraints or builders with Register(). Custom names must start with '$':

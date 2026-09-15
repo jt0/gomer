@@ -13,6 +13,13 @@ func NewCollection[I Instance[I]](proto I) *Collection[I] {
 	return &Collection[I]{proto: proto}
 }
 
+type AnyCollection interface {
+	AnyResource
+	data.Queryable
+	Query(context.Context) gomerr.Gomerr
+	Proto() AnyInstance
+}
+
 // Collection holds a set of instances resulting from a query.
 // Unlike Instance, Collection is parameterized only by its item type,
 // delegating resource identity to the instance type.
@@ -67,6 +74,10 @@ func (c *Collection[I]) TypeName() string {
 }
 
 func (c *Collection[I]) ItemTemplate() any {
+	return c.proto
+}
+
+func (c *Collection[I]) Proto() AnyInstance {
 	return c.proto
 }
 

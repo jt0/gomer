@@ -22,6 +22,12 @@ func NewInstance[I Instance[I]](ctx context.Context, sub auth.Subject) I {
 	}
 }
 
+type AnyInstance interface {
+	AnyResource
+	data.Persistable
+	Id() string
+}
+
 // Instance extends Resource for individual entities. Instances have an identity (Id) and support CRUD operations.
 type Instance[I Resource[I]] interface {
 	Resource[I]

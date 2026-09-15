@@ -39,8 +39,8 @@ type RegisteredType interface {
 	Actions() map[any]func() AnyAction
 	Parent() RegisteredType
 	Children() []RegisteredType
-	NewInstance(auth.Subject) any
-	NewCollection(proto any) any
+	NewInstance(auth.Subject) AnyInstance
+	NewCollection(proto any) AnyCollection
 	Store() data.Store
 }
 
@@ -72,13 +72,13 @@ func Register[I Instance[I]](ctx context.Context, opts ...Option) {
 	}
 
 	// Create closures while we know the type of I.
-	rt.newInstance = func(sub auth.Subject) any {
+	rt.newInstance = func(sub auth.Subject) AnyInstance {
 		i := reflect.New(reflect.TypeFor[I]().Elem()).Interface().(I)
 		i.initialize(rt, sub)
 		return i
 	}
 
-	rt.newCollection = func(proto any) any {
+	rt.newCollection = func(proto any) AnyCollection {
 		i, ok := proto.(I)
 		if !ok || i.registeredType() != rt {
 			panic(gomerr.Configuration("collection must be created with its own instance type").String())
@@ -179,8 +179,8 @@ type registeredType struct {
 	children       []RegisteredType
 	store          data.Store
 
-	newInstance   func(sub auth.Subject) any
-	newCollection func(proto any) any
+	newInstance   func(sub auth.Subject) AnyInstance
+	newCollection func(proto any) AnyCollection
 }
 
 func (m *registeredType) InstanceName() string {
@@ -206,11 +206,11 @@ func (m *registeredType) Children() []RegisteredType {
 	return m.children
 }
 
-func (m *registeredType) NewInstance(subject auth.Subject) any {
+func (m *registeredType) NewInstance(subject auth.Subject) AnyInstance {
 	return m.newInstance(subject)
 }
 
-func (m *registeredType) NewCollection(proto any) any {
+func (m *registeredType) NewCollection(proto any) AnyCollection {
 	return m.newCollection(proto)
 }
 

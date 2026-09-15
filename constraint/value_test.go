@@ -211,6 +211,107 @@ func TestReportedConstraintName(t *testing.T) {
 	}
 }
 
+// boolOutcome names the four results boolTest can produce for a value.
+type boolOutcome int
+
+const (
+	isTrue boolOutcome = iota
+	isFalse
+	// neither is the outcome for a value that holds nothing readable, which satisfies neither
+	// constraint rather than defaulting to false.
+	neither
+	// unprocessable is the outcome for a readable value that is not a bool.
+	unprocessable
+)
+
+// boolCases enumerates the outcome of each value under boolConstraint's semantics. Pointers are
+// dereferenced to any depth, so a pointer to true is true, but a nil pointer reads as nothing at
+// all and so satisfies neither constraint.
+var boolCases = []struct {
+	name  string
+	value any
+	want  boolOutcome
+}{
+	{"true", true, isTrue},
+	{"false", false, isFalse},
+	{"pointer to true", new(true), isTrue},
+	{"pointer to false", new(false), isFalse},
+	{"pointer to pointer to true", new(new(true)), isTrue},
+	{"reflect.Value of true", reflect.ValueOf(true), isTrue},
+	{"reflect.Value of false", reflect.ValueOf(false), isFalse},
+
+	{"untyped nil", nil, neither},
+	{"nil bool pointer", (*bool)(nil), neither},
+	{"nil pointer to bool pointer", (**bool)(nil), neither},
+
+	{"int", 1, unprocessable},
+	{"string", "true", unprocessable},
+	{"struct", struct{}{}, unprocessable},
+	{"nil slice", []bool(nil), unprocessable},
+}
+
+// assertBoolOutcome checks the pair of errors from a true-constraint and a false-constraint against
+// the expected outcome. The two must be exact mirrors for readable bools, and both must fail for
+// everything else - as NotSatisfied when there is nothing to read, as Unprocessable when the value
+// is readable but not a bool.
+func assertBoolOutcome(t *testing.T, want boolOutcome, trueErr, falseErr gomerr.Gomerr) {
+	t.Helper()
+
+	notSatisfied := func(ge gomerr.Gomerr) bool {
+		return gomerr.ErrorAs[*NotSatisfiedError](ge) != nil
+	}
+
+	switch want {
+	case isTrue:
+		if trueErr != nil {
+			t.Errorf("want true to be satisfied, got err=%v", trueErr)
+		}
+		if !notSatisfied(falseErr) {
+			t.Errorf("want false to be NotSatisfied, got err=%v", falseErr)
+		}
+	case isFalse:
+		if !notSatisfied(trueErr) {
+			t.Errorf("want true to be NotSatisfied, got err=%v", trueErr)
+		}
+		if falseErr != nil {
+			t.Errorf("want false to be satisfied, got err=%v", falseErr)
+		}
+	case neither:
+		if !notSatisfied(trueErr) || !notSatisfied(falseErr) {
+			t.Errorf("want both NotSatisfied, got true=%v false=%v", trueErr, falseErr)
+		}
+	case unprocessable:
+		if trueErr == nil || notSatisfied(trueErr) {
+			t.Errorf("want true to be Unprocessable, got err=%v", trueErr)
+		}
+		if falseErr == nil || notSatisfied(falseErr) {
+			t.Errorf("want false to be Unprocessable, got err=%v", falseErr)
+		}
+	}
+}
+
+// TestBoolConstraint asserts IsTrue and IsFalse over the same table so the two remain exact mirrors
+// of each other for readable bools, and neither is satisfied by anything else.
+func TestBoolConstraint(t *testing.T) {
+	for _, tt := range boolCases {
+		t.Run(tt.name, func(t *testing.T) {
+			assertBoolOutcome(t, tt.want, IsTrue.Test(tt.value), IsFalse.Test(tt.value))
+		})
+	}
+}
+
+// TestBoolFuncs covers the True and False wrappers, which back the true($.Other) and false($.Other)
+// tag forms. They must read the value the pointer holds rather than the pointer itself, which is
+// what the Test argument being ignored makes easy to get wrong.
+func TestBoolFuncs(t *testing.T) {
+	for _, tt := range boolCases {
+		t.Run(tt.name, func(t *testing.T) {
+			v := tt.value
+			assertBoolOutcome(t, tt.want, True(&v).Test(nil), False(&v).Test(nil))
+		})
+	}
+}
+
 // zeroCases enumerates the zero-ness of each value under zeroConstraint's semantics. Unlike the nil
 // constraints, the zero constraints look *through* pointers: a non-nil pointer is zero when the
 // value it points at is zero. Values that hold nothing readable at all - an untyped nil or a nil

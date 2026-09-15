@@ -9,16 +9,20 @@ import (
 	"github.com/jt0/gomer/log"
 )
 
-// Resource is the base interface for all domain resources. The type parameter T
-// is the concrete type implementing the interface (F-bounded polymorphism).
-type Resource[T any] interface {
+type AnyResource interface {
 	Subject() auth.Subject
-	DoAction(context.Context, Action[T]) (T, gomerr.Gomerr)
 	RegisteredType() RegisteredType
 	MaxActionRetries() int
 
 	registeredType() *registeredType
 	initialize(rt *registeredType, sub auth.Subject)
+}
+
+// Resource is the base interface for all domain resources. The type parameter T
+// is the concrete type implementing the interface (F-bounded polymorphism).
+type Resource[T any] interface {
+	AnyResource
+	DoAction(context.Context, Action[T]) (T, gomerr.Gomerr)
 }
 
 // BaseResource provides the default implementation for Resource[T].

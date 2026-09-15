@@ -60,8 +60,14 @@ func SetBindFromRequestConfiguration(requestConfiguration BindFromRequestConfigu
 	return DefaultBindFromRequestTool
 }
 
-// BindFromRequest binds request data to the provided resource.
-func BindFromRequest(request *http.Request, resource any, scope string) gomerr.Gomerr {
+// BindAndValidateFromRequest binds request data to the provided resource then validates it.
+func BindAndValidateFromRequest(request *http.Request, resource any, scope string) gomerr.Gomerr {
+	return BindFromRequest(request, resource, scope, constraint.DefaultValidationTool)
+}
+
+// BindFromRequest binds request data to the provided resource and then applies any tools
+// provided to the function.
+func BindFromRequest(request *http.Request, resource any, scope string, tools ...*structs.Tool) gomerr.Gomerr {
 	rv := reflect.ValueOf(resource)
 	resourceType := rv.Type()
 
@@ -116,7 +122,7 @@ func BindFromRequest(request *http.Request, resource any, scope string) gomerr.G
 		tc.Put(bind.InKey, unmarshaled)
 	}
 
-	return structs.ApplyTools(resource, tc, DefaultBindFromRequestTool, constraint.DefaultValidationTool)
+	return structs.ApplyTools(resource, tc, append([]*structs.Tool{DefaultBindFromRequestTool}, tools...)...)
 }
 
 // requestExtension

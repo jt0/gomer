@@ -56,7 +56,7 @@ func SetBindToResponseConfiguration(responseConfiguration BindToResponseConfigur
 
 // BindToResponse
 // TODO: add support for data format type
-func BindToResponse(result reflect.Value, header http.Header, scope string, acceptLanguage string, statusCode int) ([]byte, int) {
+func BindToResponse(result any, header http.Header, scope string, acceptLanguage string, statusCode int) ([]byte, int) {
 	tc := structs.ToolContextWithScope(scope).
 		With(headersKey, header).
 		With(AcceptLanguageKey, acceptLanguage).
