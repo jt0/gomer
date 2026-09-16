@@ -1,8 +1,40 @@
-package http
+package rest
 
 import (
+	"net/http"
+
+	api "github.com/jt0/gomer/api/http"
+	"github.com/jt0/gomer/api/http/middleware"
 	"github.com/jt0/gomer/resource"
 )
+
+var DoResourceAction = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rw, ok := w.(*api.ResponseWriter)
+	if !ok {
+		rw = &api.ResponseWriter{}
+		defer rw.WriteTo(w)
+		w = rw
+	}
+
+	ac := middleware.ApiContextFor(r)
+	if ac == nil || ac.Instance == nil || ac.Action == nil {
+		rw.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
+	target := middleware.ApiOutput.Output(ac)
+
+	// Execute action via DoAction on the resource
+	result, ge := ac.Action.ExecuteOn(r.Context(), target)
+	if ge != nil {
+		rw.WriteError(ge)
+		return
+	}
+
+	if result != nil && result != target {
+		ac.Target = result
+	}
+})
 
 // Op has 8 bits where the bottom five bits correspond to the action type, the sixth and seventh bit specifies what
 // resource type the action is against (instance or a collection; a singleton counts as an instance) and the highest bit
@@ -123,3 +155,42 @@ const (
 	HeadInstance    = MethodHead + instance
 	OptionsInstance = MethodOptions + instance
 )
+
+// CrudlActions is a helper function to create standard resource actions for a given Instance[I] type.
+func CrudlActions[I resource.Instance[I]]() map[any]func() resource.AnyAction {
+	return map[any]func() resource.AnyAction{
+		PostCollection: func() resource.AnyAction { return resource.CreateAction[I]() },
+		GetInstance:    func() resource.AnyAction { return resource.ReadAction[I]() },
+		PatchInstance:  func() resource.AnyAction { return resource.UpdateAction[I](resource.ReadAction[I]()) },
+		DeleteInstance: func() resource.AnyAction { return resource.DeleteAction[I]() },
+		GetCollection:  func() resource.AnyAction { return resource.ListAction[I]() },
+	}
+}
+
+// ReadOnlyActions is a helper function to create Read and List actions for a given Instance[I] type.
+func ReadOnlyActions[I resource.Instance[I]]() map[any]func() resource.AnyAction {
+	return map[any]func() resource.AnyAction{
+		GetInstance:   func() resource.AnyAction { return resource.ReadAction[I]() },
+		GetCollection: func() resource.AnyAction { return resource.ListAction[I]() },
+	}
+}
+
+// NoActions is an empty action map for resources that don't expose REST endpoints.
+var NoActions = map[any]func() resource.AnyAction{}
+
+var successStatusCodes = map[Op]int{
+	PutCollection:     http.StatusAccepted,
+	PostCollection:    http.StatusCreated,
+	GetCollection:     http.StatusOK,
+	PatchCollection:   http.StatusOK,
+	DeleteCollection:  http.StatusAccepted,
+	HeadCollection:    http.StatusOK,
+	OptionsCollection: http.StatusOK,
+	PutInstance:       http.StatusOK,
+	PostInstance:      http.StatusCreated,
+	GetInstance:       http.StatusOK,
+	PatchInstance:     http.StatusOK,
+	DeleteInstance:    http.StatusNoContent,
+	HeadInstance:      http.StatusOK,
+	OptionsInstance:   http.StatusOK,
+}

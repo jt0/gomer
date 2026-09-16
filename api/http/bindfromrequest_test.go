@@ -10,13 +10,14 @@ import (
 	"github.com/jt0/gomer/_test/assert"
 	"github.com/jt0/gomer/_test/helpers/stores"
 	. "github.com/jt0/gomer/api/http"
+	"github.com/jt0/gomer/api/rest"
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/resource"
 )
 
 var (
 	subject = auth.NewSubject(auth.ReadWriteAllFields)
-	actions = map[any]func() resource.AnyAction{PostCollection: func() resource.AnyAction {
+	actions = map[any]func() resource.AnyAction{rest.PostCollection: func() resource.AnyAction {
 		return resource.CreateAction[*Greeting]()
 	}}
 

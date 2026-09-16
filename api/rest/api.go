@@ -14,84 +14,6 @@ import (
 	"github.com/jt0/gomer/structs"
 )
 
-// ancestorContext holds information about an ancestor resource for path name derivation.
-type ancestorContext struct {
-	typeName string // The full type name of the ancestor (e.g., "ExtensionVersion")
-	pathName string // The derived path name of the ancestor (e.g., "Version")
-}
-
-type HttpSpec struct {
-	Method            string
-	SuccessStatusCode int
-}
-
-var successStatusCodes = map[api.Op]int{
-	api.PutCollection:     http.StatusAccepted,
-	api.PostCollection:    http.StatusCreated,
-	api.GetCollection:     http.StatusOK,
-	api.PatchCollection:   http.StatusOK,
-	api.DeleteCollection:  http.StatusAccepted,
-	api.HeadCollection:    http.StatusOK,
-	api.OptionsCollection: http.StatusOK,
-	api.PutInstance:       http.StatusOK,
-	api.PostInstance:      http.StatusCreated,
-	api.GetInstance:       http.StatusOK,
-	api.PatchInstance:     http.StatusOK,
-	api.DeleteInstance:    http.StatusNoContent,
-	api.HeadInstance:      http.StatusOK,
-	api.OptionsInstance:   http.StatusOK,
-}
-
-// CrudlActions is a helper function to create standard resource actions for a given Instance[I] type.
-func CrudlActions[I resource.Instance[I]]() map[any]func() resource.AnyAction {
-	return map[any]func() resource.AnyAction{
-		api.PostCollection: func() resource.AnyAction { return resource.CreateAction[I]() },
-		api.GetInstance:    func() resource.AnyAction { return resource.ReadAction[I]() },
-		api.PatchInstance:  func() resource.AnyAction { return resource.UpdateAction[I](resource.ReadAction[I]()) },
-		api.DeleteInstance: func() resource.AnyAction { return resource.DeleteAction[I]() },
-		api.GetCollection:  func() resource.AnyAction { return resource.ListAction[I]() },
-	}
-}
-
-// ReadOnlyActions is a helper function to create Read and List actions for a given Instance[I] type.
-func ReadOnlyActions[I resource.Instance[I]]() map[any]func() resource.AnyAction {
-	return map[any]func() resource.AnyAction{
-		api.GetInstance:   func() resource.AnyAction { return resource.ReadAction[I]() },
-		api.GetCollection: func() resource.AnyAction { return resource.ListAction[I]() },
-	}
-}
-
-// NoActions is an empty action map for resources that don't expose REST endpoints.
-var NoActions = map[any]func() resource.AnyAction{}
-
-var doAction = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	rw, ok := w.(*api.ResponseWriter)
-	if !ok {
-		rw = &api.ResponseWriter{}
-		defer rw.WriteTo(w)
-		w = rw
-	}
-
-	ac := middleware.ApiContextFor(r)
-	if ac == nil || ac.Instance == nil || ac.Action == nil {
-		rw.WriteHeader(http.StatusServiceUnavailable)
-		return
-	}
-
-	target := middleware.ApiOutput.Output(ac)
-
-	// Execute action via DoAction on the resource
-	result, ge := ac.Action.ExecuteOn(r.Context(), target)
-	if ge != nil {
-		rw.WriteError(ge)
-		return
-	}
-
-	if result != nil && result != target {
-		ac.Target = result
-	}
-})
-
 func BuildApiContext(rt resource.RegisteredType, action resource.AnyAction, successCode int) func(http.Handler) http.Handler {
 	if rt == nil {
 		panic("rt cannot be nil")
@@ -125,55 +47,59 @@ func apiContextFromContext(r *http.Request) *middleware.ApiContext {
 	return r.Context().Value(apiContextKey{}).(*middleware.ApiContext)
 }
 
-func NewRoutes(registry *resource.Registry, middleware ...func(http.Handler) http.Handler) *Routes {
+func NewApi(registry *resource.Registry, apiMiddleware ...func(http.Handler) http.Handler) *Api {
 	mux := http.NewServeMux()
-	mux.Handle("/", noRouteHandler()) // include catchall handler for unmatched routes
-	return &Routes{
-		registry:   registry,
-		mux:        mux,
-		middleware: middleware,
-		handler:    doAction,
-	}
-}
 
-// noRouteHandler returns a handler for requests that don't match any registered route.
-func noRouteHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// "unroutable" handler for anything that doesn't match
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw, ok := w.(*api.ResponseWriter)
 		if !ok {
 			rw = &api.ResponseWriter{}
 			defer rw.WriteTo(w)
 		}
 		rw.WriteError(api.Unroutable())
-	})
+	}))
+
+	return &Api{
+		registry:      registry,
+		mux:           mux,
+		apiMiddleware: apiMiddleware,
+		handler:       DoResourceAction,
+	}
 }
 
-type Routes struct {
-	registry        *resource.Registry
-	mux             *http.ServeMux
-	middleware      []func(http.Handler) http.Handler
-	routeMiddleware []func(http.Handler) http.Handler
-	handler         http.Handler
+type Api struct {
+	registry           *resource.Registry
+	mux                *http.ServeMux
+	apiMiddleware      []func(http.Handler) http.Handler
+	resourceMiddleware []func(http.Handler) http.Handler
+	handler            http.Handler
 }
 
-func (r *Routes) WithRouteMiddleware(middleware ...func(http.Handler) http.Handler) *Routes {
-	r.routeMiddleware = append(r.routeMiddleware, middleware...)
+func (r *Api) WithResourceMiddleware(middleware ...func(http.Handler) http.Handler) *Api {
+	r.resourceMiddleware = append(r.resourceMiddleware, middleware...)
 	return r
 }
 
-func (r *Routes) WithMainHandler(handler http.Handler) *Routes {
+func (r *Api) WithResourceHandler(handler http.Handler) *Api {
 	r.handler = handler
 	return r
 }
 
-func (r *Routes) Build() http.Handler {
+func (r *Api) Build() http.Handler {
 	for _, root := range r.registry.RootTypes() {
 		r.buildRoutes(root, "", nil)
 	}
-	return api.Handler(r.registry, r.mux, r.middleware...)
+	return api.Handler(r.registry, r.mux, r.apiMiddleware...)
 }
 
-func (r *Routes) buildRoutes(rt resource.RegisteredType, parentPath string, ancestors []ancestorContext) {
+// ancestorContext holds information about an ancestor resource for path name derivation.
+type ancestorContext struct {
+	typeName string // The full type name of the ancestor (e.g., "ExtensionVersion")
+	pathName string // The derived path name of the ancestor (e.g., "Version")
+}
+
+func (r *Api) buildRoutes(rt resource.RegisteredType, parentPath string, ancestors []ancestorContext) {
 	if ge := structs.Preprocess(rt.NewInstance(nil), api.DefaultBindFromRequestTool, constraint.DefaultValidationTool); ge != nil {
 		panic(ge.String())
 	}
@@ -183,7 +109,7 @@ func (r *Routes) buildRoutes(rt resource.RegisteredType, parentPath string, ance
 
 	hasCollectionAction := false
 	for key := range rt.Actions() {
-		if key.(api.Op).ResourceType() == resource.CollectionCategory {
+		if key.(Op).ResourceType() == resource.CollectionCategory {
 			hasCollectionAction = true
 			break
 		}
@@ -202,8 +128,7 @@ func (r *Routes) buildRoutes(rt resource.RegisteredType, parentPath string, ance
 
 	var patterns []string
 	for key, actionFunc := range rt.Actions() {
-		op := key.(api.Op)
-
+		op := key.(Op)
 		relativePath, ok := path[op.ResourceType()]
 		if !ok {
 			panic("invalid resource type; does not map to a path: " + op.ResourceType())
@@ -234,14 +159,14 @@ func (r *Routes) buildRoutes(rt resource.RegisteredType, parentPath string, ance
 	}
 }
 
-func (r *Routes) routeHandler(rt resource.RegisteredType, actionFunc func() resource.AnyAction, successStatus int) http.Handler {
+func (r *Api) routeHandler(rt resource.RegisteredType, actionFunc func() resource.AnyAction, successStatus int) http.Handler {
 	action := actionFunc()
 	if action == nil {
 		panic(gomerr.Configuration("cannot handle a nil action").String())
 	}
 
 	buildApiContext := []func(http.Handler) http.Handler{BuildApiContext(rt, action, successStatus)}
-	routeChain := api.Chain(append(buildApiContext, r.routeMiddleware...)...)
+	routeChain := api.Chain(append(buildApiContext, r.resourceMiddleware...)...)
 	return routeChain(r.handler)
 }
 

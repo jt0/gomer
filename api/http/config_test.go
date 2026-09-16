@@ -11,6 +11,7 @@ import (
 	"github.com/jt0/gomer/_test/assert"
 	"github.com/jt0/gomer/_test/helpers/stores"
 	. "github.com/jt0/gomer/api/http"
+	"github.com/jt0/gomer/api/rest"
 	"github.com/jt0/gomer/resource"
 )
 
@@ -24,7 +25,7 @@ type Person struct {
 	Suffix     string  `in:"" out:""`
 }
 
-var personActions = map[any]func() resource.AnyAction{PostCollection: func() resource.AnyAction { return resource.CreateAction[*Person]() }}
+var personActions = map[any]func() resource.AnyAction{rest.PostCollection: func() resource.AnyAction { return resource.CreateAction[*Person]() }}
 
 func init() {
 	resource.Register[*Person](ctx, resource.WithActions(personActions), resource.WithStore(stores.PanicStore))
