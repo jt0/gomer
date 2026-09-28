@@ -2,6 +2,7 @@ package resource
 
 import (
 	"context"
+	"errors"
 	"unsafe"
 
 	"github.com/jt0/gomer/auth"
@@ -44,6 +45,9 @@ func (b *BaseResource[T]) Self() T {
 func (b *BaseResource[T]) DoAction(ctx context.Context, action Action[T]) (T, gomerr.Gomerr) {
 	var zero T
 	if ge := action.Pre(ctx, b.self); ge != nil {
+		if errors.Is(ge, gomerr.NotAnError) {
+			return action.OnDoSuccess(ctx, b.self)
+		}
 		return zero, ge
 	}
 
