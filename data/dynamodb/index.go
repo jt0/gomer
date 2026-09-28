@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -16,6 +17,7 @@ import (
 
 type index struct {
 	name                *string
+	local               bool
 	pk                  *keyAttribute
 	sk                  *keyAttribute
 	canReadConsistently bool
@@ -122,40 +124,56 @@ func indexFor(t *table, q data.Queryable) (index *index, ascending bool, consist
 	switch len(candidates) {
 	case 0:
 		available := make(map[string]any, 1)
+		type idxInfo struct {
+			PkFields []string
+			SkFields []string
+		}
 		for _, idx := range t.indexes {
-			available[idx.friendlyName()] = idx
+			if idx.local && idx.sk == nil {
+				continue
+			}
+			if len(idx.pk.keyFieldsByPersistable[q.TypeName()]) > 0 {
+				available[idx.friendlyName()] = idxInfo{
+					PkFields: idx.pk.keyFields(q.TypeName()),
+					SkFields: idx.sk.keyFields(q.TypeName()), // nil-safe
+				}
+			}
 		}
 		return nil, false, nil, dataerr.NoIndexMatch(available, q)
 	case 1:
 		// do nothing. candidates[0] returned below
 	default:
-		sort.Slice(candidates, func(i, j int) bool {
-			c1 := candidates[i]
-			c2 := candidates[j]
-
-			if c1.preferred != c2.preferred {
-				return c1.preferred // sorts based on which of c1 or c2 is preferred over the other
-			}
-
-			// TODO: moving and reordering logic from compareCandidates - consider if it should be applied above, too
-			// 4-2 vs 3-1  a_b_c_d  vs a_b_e_d
-			if c1.skMissing != c2.skMissing {
-				return c1.skMissing < c2.skMissing
-			}
-
-			if c1.skLength != c2.skLength {
-				return c1.skLength > c2.skLength
-			}
-
-			if consistencyType == Preferred && c1.index.canReadConsistently != c2.index.canReadConsistently {
-				return c1.index.canReadConsistently // sorts based on which of c1 or c2 can be read consistently
-			}
-
-			return c1.index.name == nil // favor the table's index over others
-		})
+		sort.Slice(candidates, candidateComparator(candidates, consistencyType))
 	}
 
 	return candidates[0].index, candidates[0].ascending, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
+}
+
+func candidateComparator(candidates []*candidate, consistencyType ConsistencyType) func(i int, j int) bool {
+	return func(i, j int) bool {
+		c1 := candidates[i]
+		c2 := candidates[j]
+
+		if c1.preferred != c2.preferred {
+			return c1.preferred // sorts based on which of c1 or c2 is preferred over the other
+		}
+
+		// TODO: moving and reordering logic from compareCandidates - consider if it should be applied above, too
+		// 4-2 vs 3-1  a_b_c_d  vs a_b_e_d
+		if c1.skMissing != c2.skMissing {
+			return c1.skMissing < c2.skMissing
+		}
+
+		if c1.skLength != c2.skLength {
+			return c1.skLength > c2.skLength
+		}
+
+		if consistencyType == Preferred && c1.index.canReadConsistently != c2.index.canReadConsistently {
+			return c1.index.canReadConsistently // sorts based on which of c1 or c2 can be read consistently
+		}
+
+		return c1.index.name == nil // favor the table's index over others
+	}
 }
 
 func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
@@ -226,7 +244,7 @@ func (i *index) candidate(qv reflect.Value, ptName string) *candidate {
 
 // endsWithWildcard checks if a reflect.Value (string or *string) ends with the wildcard character.
 func endsWithWildcard(fv reflect.Value, wildcardChar byte) bool {
-	if fv.Kind() == reflect.Ptr {
+	if fv.Kind() == reflect.Pointer {
 		fv = fv.Elem()
 	}
 	if s, ok := fv.Interface().(string); ok && s != "" {
@@ -273,9 +291,8 @@ func keyFieldNames(keyFields []*keyField) []string {
 func (i *index) keyAttributes() []*keyAttribute {
 	if i.sk == nil {
 		return []*keyAttribute{i.pk}
-	} else {
-		return []*keyAttribute{i.pk, i.sk}
 	}
+	return []*keyAttribute{i.pk, i.sk}
 }
 
 func (k *keyAttribute) attributeValue(elemValue reflect.Value, persistableTypeName string, valueSeparator, queryWildcardChar byte) types.AttributeValue {
@@ -330,6 +347,21 @@ func (k *keyAttribute) buildKeyValue(elemValue reflect.Value, persistableTypeNam
 	return keyValue
 }
 
+func (k *keyAttribute) keyFields(persistableTypeName string) []string {
+	if k == nil {
+		return nil
+	}
+	keyFields, ok := k.keyFieldsByPersistable[persistableTypeName]
+	if !ok {
+		return nil
+	}
+	names := make([]string, len(keyFields))
+	for i, kf := range keyFields {
+		names[i] = kf.name
+	}
+	return names
+}
+
 // unescapeAndSplit splits a composite key value by separator and unescapes each segment.
 // Handles escaped separators and escape characters correctly.
 func unescapeAndSplit(value string, separator, escape byte) []string {
@@ -378,14 +410,14 @@ func escapeAndJoin(segments []string, separator, escape byte) string {
 		escaped[i] = escapeKeyValue(s, separator, escape)
 	}
 
-	result := ""
+	var result strings.Builder
 	for i, s := range escaped {
 		if i > 0 {
-			result += string(separator)
+			result.WriteString(string(separator))
 		}
-		result += s
+		result.WriteString(s)
 	}
-	return result
+	return result.String()
 }
 
 // escapeKeyValue escapes separator and escape characters in field values to prevent ambiguity in composite keys.
@@ -425,29 +457,27 @@ func fieldValue(fieldName string, sv reflect.Value, separator, escape byte) stri
 	if fieldName[:1] == "'" {
 		// Static value - don't escape (controlled by developer, not user data)
 		return fieldName[1 : len(fieldName)-1]
-	} else {
-		v := sv.FieldByName(fieldName)
-		// NB: if the type is a number w/ a value of 0, it will be discarded. To use an actual zero, one needs to
-		//  specify the attribute as a pointer to the numeric type.
-		if v.IsValid() && !v.IsZero() {
-			if v.Kind() == reflect.Ptr && !v.IsNil() {
-				v = v.Elem()
-			}
-
-			// Special case for time.Time to match framework RFC3339 standard
-			var value string
-			if t, ok := v.Interface().(time.Time); ok {
-				value = t.Format(time.RFC3339)
-			} else {
-				value = fmt.Sprint(v.Interface())
-			}
-
-			// Escape separator and escape characters to preserve sort order and avoid ambiguity
-			return escapeKeyValue(value, separator, escape)
-		} else {
-			return ""
-		}
 	}
+	v := sv.FieldByName(fieldName)
+	// NB: if the type is a number w/ a value of 0, it will be discarded. To use an actual zero, one needs to
+	//  specify the attribute as a pointer to the numeric type.
+	if v.IsValid() && !v.IsZero() {
+		if v.Kind() == reflect.Pointer && !v.IsNil() {
+			v = v.Elem()
+		}
+
+		// Special case for time.Time to match framework RFC3339 standard
+		var value string
+		if t, ok := v.Interface().(time.Time); ok {
+			value = t.Format(time.RFC3339)
+		} else {
+			value = fmt.Sprint(v.Interface())
+		}
+
+		// Escape separator and escape characters to preserve sort order and avoid ambiguity
+		return escapeKeyValue(value, separator, escape)
+	}
+	return ""
 }
 
 // indexForMultiple finds an index that supports querying multiple types together.
@@ -497,28 +527,7 @@ func indexForMultiple(t *table, parentType string, childTypes []string, q data.Q
 	}
 
 	// Sort candidates (same logic as indexFor)
-	sort.Slice(candidates, func(i, j int) bool {
-		c1 := candidates[i]
-		c2 := candidates[j]
-
-		if c1.preferred != c2.preferred {
-			return c1.preferred
-		}
-
-		if c1.skMissing != c2.skMissing {
-			return c1.skMissing < c2.skMissing
-		}
-
-		if c1.skLength != c2.skLength {
-			return c1.skLength > c2.skLength
-		}
-
-		if consistencyType == Preferred && c1.index.canReadConsistently != c2.index.canReadConsistently {
-			return c1.index.canReadConsistently
-		}
-
-		return c1.index.name == nil
-	})
+	sort.Slice(candidates, candidateComparator(candidates, consistencyType))
 
 	return candidates[0].index, candidates[0].ascending, consistentRead(consistencyType, candidates[0].index.canReadConsistently), nil
 }

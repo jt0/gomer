@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -104,10 +105,8 @@ func Store(tableName string, config *Configuration /* resolver data.ItemResolver
 
 	var validOrDefaultChar = func(ch byte, _default byte) (byte, gomerr.Gomerr) {
 		if ch != 0 {
-			for _, sch := range []byte(SymbolChars) {
-				if ch == sch {
-					return ch, nil
-				}
+			if slices.Contains([]byte(SymbolChars), ch) {
+				return ch, nil
 			}
 			return 0, gomerr.Configuration("character " + string(ch) + " not in the valid set: " + SymbolChars)
 		}
@@ -161,34 +160,35 @@ func (t *table) prepare() gomerr.Gomerr {
 
 	t.indexes[""] = &t.index
 
-	for _, lsid := range output.Table.LocalSecondaryIndexes {
+	for _, lsIdx := range output.Table.LocalSecondaryIndexes {
 		lsi := &index{
-			name:                lsid.IndexName,
+			name:                lsIdx.IndexName,
+			local:               true,
 			canReadConsistently: true,
 			queryWildcardChar:   t.queryWildcardChar,
 		}
 
-		if ge := lsi.processKeySchema(lsid.KeySchema, attributeTypes); ge != nil {
+		if ge := lsi.processKeySchema(lsIdx.KeySchema, attributeTypes); ge != nil {
 			return ge
 		}
 
 		lsi.pk = t.pk // Overwrite w/ t.pk
 
-		t.indexes[*lsid.IndexName] = lsi
+		t.indexes[*lsIdx.IndexName] = lsi
 	}
 
-	for _, gsid := range output.Table.GlobalSecondaryIndexes {
+	for _, gsIdx := range output.Table.GlobalSecondaryIndexes {
 		gsi := &index{
-			name:                gsid.IndexName,
+			name:                gsIdx.IndexName,
 			canReadConsistently: false,
 			queryWildcardChar:   t.queryWildcardChar,
 		}
 
-		if ge := gsi.processKeySchema(gsid.KeySchema, attributeTypes); ge != nil {
+		if ge := gsi.processKeySchema(gsIdx.KeySchema, attributeTypes); ge != nil {
 			return ge
 		}
 
-		t.indexes[*gsid.IndexName] = gsi
+		t.indexes[*gsIdx.IndexName] = gsi
 	}
 
 	t.constraintTool = NewConstraintTool(t)
@@ -517,7 +517,7 @@ func copyFields(dst, src reflect.Value) {
 			} else {
 				copyFields(df, sf)
 			}
-		case reflect.Ptr:
+		case reflect.Pointer:
 			if f.Type.Elem().Kind() == reflect.Struct && !df.IsNil() && !sf.IsNil() && f.Type.Elem() != timeType {
 				copyFields(df.Elem(), sf.Elem())
 			} else {
@@ -869,7 +869,7 @@ func (t *table) _filterExpression(qv reflect.Value, idx *index, expressionAttrib
 		} else if qfv = qv.Field(i); qfv.IsZero() {
 			continue
 		}
-		if qfv.Kind() == reflect.Ptr {
+		if qfv.Kind() == reflect.Pointer {
 			qfv = qfv.Elem()
 		}
 		if qfv.Kind() == reflect.Struct {
