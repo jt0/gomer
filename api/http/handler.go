@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	"github.com/jt0/gomer/resource"
 )
@@ -12,14 +13,12 @@ func Handler(registry *resource.Registry, mux *http.ServeMux, middleware ...func
 	// Outermost middleware that initializes ResponseWriter and finalizes response.
 	outer := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Initialize buffered response writer
-			rw := &ResponseWriter{}
+			// Buffer the response, writing it to the actual ResponseWriter once the chain returns
+			rw, flush := AsResponseWriter(&w)
+			defer flush()
 
 			// Call middleware chain with response writer and registry
 			next.ServeHTTP(rw, r.WithContext(context.WithValue(r.Context(), resource.RegistryCtxKey, registry)))
-
-			// Write buffered response to actual ResponseWriter
-			rw.WriteTo(w)
 		})
 	}
 
@@ -33,8 +32,8 @@ func Handler(registry *resource.Registry, mux *http.ServeMux, middleware ...func
 // desired.
 func Chain(middleware ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(inner http.Handler) http.Handler {
-		for i := len(middleware) - 1; i >= 0; i-- {
-			inner = middleware[i](inner)
+		for _, m := range slices.Backward(middleware) {
+			inner = m(inner)
 		}
 		return inner
 	}

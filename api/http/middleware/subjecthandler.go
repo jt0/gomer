@@ -31,12 +31,8 @@ func SubjectHandler(subjectProvider SubjectProvider) func(http.Handler) http.Han
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			rw, ok := w.(*api.ResponseWriter)
-			if !ok {
-				rw = &api.ResponseWriter{}
-				defer rw.WriteTo(w)
-				w = rw
-			}
+			rw, flush := api.AsResponseWriter(&w)
+			defer flush()
 
 			subject, ge := subjectProvider(r)
 			if ge != nil {

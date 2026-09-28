@@ -15,12 +15,8 @@ import (
 func RenderErrorMiddleware(renderer func(gomerr.Gomerr) api.StatusCoder) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			rw, ok := w.(*api.ResponseWriter)
-			if !ok {
-				rw = &api.ResponseWriter{}
-				defer rw.WriteTo(w)
-				w = rw
-			}
+			rw, flush := api.AsResponseWriter(&w)
+			defer flush()
 
 			next.ServeHTTP(w, r)
 
@@ -35,7 +31,7 @@ func RenderErrorMiddleware(renderer func(gomerr.Gomerr) api.StatusCoder) func(ht
 				rendered := renderer(ge)
 				bytes, statusCode := api.BindToResponse(reflect.ValueOf(rendered), rw.Header(), "", r.Header.Get("Accept-Language"), rendered.StatusCode())
 				rw.WriteHeader(statusCode)
-				rw.Write(bytes)
+				rw.Overwrite(bytes)
 				rw.WriteError(nil)
 			}
 		})

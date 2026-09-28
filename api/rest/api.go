@@ -52,11 +52,8 @@ func NewApi(registry *resource.Registry, apiMiddleware ...func(http.Handler) htt
 
 	// "unroutable" handler for anything that doesn't match
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rw, ok := w.(*api.ResponseWriter)
-		if !ok {
-			rw = &api.ResponseWriter{}
-			defer rw.WriteTo(w)
-		}
+		rw, flush := api.AsResponseWriter(&w)
+		defer flush()
 		rw.WriteError(api.Unroutable())
 	}))
 

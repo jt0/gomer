@@ -26,12 +26,8 @@ func LocalRedirectIfCanonical(next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rw, ok := w.(*api.ResponseWriter)
-		if !ok {
-			rw = &api.ResponseWriter{}
-			defer rw.WriteTo(w)
-			w = rw
-		}
+		rw, flush := api.AsResponseWriter(&w)
+		defer flush()
 
 		next.ServeHTTP(rw, r)
 
@@ -47,7 +43,7 @@ func LocalRedirectIfCanonical(next http.Handler) http.Handler {
 			outHeader.Del("Location")
 			outHeader.Del("Content-Type")
 			outHeader.Del("Content-Length")
-			rw.Write(nil)
+			rw.Overwrite(nil)
 
 			next.ServeHTTP(w, r)
 		}

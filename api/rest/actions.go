@@ -9,12 +9,8 @@ import (
 )
 
 var DoResourceAction = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	rw, ok := w.(*api.ResponseWriter)
-	if !ok {
-		rw = &api.ResponseWriter{}
-		defer rw.WriteTo(w)
-		w = rw
-	}
+	rw, flush := api.AsResponseWriter(&w)
+	defer flush()
 
 	ac := middleware.ApiContextFor(r)
 	if ac == nil || ac.Instance == nil || ac.Action == nil {
