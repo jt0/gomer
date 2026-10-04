@@ -8,6 +8,7 @@ import (
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data/dataerr"
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/limit"
 	"github.com/jt0/gomer/structs"
 )
 
@@ -46,7 +47,9 @@ func CreateAction[I Instance[I]]() Action[I] {
 	return &createAction[I]{}
 }
 
-type createAction[I Instance[I]] struct{}
+type createAction[I Instance[I]] struct {
+	limiter limit.Limiter
+}
 
 func (*createAction[I]) Name() string {
 	return "resource.CreateAction"
@@ -64,7 +67,10 @@ func (*createAction[I]) Pre(ctx context.Context, i I) gomerr.Gomerr {
 	return i.PreCreate(ctx)
 }
 
-func (*createAction[I]) Do(ctx context.Context, i I) gomerr.Gomerr {
+func (a *createAction[I]) Do(ctx context.Context, i I) (ge gomerr.Gomerr) {
+	if a.limiter, ge = applyLimitAction(ctx, checkAndIncrement, i); ge != nil {
+		return ge
+	}
 	return i.registeredType().store.Create(ctx, i)
 }
 
@@ -72,8 +78,12 @@ func (*createAction[I]) Retry(ctx context.Context, i I, ge gomerr.Gomerr) gomerr
 	return i.RetryCreate(ctx, ge)
 }
 
-func (*createAction[I]) OnDoSuccess(ctx context.Context, i I) (I, gomerr.Gomerr) {
-	return i, i.PostCreate(ctx)
+func (a *createAction[I]) OnDoSuccess(ctx context.Context, i I) (I, gomerr.Gomerr) {
+	ge := i.PostCreate(ctx)
+	if ge == nil || errors.Is(ge, gomerr.NotAnError) {
+		saveLimiterIfDirty(ctx, a.limiter)
+	}
+	return i, ge
 }
 
 func (*createAction[I]) OnDoFailure(ctx context.Context, i I, ge gomerr.Gomerr) gomerr.Gomerr {
@@ -271,7 +281,9 @@ func DeleteAction[I Instance[I]]() Action[I] {
 	return &deleteAction[I]{}
 }
 
-type deleteAction[I Instance[I]] struct{}
+type deleteAction[I Instance[I]] struct {
+	limiter limit.Limiter
+}
 
 func (*deleteAction[I]) Name() string {
 	return "resource.DeleteAction"
@@ -289,7 +301,10 @@ func (*deleteAction[I]) Pre(ctx context.Context, i I) gomerr.Gomerr {
 	return i.PreDelete(ctx)
 }
 
-func (*deleteAction[I]) Do(ctx context.Context, i I) gomerr.Gomerr {
+func (a *deleteAction[I]) Do(ctx context.Context, i I) (ge gomerr.Gomerr) {
+	if a.limiter, ge = applyLimitAction(ctx, decrement, i); ge != nil {
+		return ge
+	}
 	return i.registeredType().store.Delete(ctx, i)
 }
 
@@ -297,8 +312,12 @@ func (*deleteAction[I]) Retry(ctx context.Context, i I, ge gomerr.Gomerr) gomerr
 	return i.RetryDelete(ctx, ge)
 }
 
-func (*deleteAction[I]) OnDoSuccess(ctx context.Context, i I) (I, gomerr.Gomerr) {
-	return i, i.PostDelete(ctx)
+func (a *deleteAction[I]) OnDoSuccess(ctx context.Context, i I) (I, gomerr.Gomerr) {
+	ge := i.PostDelete(ctx)
+	if ge == nil || errors.Is(ge, gomerr.NotAnError) {
+		saveLimiterIfDirty(ctx, a.limiter)
+	}
+	return i, ge
 }
 
 func (*deleteAction[I]) OnDoFailure(ctx context.Context, i I, ge gomerr.Gomerr) gomerr.Gomerr {

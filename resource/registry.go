@@ -79,8 +79,8 @@ func Register[I Instance[I]](ctx context.Context, opts ...Option) {
 	}
 
 	rt.newCollection = func(proto any) AnyCollection {
-		i, ok := proto.(I)
-		if !ok || i.registeredType() != rt {
+		i, matches := proto.(I)
+		if !matches || i.registeredType() != rt {
 			panic(gomerr.Configuration("collection must be created with its own instance type").String())
 		}
 		return NewCollection(i)

@@ -3,7 +3,6 @@ package resource
 import (
 	"context"
 
-	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/limit"
 	"github.com/jt0/gomer/log"
@@ -43,53 +42,20 @@ func decrement(limiter limit.Limiter, limited limit.Limited) gomerr.Gomerr {
 	return nil
 }
 
-// resourceLike is an internal interface that abstracts over generic Resource types.
-type resourceLike interface {
-	Metadata() *registeredType
-	Subject(context.Context) any
-}
-
-// instanceLike is an internal interface that abstracts over generic Instance types.
-type instanceLike interface {
-	resourceLike
-	data.Persistable
-	Id() string
-}
-
-func applyLimitAction(ctx context.Context, limitAction limitAction, i resourceLike) (limit.Limiter, gomerr.Gomerr) {
-	limited, ok := i.(limit.Limited)
+func applyLimitAction[I Instance[I]](_ context.Context, limitAction limitAction, i I) (limit.Limiter, gomerr.Gomerr) {
+	limited, ok := any(i).(limit.Limited)
 	if !ok {
 		return nil, nil
 	}
 
 	limiter, ge := limited.Limiter()
 	if ge != nil {
-		return nil, gomerr.Configuration(i.Metadata().instanceName + " did not provide a Limiter for itself.").Wrap(ge)
+		return nil, gomerr.Configuration(i.TypeName() + " did not provide a Limiter for itself.").Wrap(ge)
+	} else if limiter == nil {
+		return nil, nil
 	}
 
-	li, ok := limiter.(instanceLike)
-	if !ok {
-		return nil, gomerr.Configuration("limiter from " + i.Metadata().instanceName + " does not implement resource.Instance")
-	}
-
-	// If the registeredType isn't set, then this is a New object and needs to be loaded
-	var loaded bool
-	if li.Metadata() == nil {
-		// Note: this path requires a global registry lookup which is not available
-		// in the generic design. Consider requiring pre-initialized limiters.
-		return nil, gomerr.Configuration("limiter must be pre-initialized with registry")
-	}
-
-	if ge = limitAction(limiter, limited); ge != nil {
-		return nil, ge
-	}
-
-	// If we didn't load the updatable, we'll let other code handle the save
-	if !loaded {
-		limiter = nil
-	}
-
-	return limiter, nil
+	return limiter, limitAction(limiter, limited)
 }
 
 func saveLimiterIfDirty(ctx context.Context, limiter limit.Limiter) {
@@ -98,10 +64,13 @@ func saveLimiterIfDirty(ctx context.Context, limiter limit.Limiter) {
 		return
 	}
 
-	li := limiter.(instanceLike) // Should always be true
-	ge := li.Metadata().store.Update(ctx, li, nil)
+	li := limiter.(AnyInstance) // Should always be true
+	//_, ge := b.DoAction(ctx, ReadAction[I]())
+
+	ge := li.RegisteredType().Store().Update(ctx, li, li)
+
 	if ge != nil {
-		log.Logger().Error("failed to save limiter", "type", li.Metadata().instanceName, "id", li.Id(), "error", ge)
+		log.Logger().Error("failed to save limiter", "type", li.TypeName(), "id", li.Id(), "error", ge)
 		return
 	}
 
