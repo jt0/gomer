@@ -96,26 +96,21 @@ func Map(keyConstraint Constraint, valueConstraint Constraint) Constraint {
 		}
 
 		iter := ttv.MapRange()
-		var errors []gomerr.Gomerr
+		var eb gomerr.ErrorBatch
 		for iter.Next() {
 			ki := iter.Key().Interface()
 			target := fmt.Sprintf("%v", ki)
 			if keyConstraint != nil {
-				if ge := keyConstraint.Validate(target, ki); ge != nil {
-					errors = append(errors, ge)
-				}
+				eb.Capture(keyConstraint.Validate(target, ki))
 			}
 			if valueConstraint != nil {
 				if UseBracketsForContainedTargets {
 					target = "[" + target + "]"
 				}
-				if ge := valueConstraint.Validate(target, iter.Value().Interface()); ge != nil {
-					errors = append(errors, ge)
-				}
+				eb.Capture(valueConstraint.Validate(target, iter.Value().Interface()))
 			}
 		}
-
-		return gomerr.Batcher(errors)
+		return eb.GomerrOrNil()
 	}), keyConstraint, valueConstraint)
 }
 
@@ -136,7 +131,7 @@ func Entries(entryConstraint Constraint) Constraint {
 		}
 
 		iter := ttv.MapRange()
-		var errors []gomerr.Gomerr
+		var eb gomerr.ErrorBatch
 		for iter.Next() {
 			var target string
 			if UseBracketsForContainedTargets {
@@ -144,12 +139,9 @@ func Entries(entryConstraint Constraint) Constraint {
 			} else {
 				target = fmt.Sprintf("%v", iter.Key().Interface())
 			}
-			if ge := entryConstraint.Validate(target, Entry{iter.Key().Interface(), iter.Value().Interface()}); ge != nil {
-				errors = append(errors, ge)
-			}
+			eb.Capture(entryConstraint.Validate(target, Entry{iter.Key().Interface(), iter.Value().Interface()}))
 		}
-
-		return gomerr.Batcher(errors)
+		return eb.GomerrOrNil()
 	}), entryConstraint)
 }
 
@@ -164,7 +156,7 @@ func Elements(elementsConstraint Constraint) Constraint {
 			return gomerr.Unprocessable("input is not a slice or array", toTest)
 		}
 
-		var errors []gomerr.Gomerr
+		var eb gomerr.ErrorBatch
 		for i := 0; i < ttv.Len(); i++ {
 			var target string
 			if UseBracketsForContainedTargets {
@@ -172,12 +164,9 @@ func Elements(elementsConstraint Constraint) Constraint {
 			} else {
 				target = fmt.Sprintf("%d", i)
 			}
-			if ge := elementsConstraint.Validate(target, ttv.Index(i).Interface()); ge != nil {
-				errors = append(errors, ge)
-			}
+			eb.Capture(elementsConstraint.Validate(target, ttv.Index(i).Interface()))
 		}
-
-		return gomerr.Batcher(errors)
+		return eb.GomerrOrNil()
 	}), elementsConstraint)
 }
 

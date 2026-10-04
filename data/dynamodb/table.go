@@ -281,12 +281,22 @@ func (t *table) Update(ctx context.Context, p data.Persistable, u data.Persistab
 	return t.put(ctx, p, validate, false)
 }
 
-var conditionalCheckFailure = constraint.New("uniqueKeys", nil, func(toTest any) gomerr.Gomerr {
-	if ccf := gomerr.ErrorAs[*types.ConditionalCheckFailedException](toTest.(error)); ccf != nil {
-		return constraint.NotSatisfied(ccf)
+// uniqueNode and uniqueKeysNode name the two uniqueness failures the table reports, so a renderer can
+// tell a duplicate value from a key collision.
+var (
+	uniqueNode     = constraint.Fail("unique")
+	uniqueKeysNode = constraint.Fail("uniqueKeys")
+)
+
+func conditionalCheckFailure(err error) gomerr.Gomerr {
+	if ccf, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok {
+		nse := constraint.NotSatisfied(ccf)
+		nse.Node = uniqueKeysNode
+		nse.Expected = "unique keys"
+		return nse
 	}
 	return nil
-})
+}
 
 func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints bool, ensureUniqueId bool) gomerr.Gomerr {
 	// Validate constraints using tool framework
@@ -345,7 +355,7 @@ func (t *table) put(ctx context.Context, p data.Persistable, validateConstraints
 	}
 	_, err = t.ddb.PutItem(ctx, input) // TODO:p3 look at result data to track capacity or other info?
 	if err != nil {
-		if ge := conditionalCheckFailure.Test(err); ge != nil {
+		if ge := conditionalCheckFailure(err); ge != nil {
 			return ge
 		}
 
@@ -688,7 +698,10 @@ func (t *table) checkFieldTupleUnique(ctx context.Context, p data.Persistable, f
 
 			q.SetResults([]any{existing})
 
-			return constraint.NotSatisfied(p).AddAttribute("existing", existing)
+			nse := constraint.NotSatisfied(p)
+			nse.Node = uniqueNode
+			nse.Expected = "a unique " + strings.Join(fields, ",")
+			return nse.AddAttribute("existing", existing)
 		}
 
 		// No more pages, confirmed unique

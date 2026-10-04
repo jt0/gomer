@@ -134,13 +134,11 @@ var builders = map[string]any{
 }
 
 func RegisterEach(constraintsAndBuilders map[string]any) gomerr.Gomerr {
-	var errors []gomerr.Gomerr
+	var eb gomerr.ErrorBatch
 	for name, cob := range constraintsAndBuilders {
-		if ge := Register(name, cob); ge != nil {
-			errors = append(errors, ge)
-		}
+		eb.Capture(Register(name, cob))
 	}
-	return gomerr.Batcher(errors)
+	return eb.GomerrOrNil()
 }
 
 // Register adds a custom constraint or builder to the registry. The name must start with '$'

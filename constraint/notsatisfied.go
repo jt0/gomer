@@ -12,5 +12,5 @@ type NotSatisfiedError struct {
 }
 
 func NotSatisfied(toTest any) *NotSatisfiedError {
-	return gomerr.Build(new(NotSatisfiedError), toTest).(*NotSatisfiedError)
+	return gomerr.BuildWithoutStack(new(NotSatisfiedError), toTest).(*NotSatisfiedError)
 }

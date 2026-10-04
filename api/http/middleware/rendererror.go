@@ -24,8 +24,8 @@ func RenderErrorMiddleware(renderer func(gomerr.Gomerr) api.StatusCoder) func(ht
 				return
 			}
 
-			if ge := gomerr.ErrorAs[gomerr.Gomerr](rw.Error()); ge != nil {
-				if ue := gomerr.ErrorAs[*api.UnroutableError](ge); ue != nil {
+			if ge, ok := errors.AsType[gomerr.Gomerr](rw.Error()); ge != nil {
+				if ue, ok := errors.AsType[*api.UnroutableError](ge); ue != nil {
 					ue.Route = r.Method + " " + r.URL.Path
 				}
 				rendered := renderer(ge)

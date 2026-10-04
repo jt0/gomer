@@ -34,10 +34,11 @@ func newPersistableType(table *table, persistableName string, pType reflect.Type
 		resolver:         resolver(pType),
 	}
 
-	if errors := pt.processFields(pType, "", table, make([]gomerr.Gomerr, 0)); len(errors) > 0 {
-		return nil, gomerr.Configuration("'db' tag errors found for type: " + persistableName).Wrap(gomerr.Batcher(errors))
+	var eb gomerr.ErrorBatch
+	pt.processFields(pType, "", table, &eb)
+	if ge := eb.GomerrOrNil(); ge != nil {
+		return nil, gomerr.Configuration("'db' tag errors found for type: " + persistableName).Wrap(ge)
 	}
-
 	return pt, nil
 }
 
@@ -59,23 +60,21 @@ func resolver(pt reflect.Type) func(any) (any, gomerr.Gomerr) {
 	}
 }
 
-func (pt *persistableType) processFields(structType reflect.Type, fieldPath string, table *table, errors []gomerr.Gomerr) []gomerr.Gomerr {
+func (pt *persistableType) processFields(structType reflect.Type, fieldPath string, table *table, eb *gomerr.ErrorBatch) {
 	for field := range structType.Fields() {
 		fieldName := field.Name
 
 		if field.Type.Kind() == reflect.Struct && field.Anonymous {
-			errors = pt.processFields(field.Type, fieldPath+fieldName+".", table, errors)
+			pt.processFields(field.Type, fieldPath+fieldName+".", table, eb)
 		} else if unicode.IsLower([]rune(fieldName)[0]) {
 			continue
 		} else {
 			pt.processNameTag(fieldName, field.Tag.Get("db.name"))
 
-			errors = pt.processConstraintsTag(fieldName, field.Tag.Get("db.constraints"), errors)
-			errors = pt.processKeysTag(fieldName, field.Tag.Get("db.keys"), table.indexes, errors)
+			pt.processConstraintsTag(fieldName, field.Tag.Get("db.constraints"), eb)
+			pt.processKeysTag(fieldName, field.Tag.Get("db.keys"), table.indexes, eb)
 		}
 	}
-
-	return errors
 }
 
 func (pt *persistableType) processNameTag(fieldName string, tag string) {
@@ -86,14 +85,15 @@ func (pt *persistableType) processNameTag(fieldName string, tag string) {
 	pt.dbNames[fieldName] = tag
 }
 
-func (pt *persistableType) processConstraintsTag(fieldName string, tag string, errors []gomerr.Gomerr) []gomerr.Gomerr {
+func (pt *persistableType) processConstraintsTag(fieldName string, tag string, eb *gomerr.ErrorBatch) {
 	if tag == "" {
-		return errors
+		return
 	}
 
 	constraints := constraintsRegexp.FindAllStringSubmatch(tag, -1)
 	if constraints == nil {
-		return append(errors, gomerr.Configuration("invalid `db.constraints` value: "+tag).AddAttribute("field", fieldName))
+		eb.Capture(gomerr.Configuration("invalid `db.constraints` value: "+tag).AddAttribute("field", fieldName))
+		return
 	}
 
 	for _, c := range constraints {
@@ -111,8 +111,6 @@ func (pt *persistableType) processConstraintsTag(fieldName string, tag string, e
 			}
 		}
 	}
-
-	return errors
 }
 
 var ddbKeyStatementRegexp = regexp.MustCompile(`(!)?([+-])?(?:([\w-.]+):)?(pk|sk)(?:.(\d))?(?:=(_|'\w+'))?`)
@@ -125,22 +123,22 @@ var ddbKeyStatementRegexp = regexp.MustCompile(`(!)?([+-])?(?:([\w-.]+):)?(pk|sk
 // for a specific index key and redefine them. This is needed in single-table designs where a child
 // type shares an index with its parent but requires different key composition for queries to work
 // correctly against that type. Resets must appear before any non-reset statements in the tag.
-func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes map[string]*index, errors []gomerr.Gomerr) []gomerr.Gomerr {
+func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes map[string]*index, eb *gomerr.ErrorBatch) {
 	if tag == "" {
-		return errors
+		return
 	}
 
 	var resetsComplete bool
 	for keyStatement := range strings.SplitSeq(strings.ReplaceAll(tag, " ", ""), ",") {
 		groups := ddbKeyStatementRegexp.FindStringSubmatch(keyStatement)
 		if groups == nil {
-			errors = append(errors, gomerr.Configuration("invalid `db.keys` value: "+keyStatement).AddAttribute("field", fieldName))
+			eb.Capture(gomerr.Configuration("invalid `db.keys` value: "+keyStatement).AddAttribute("field", fieldName))
 			continue
 		}
 
 		idx, ok := indexes[groups[3]]
 		if !ok {
-			errors = append(errors, gomerr.Configuration("undefined index: "+groups[3]).AddAttribute("field", fieldName))
+			eb.Capture(gomerr.Configuration("undefined index: "+groups[3]).AddAttribute("field", fieldName))
 			continue
 		}
 
@@ -159,7 +157,7 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 		kfName := fieldName   // Use local variable to avoid modifying parameter across iterations
 		if groups[6] == "_" { // Underscore indicates the fields in idx's key should be re-evaluated as key fields
 			if resetsComplete {
-				errors = append(errors, gomerr.Configuration("resets must be ordered first in a tag: "+tag).AddAttribute("field", fieldName))
+				eb.Capture(gomerr.Configuration("resets must be ordered first in a tag: "+tag).AddAttribute("field", fieldName))
 				continue
 			}
 			notKeyFields := make(map[string]struct{})
@@ -189,11 +187,9 @@ func (pt *persistableType) processKeysTag(fieldName string, tag string, indexes 
 		var ge gomerr.Gomerr
 		key.keyFieldsByPersistable[pt.name], ge = insertAtIndex(key.keyFieldsByPersistable[pt.name], &kf, partIndex)
 		if ge != nil {
-			errors = append(errors, ge.AddAttribute("field", fieldName).AddAttribute("idx", idx.friendlyName()))
+			eb.Capture(ge.AddAttribute("field", fieldName).AddAttribute("idx", idx.friendlyName()))
 		}
 	}
-
-	return errors
 }
 
 func identifyKeyFields(indexes map[string]*index, resetKey *keyAttribute, persistable string, notKeyFields map[string]struct{}) {

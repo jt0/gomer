@@ -33,16 +33,23 @@ type Gomerr interface {
 	isFromBuildFunc() bool
 }
 
+// Deprecated: use errors.AsType instead
 func ErrorAs[E error](err error) (e E) {
-	errors.As(err, &e)
+	e, _ = errors.AsType[E](err)
 	return
 }
 
-var gomerrType = reflect.TypeOf((*Gomerr)(nil)).Elem()
+var gomerrType = reflect.TypeFor[Gomerr]()
 
 func Build(g Gomerr, attributes ...any) Gomerr {
 	build(reflect.ValueOf(g).Elem(), attributes, newGomerr(4, g))
+	return g
+}
 
+// BuildWithoutStack is Build for errors caused by a caller's input rather than by code, such as a
+// failed validation. A stack there shows only library internals and costs a runtime.Callers.
+func BuildWithoutStack(g Gomerr, attributes ...any) Gomerr {
+	build(reflect.ValueOf(g).Elem(), attributes, &gomerr{self: g})
 	return g
 }
 
@@ -65,7 +72,7 @@ func build(v reflect.Value, attributes []any, gomerr *gomerr) (attributesProcess
 			// follow anonymous structs or pointers to structs
 			if fv.Type().Kind() == reflect.Struct {
 				attributesProcessed += build(fv, attributes[attributesProcessed:], gomerr)
-			} else if fv.Type().Kind() == reflect.Ptr && fv.Type().Elem().Kind() == reflect.Struct {
+			} else if fv.Type().Kind() == reflect.Pointer && fv.Type().Elem().Kind() == reflect.Struct {
 				attributesProcessed += build(fv.Elem(), attributes[attributesProcessed:], gomerr)
 			}
 		}
@@ -109,7 +116,7 @@ func fillStack(stackSkip int) []string {
 
 	stack := make([]string, depth)
 	frames := runtime.CallersFrames(callers)
-	for i := 0; i < depth; i++ {
+	for i := range depth {
 		frame, _ := frames.Next()
 		function := frame.Function[strings.LastIndexByte(frame.Function, '/')+1:]
 		stack[i] = fmt.Sprintf("%s -- %s:%d", function, frame.File, frame.Line)
@@ -117,19 +124,6 @@ func fillStack(stackSkip int) []string {
 
 	return stack
 }
-
-// func relative(file string) string {
-// 	_, thisFile, _, _ := runtime.Caller(0)
-//
-// 	gomerPath := thisFile[:strings.LastIndex(thisFile, "/gomerr/")]
-// 	basePath := gomerPath[:strings.LastIndex(gomerPath, "/")]
-// 	rel, err := filepath.Rel(basePath, file)
-// 	if err != nil {
-// 		return file
-// 	}
-//
-// 	return strings.TrimLeft(rel, "./")
-// }
 
 func (g *gomerr) Wrap(err error) Gomerr {
 	if g.wrapped != nil {
@@ -235,8 +229,6 @@ func (g *gomerr) Is(err error) bool {
 	return reflect.TypeOf(g.self) == reflect.TypeOf(err)
 }
 
-// Implicitly used by errors.Is()/errors.As()
-
 func (g *gomerr) Unwrap() error {
 	return g.wrapped
 }
@@ -290,10 +282,12 @@ func (g *gomerr) ToMap() map[string]any {
 					w["_error"] = wm
 				}
 			}
-			w["_stack"] = g.stack // provide a stack for the deepest error (non-Gomerr)
+			if len(g.stack) > 0 {
+				w["_stack"] = g.stack // provide a stack for the deepest error (non-Gomerr)
+			}
 		}
 		m["_wrapped"] = w
-	} else {
+	} else if len(g.stack) > 0 {
 		m["_stack"] = g.stack // provide a stack for the deepest error (Gomerr)
 	}
 

@@ -1,6 +1,7 @@
 package constraint
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/jt0/gomer/gomerr"
@@ -51,14 +52,14 @@ func Or(constraints ...Constraint) Constraint {
 	}
 
 	return dynamicIfNeeded(New(orOp, constraints, func(toTest any) gomerr.Gomerr {
-		var errors []gomerr.Gomerr
+		var eb gomerr.ErrorBatch
 		for _, c := range constraints {
 			ge := c.Test(toTest)
 			if ge == nil {
 				return nil // any success results in success
 			}
 
-			if nse := gomerr.ErrorAs[*NotSatisfiedError](ge); nse != nil {
+			if nse, ok := errors.AsType[*NotSatisfiedError](ge); ok && nse != nil {
 				if nse.Constraint == nil {
 					nse.Constraint = c
 				} else if nct := nse.Constraint.Type(); nct == "nil" || nct == "zero" || strings.HasPrefix(nct, "fieldTest_") {
@@ -69,12 +70,12 @@ func Or(constraints ...Constraint) Constraint {
 				} else if _, isDynamicConstraint := c.(*dynamicConstraint); isDynamicConstraint && c.Type() != "and" && c.Type() != "or" {
 					nse.Constraint = c
 				}
-			} else if _, ok := ge.AttributeLookup("constraint"); !ok {
+			} else if _, ok = ge.AttributeLookup("constraint"); !ok {
 				ge = ge.AddAttribute("constraint", c)
 			}
-			errors = append(errors, ge)
+			eb.Capture(ge)
 		}
-		return gomerr.Batcher(errors)
+		return eb.GomerrOrNil()
 	}), constraints...)
 }
 

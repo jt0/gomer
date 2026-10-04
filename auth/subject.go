@@ -28,19 +28,11 @@ func (b *basicSubject) Principal(principalType PrincipalType) Principal {
 }
 
 func (b *basicSubject) Release(errored bool) gomerr.Gomerr {
-	errors := make([]gomerr.Gomerr, 0)
+	var eb gomerr.ErrorBatch
 	for _, principal := range b.principals {
-		ge := principal.Release(errored)
-		if ge != nil {
-			errors = append(errors, ge)
-		}
+		eb.Capture(principal.Release(errored))
 	}
-
-	if len(errors) > 0 {
-		return gomerr.Batcher(errors)
-	}
-
-	return nil
+	return eb.GomerrOrNil()
 }
 
 type PrincipalType string

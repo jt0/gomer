@@ -39,11 +39,12 @@ func ApplyTools(v any, tc ToolContext, tools ...*Tool) gomerr.Gomerr {
 
 func Preprocess(v any, tools ...*Tool) gomerr.Gomerr {
 	vt := flect.IndirectType(v)
-	ps, errors := process(vt, tools...)
+	var eb gomerr.ErrorBatch
+	ps := process(vt, &eb, tools...)
 	if ps == nil {
 		return gomerr.Configuration("invalid type: must be a struct or pointer to struct").AddAttribute("type", vt.String())
 	}
-	return gomerr.Batcher(errors)
+	return eb.GomerrOrNil()
 }
 
 func NewTool(toolType string, ap ApplierProvider, dp DirectiveProvider) *Tool {
@@ -108,22 +109,22 @@ func (s StructTagDirectiveProvider) Get(structField reflect.StructField) (string
 var (
 	idGen           = id.NewBase36IdGenerator(4, id.Chars)
 	preparedStructs = map[string]*preparedStruct{}
-	timeType        = reflect.TypeOf((*time.Time)(nil)).Elem()
+	timeType        = reflect.TypeFor[time.Time]()
 )
 
-func process(st reflect.Type, tools ...*Tool) (*preparedStruct, []gomerr.Gomerr) {
+func process(st reflect.Type, eb *gomerr.ErrorBatch, tools ...*Tool) *preparedStruct {
 	for k := st.Kind(); k != reflect.Struct; k = st.Kind() {
 		switch st.Kind() {
-		case reflect.Array, reflect.Map, reflect.Ptr, reflect.Slice:
+		case reflect.Array, reflect.Map, reflect.Pointer, reflect.Slice:
 			st = st.Elem()
 		default:
-			return nil, nil
+			return nil
 		}
 	}
 
 	// Time structs are a special case, ignore.
 	if st == timeType {
-		return nil, nil
+		return nil
 	}
 
 	var toolsForStruct []*Tool
@@ -137,7 +138,7 @@ func process(st reflect.Type, tools ...*Tool) (*preparedStruct, []gomerr.Gomerr)
 		}
 		if len(toolsForStruct) == 0 {
 			// No work to do, return
-			return ps, nil
+			return ps
 		}
 	} else {
 		toolsForStruct = tools
@@ -151,10 +152,7 @@ func process(st reflect.Type, tools ...*Tool) (*preparedStruct, []gomerr.Gomerr)
 
 	// TODO: descend into non-exported if tag value provided?
 
-	errors := make([]gomerr.Gomerr, 0)
-	for i := 0; i < st.NumField(); i++ {
-		sf := st.Field(i)
-
+	for sf := range st.Fields() {
 		if sf.Tag.Get("structs") == "ignore" {
 			continue
 		}
@@ -162,16 +160,15 @@ func process(st reflect.Type, tools ...*Tool) (*preparedStruct, []gomerr.Gomerr)
 		sft := sf.Type
 		switch sft.Kind() {
 		case reflect.Struct:
-			if subStruct, subErrors := process(sf.Type, toolsForStruct...); len(subErrors) > 0 {
-				errors = append(errors, subErrors...)
-			} else if sf.Anonymous {
+			if subStruct := process(sf.Type, eb, toolsForStruct...); subStruct != nil && sf.Anonymous {
 				for _, f := range subStruct.fields {
 					ps.addAppliers(f.name, f.appliers)
 				}
 			}
-		case reflect.Array, reflect.Map, reflect.Ptr, reflect.Slice:
-			_, subErrors := process(sft.Elem(), tools...)
-			errors = append(errors, subErrors...)
+		case reflect.Array, reflect.Map, reflect.Pointer, reflect.Slice:
+			process(sft.Elem(), eb, tools...)
+		default:
+			// nothing to do with other kinds
 		}
 
 		// TODO: Is there a case where we want to interpret a directive on this attribute?
@@ -182,7 +179,7 @@ func process(st reflect.Type, tools ...*Tool) (*preparedStruct, []gomerr.Gomerr)
 		appliers := map[string]Applier{}
 		for _, tool := range toolsForStruct {
 			if applier, ge := tool.applierFor(st, sf); ge != nil {
-				errors = append(errors, ge)
+				eb.Capture(ge)
 			} else if applier != nil {
 				appliers[tool.Id()] = applier
 			}
@@ -191,7 +188,7 @@ func process(st reflect.Type, tools ...*Tool) (*preparedStruct, []gomerr.Gomerr)
 		ps.addAppliers(sf.Name, appliers)
 	}
 
-	return ps, errors
+	return ps
 }
 
 type preparedStruct struct {
@@ -223,12 +220,14 @@ func (ps *preparedStruct) addAppliers(fieldName string, appliersToAdd map[string
 
 // ApplyTools will apply the tool associated with each tool type in the appliers slice, in order, to each value in sv.
 func (ps *preparedStruct) applyTools(sv reflect.Value, tc ToolContext, tools ...*Tool) gomerr.Gomerr {
-	var errors []gomerr.Gomerr
+	var eb gomerr.ErrorBatch
 	for _, tool := range tools {
 		if !ps.applied[tool.Id()] {
 			// TODO:p3 verify all tools applied....
-			if _, pErrors := process(sv.Type(), tools...); len(pErrors) > 0 {
-				return gomerr.Batcher(pErrors)
+			var pEb gomerr.ErrorBatch
+			process(sv.Type(), &pEb, tools...)
+			if ge := pEb.GomerrOrNil(); ge != nil {
+				return ge
 			}
 		}
 
@@ -255,9 +254,9 @@ func (ps *preparedStruct) applyTools(sv reflect.Value, tc ToolContext, tools ...
 					_ = ge.AddAttribute("field", fieldName)
 				}
 
-				errors = append(errors, ge)
+				eb.Capture(ge)
 			}
 		}
 	}
-	return gomerr.Batcher(errors)
+	return eb.GomerrOrNil()
 }

@@ -1,6 +1,7 @@
 package structs
 
 import (
+	"errors"
 	"reflect"
 	"regexp"
 	"strings"
@@ -195,23 +196,30 @@ func (a ifThenElseApplier) Apply(sv reflect.Value, fv reflect.Value, tc ToolCont
 
 func leftRight(directive string, tool *Tool, st reflect.Type, sf reflect.StructField, tIndex int) (Applier, gomerr.Gomerr) {
 	var left Applier
-	var leftGe gomerr.Gomerr
+	var eb gomerr.ErrorBatch
 	if lhs := directive[:tIndex]; len(lhs) > 0 {
-		left, leftGe = applyScopes(tool.applierProvider, st, sf, lhs)
-		if leftGe != nil && gomerr.ErrorAs[*gomerr.ConfigurationError](leftGe) == nil {
-			leftGe = gomerr.Configuration("unable to process directive: " + directive).Wrap(leftGe)
+		var ge gomerr.Gomerr
+		left, ge = applyScopes(tool.applierProvider, st, sf, lhs)
+		if ce, ok := errors.AsType[*gomerr.ConfigurationError](ge); ok {
+			eb.Capture(ce)
+		} else if ge != nil {
+			eb.Capture(gomerr.Configuration("unable to process directive: " + directive).Wrap(ge))
 		}
 	}
 	var right Applier
-	var rightGe gomerr.Gomerr
 	if rhs := directive[tIndex+1:]; len(rhs) > 0 {
-		right, rightGe = applyScopes(tool.applierProvider, st, sf, rhs)
-		if rightGe != nil && gomerr.ErrorAs[*gomerr.ConfigurationError](rightGe) == nil {
-			rightGe = gomerr.Configuration("unable to process directive: " + directive).Wrap(rightGe)
+		var ge gomerr.Gomerr
+		right, ge = applyScopes(tool.applierProvider, st, sf, rhs)
+		if ce, ok := errors.AsType[*gomerr.ConfigurationError](ge); ok {
+			eb.Capture(ce)
+		} else if ge != nil {
+			eb.Capture(gomerr.Configuration("unable to process directive: " + directive).Wrap(ge))
 		}
 	}
-	if ge := gomerr.Batch(leftGe, rightGe); ge != nil || (left == nil && right == nil) {
-		return nil, ge
+	if eb.HasErrors() {
+		return nil, eb.GomerrOrNil()
+	} else if left == nil && right == nil {
+		return nil, nil
 	}
 
 	// TODO:p0 special case "$_b64[encode_type]&[output location]"
@@ -249,7 +257,7 @@ func (a leftTestRightApplier) Apply(sv reflect.Value, fv reflect.Value, tc ToolC
 
 	ge := a.right.Apply(sv, fv, tc)
 	if ge != nil {
-		return gomerr.Batch(ge, leftGe) // Okay if leftGe is nil
+		return gomerr.ToGomerrOrNil(ge, leftGe) // Okay if leftGe is nil
 	} else if leftGe != nil {
 		log.Logger().Debug("left-side applier failed, but right side succeeded", "leftError", leftGe)
 	}

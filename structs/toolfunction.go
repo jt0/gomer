@@ -29,13 +29,11 @@ func init() {
 }
 
 func RegisterToolFunctions(functions map[string]ToolFunction) gomerr.Gomerr {
-	var errors []gomerr.Gomerr
+	var eb gomerr.ErrorBatch
 	for name, function := range functions {
-		if ge := RegisterToolFunction(name, function); ge != nil {
-			errors = append(errors, ge)
-		}
+		eb.Capture(RegisterToolFunction(name, function))
 	}
-	return gomerr.Batcher(errors)
+	return eb.GomerrOrNil()
 }
 
 func RegisterToolFunction(name string, function ToolFunction) gomerr.Gomerr {
