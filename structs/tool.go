@@ -2,6 +2,7 @@ package structs
 
 import (
 	"reflect"
+	"sync"
 	"time"
 	"unicode"
 
@@ -19,28 +20,90 @@ func ApplyTools(v any, tc ToolContext, tools ...*Tool) gomerr.Gomerr {
 	}
 
 	vt := vv.Type()
-	vts := vt.String()
 	if vt.Kind() != reflect.Struct {
-		return gomerr.Configuration("can only apply tools to struct (or pointer to struct) types").AddAttribute("type", vts)
+		return gomerr.Configuration("can only apply tools to struct (or pointer to struct) types").AddAttribute("type", vt.String())
 	}
 
-	ps, ok := preparedStructs[vts]
-	if !ok {
-		ps = &preparedStruct{
-			typeName: vts,
-			fields:   make([]*field, 0, vt.NumField()),
-			applied:  make(map[string]bool, len(tools)),
+	appliers, ge := prepare(vt, tools...)
+	if ge != nil {
+		return ge
+	}
+
+	return apply(vv, tc, appliers)
+}
+
+type fieldApplier struct {
+	name    string
+	applier Applier
+}
+
+// prepare prepares st for the given tools while holding mu, returning an immutable
+// snapshot of the (field, applier) pairs to run. preparedStructs and each preparedStruct
+// are read and mutated only under the lock. Process never runs an Applier, so a first
+// concurrent use of a type through any tool (the bind in/out tools included) cannot race
+// on the shared map or observe a half-built preparedStruct. Returning a snapshot lets
+// the appliers run without the lock, so a tool whose Apply recurses into ApplyTools does
+// not deadlock on it.
+func prepare(st reflect.Type, tools ...*Tool) ([]fieldApplier, gomerr.Gomerr) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	var eb gomerr.ErrorBatch
+	ps := process(st, &eb, tools...)
+	if ge := eb.GomerrOrNil(); ge != nil {
+		return nil, ge
+	}
+	if ps == nil {
+		return nil, nil
+	}
+
+	var plan []fieldApplier
+	for _, tool := range tools {
+		for _, f := range ps.fields {
+			if applier, ok := f.appliers[tool.Id()]; ok {
+				plan = append(plan, fieldApplier{f.name, applier})
+			}
 		}
-		preparedStructs[vts] = ps
 	}
+	return plan, nil
+}
 
-	return ps.applyTools(vv, tc, tools...)
+func apply(sv reflect.Value, tc ToolContext, plan []fieldApplier) gomerr.Gomerr {
+	var eb gomerr.ErrorBatch
+	for _, fa := range plan {
+		fv := sv.FieldByName(fa.name) // fv should always be valid
+		ge := fa.applier.Apply(sv, fv, tc)
+		if ge == nil {
+			continue
+		}
+
+		var fieldName string
+		if keyAttr, exists := ge.AttributeLookup("key"); !exists {
+			fieldName = fa.name
+		} else if key := keyAttr.(string); len(key) > 0 {
+			fieldName = fa.name + "." + key
+			_ = ge.DeleteAttribute("key")
+		} else {
+			fieldName = fa.name
+		}
+
+		if fieldAttr, exists := ge.AttributeLookup("field"); exists {
+			_ = ge.ReplaceAttribute("field", fieldName+"."+fieldAttr.(string))
+		} else {
+			_ = ge.AddAttribute("field", fieldName)
+		}
+
+		eb.Capture(ge)
+	}
+	return eb.GomerrOrNil()
 }
 
 func Preprocess(v any, tools ...*Tool) gomerr.Gomerr {
 	vt := flect.IndirectType(v)
 	var eb gomerr.ErrorBatch
+	mu.Lock()
 	ps := process(vt, &eb, tools...)
+	mu.Unlock()
 	if ps == nil {
 		return gomerr.Configuration("invalid type: must be a struct or pointer to struct").AddAttribute("type", vt.String())
 	}
@@ -51,7 +114,8 @@ func NewTool(toolType string, ap ApplierProvider, dp DirectiveProvider) *Tool {
 	return &Tool{toolType + "_" + idGen.Generate(), toolType, ap, dp}
 }
 
-// Tool contains references to some behavior that can be applied to structs present in an application.
+// Tool contains references to some behavior that can be applied to structs present in an
+// application.
 type Tool struct {
 	id                string
 	toolType          string
@@ -88,8 +152,9 @@ type ApplierProvider interface {
 	Applier(structType reflect.Type, structField reflect.StructField, directive string, scope string) (Applier, gomerr.Gomerr)
 }
 
-// MissingDirectiveHandler can be implemented by an ApplierProvider to indicate that fields without
-// the struct tag should still be processed. The returned string is used as the default directive.
+// MissingDirectiveHandler can be implemented by an ApplierProvider to indicate that
+// fields without the struct tag should still be processed. The returned string is used
+// as the default directive.
 type MissingDirectiveHandler interface {
 	DefaultDirective() string
 }
@@ -108,6 +173,7 @@ func (s StructTagDirectiveProvider) Get(structField reflect.StructField) (string
 
 var (
 	idGen           = id.NewBase36IdGenerator(4, id.Chars)
+	mu              sync.Mutex
 	preparedStructs = map[string]*preparedStruct{}
 	timeType        = reflect.TypeFor[time.Time]()
 )
@@ -213,50 +279,6 @@ func (ps *preparedStruct) addAppliers(fieldName string, appliersToAdd map[string
 			return
 		}
 	}
-
 	ps.fields = append(ps.fields, &field{fieldName, appliersToAdd})
 	return
-}
-
-// ApplyTools will apply the tool associated with each tool type in the appliers slice, in order, to each value in sv.
-func (ps *preparedStruct) applyTools(sv reflect.Value, tc ToolContext, tools ...*Tool) gomerr.Gomerr {
-	var eb gomerr.ErrorBatch
-	for _, tool := range tools {
-		if !ps.applied[tool.Id()] {
-			// TODO:p3 verify all tools applied....
-			var pEb gomerr.ErrorBatch
-			process(sv.Type(), &pEb, tools...)
-			if ge := pEb.GomerrOrNil(); ge != nil {
-				return ge
-			}
-		}
-
-		for _, f := range ps.fields {
-			applier, ok := f.appliers[tool.Id()]
-			if !ok {
-				continue
-			}
-			fv := sv.FieldByName(f.name) // fv should always be valid
-			if ge := applier.Apply(sv, fv, tc); ge != nil {
-				var fieldName string
-				if keyAttr, exists := ge.AttributeLookup("key"); !exists {
-					fieldName = f.name
-				} else if key := keyAttr.(string); len(key) > 0 {
-					fieldName = f.name + "." + key
-					_ = ge.DeleteAttribute("key")
-				} else {
-					fieldName = f.name
-				}
-
-				if fieldAttr, exists := ge.AttributeLookup("field"); exists {
-					_ = ge.ReplaceAttribute("field", fieldName+"."+fieldAttr.(string))
-				} else {
-					_ = ge.AddAttribute("field", fieldName)
-				}
-
-				eb.Capture(ge)
-			}
-		}
-	}
-	return eb.GomerrOrNil()
 }
