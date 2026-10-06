@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"strings"
 
 	api "github.com/jt0/gomer/api/http"
@@ -97,7 +98,12 @@ type ancestorContext struct {
 }
 
 func (r *Api) buildRoutes(rt resource.RegisteredType, parentPath string, ancestors []ancestorContext) {
-	if ge := structs.Preprocess(rt.NewInstance(nil), api.DefaultBindFromRequestTool, constraint.DefaultValidationTool); ge != nil {
+	i := rt.NewInstance(nil)
+	if ge := structs.Preprocess(i, api.DefaultBindFromRequestTool); ge != nil {
+		panic(ge.String())
+	}
+	// Compiling the validate tags at startup surfaces a bad tag before the first request does.
+	if _, ge := constraint.NewValidator(reflect.TypeOf(i), ""); ge != nil {
 		panic(ge.String())
 	}
 

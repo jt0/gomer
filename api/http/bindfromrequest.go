@@ -62,7 +62,10 @@ func SetBindFromRequestConfiguration(requestConfiguration BindFromRequestConfigu
 
 // BindAndValidateFromRequest binds request data to the provided resource then validates it.
 func BindAndValidateFromRequest(request *http.Request, resource any, scope string) gomerr.Gomerr {
-	return BindFromRequest(request, resource, scope, constraint.DefaultValidationTool)
+	if ge := BindFromRequest(request, resource, scope); ge != nil {
+		return ge
+	}
+	return constraint.Validate(resource, scope)
 }
 
 // BindFromRequest binds request data to the provided resource and then applies any tools

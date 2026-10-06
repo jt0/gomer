@@ -6,9 +6,56 @@ import (
 	"testing"
 
 	"github.com/jt0/gomer/bind"
+	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/structs"
 )
+
+type (
+	first1 struct {
+		A string `validate:"len(1,8)"`
+	}
+	first2 struct {
+		A string `validate:"len(1,8)"`
+	}
+	first3 struct {
+		A string `validate:"len(1,8)"`
+	}
+	first4 struct {
+		A string `validate:"len(1,8)"`
+	}
+	first5 struct {
+		A string `validate:"len(1,8)"`
+	}
+	first6 struct {
+		A string `validate:"len(1,8)"`
+	}
+	first7 struct {
+		A string `validate:"len(1,8)"`
+	}
+	first8 struct {
+		A string `validate:"len(1,8)"`
+	}
+)
+
+// TestApplyTools_ConcurrentFirstUse validates eight types that have never been seen, all at once,
+// through constraint.Validate. Validation now compiles to a cached Validator rather than writing the
+// structs package's shared prepared-struct map, so a concurrent first use is race-free; run under
+// -race.
+func TestApplyTools_ConcurrentFirstUse(t *testing.T) {
+	values := []any{&first1{"a"}, &first2{"a"}, &first3{"a"}, &first4{"a"}, &first5{"a"}, &first6{"a"}, &first7{"a"}, &first8{"a"}}
+	var wg sync.WaitGroup
+	for _, v := range values {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if ge := constraint.Validate(v, ""); ge != nil {
+				t.Errorf("%T: %v", v, ge)
+			}
+		}()
+	}
+	wg.Wait()
+}
 
 type (
 	allTools1 struct {

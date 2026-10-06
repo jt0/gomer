@@ -75,15 +75,16 @@ func (i *index) processKeySchema(keySchemaElements []types.KeySchemaElement, att
 	return nil
 }
 
-var safeTypeConstraint = constraint.OneOf(string(types.ScalarAttributeTypeS), string(types.ScalarAttributeTypeN))
-
 func safeAttributeType(attributeType string) (string, gomerr.Gomerr) {
-	ge := safeTypeConstraint.Validate("AttributeType", attributeType)
-	if ge != nil {
-		return "", ge
+	switch attributeType {
+	case string(types.ScalarAttributeTypeS), string(types.ScalarAttributeTypeN):
+		return attributeType, nil
 	}
 
-	return attributeType, nil
+	nse := constraint.NotSatisfied(attributeType)
+	nse.Target = "AttributeType"
+	nse.Expected = "S or N"
+	return "", nse
 }
 
 // indexFor attempts to find the best index match for the provided queryable. The definition of "best" is the index

@@ -6,7 +6,6 @@ import (
 	api "github.com/jt0/gomer/api/http"
 	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/log"
-	"github.com/jt0/gomer/structs"
 )
 
 func ValidateInput(next http.Handler) http.Handler {
@@ -22,7 +21,7 @@ func ValidateInput(next http.Handler) http.Handler {
 		}
 
 		scope := ac.Action.Name()
-		if ge := structs.ApplyTools(ApiContextFor(r), structs.ToolContextWithScope(scope), constraint.DefaultValidationTool); ge != nil {
+		if ge := constraint.Validate(ac, scope); ge != nil {
 			rw.WriteError(ge)
 			return
 		}

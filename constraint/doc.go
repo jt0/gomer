@@ -1,139 +1,90 @@
-// Package constraint provides a struct-tag-driven validation framework.
+// Package constraint validates structs against constraints declared in "validate" struct
+// tags.
 //
-// Constraints are declared in "validate" struct tags and automatically applied when a struct
-// is validated. The system supports composable constraints, logical operators, and cross-field
-// references.
+// A tag is parsed into a Node, a tree of checks that is plain data, and the Node is
+// compiled against the field's type into a Validator. A Validator specializes each check
+// for its type once, so validating a value does no tag parsing and, when the value
+// passes, allocates nothing. Validators are cached per type and scope.
 //
 // # Basic Usage
 //
 //	type User struct {
 //	    Name  string `validate:"len(1,64)"`
-//	    Email string `validate:"required,regexp(^.+@.+$)"`
-//	    Age   int    `validate:"int(gte,0),int(lte,150)"`
+//	    Email string `validate:"regexp(^.+@.+$)"`
+//	    Age   *int   `validate:"required,between(0,150)"`
 //	}
 //
-//	err := constraint.Validate(&user, constraint.DefaultValidationTool)
+//	ge := constraint.Validate(&user, "")
 //
-// # Constraint Types
+// A failure is a *NotSatisfiedError naming the field (Target), the failing check (Node)
+// and what would have satisfied it (Expected). Several failures come back together as a
+// gomerr.BatchError.
 //
-// Simple constraints take no parameters and are looked up by name:
+// # Scopes
 //
-//	required, nil, notnil, zero, notzero, true, false
+// A tag can hold a section per scope, such as an API action, separated by semicolons:
 //
-// Parameterized constraints are built by functions that accept typed arguments:
+//	Name string `validate:"create:len(1,64);update:or(zero,len(1,64))"`
 //
-//	len(1,64)           // length between 1 and 64
-//	minlen(1)           // non-empty
-//	int(gte,0)          // integer >= 0
-//	oneof(a,b,c)        // value is one of a, b, or c
-//	regexp(^[a-z]+$)    // matches regex
-//	elements(required)  // each element satisfies "required"
+// A section without a scope applies when no named section matches. A field with no
+// matching section is not validated in that scope, so "list:" alone exempts a field from
+// list.
 //
-// # Nil-ness vs. Zero-ness
+// # Checks
 //
-// These ask about different things, and reaching for the wrong one is a common source of bugs.
+//	required            the value is present: not a nil pointer, slice, map or interface
+//	notzero             the value is not its type's zero value
+//	nil, notnil         the value is, or is not, absent
+//	zero                the value is its type's zero value
+//	true, false         a bool's value
+//	len(1,64)           length 1 to 64; len(1) is a minimum, len(,64) a maximum
+//	gte(0), gt, lte, lt an ordered comparison
+//	between(0,150)      an inclusive range
+//	eq(x), neq(x)       equality
+//	oneof(a,b,c)        one of the listed values
+//	regexp(^[a-z]+$)    the string matches the pattern
+//	isregexp            the string is itself a valid pattern
 //
-// "nil" and "notnil" ask about pointer types: does it point at anything at all? The answer comes
-// from the reference alone - the pointed-at value is never read - so a pointer to 0, or to "",
-// is not nil. Types that cannot be nil (int, string, a struct) are Unprocessable rather than
-// satisfying either.
+// # Composition
 //
-// "zero" and "notzero" ask about the value: is it the zero value for its type? Reaching it means
-// following the reference, so a pointer to 0 is zero even though it is not nil. A reference that
-// points at nothing has no value to inspect and is treated as zero.
+// Comma-separated checks must all pass, and each failure is reported. The structural
+// forms are:
 //
-// The two only disagree when a pointer is involved:
+//	or(a,b)             either passes
+//	not(a)              a fails
+//	when($.Mode,eq,X,a) a applies only when the Mode field equals X
+//	elements(a)         each element of a slice or array passes a
+//	mapkeys(a)          each map key passes a
+//	mapvalues(a)        each map value passes a
+//	struct              the nested struct passes its own tags
+//	union               exactly one of the nested struct's fields is set
 //
-//	value           nil    notnil  zero  notzero
-//	(*int)(nil)     yes    no      yes   no
-//	new(0)          no     yes     yes   no      // not nil, but zero
-//	new(42)         no     yes     no    yes
-//	0               error  error   yes   no
-//	42              error  error   no    yes
+// # Absent Values
 //
-// "required" is an alias for "notzero", so it rejects 0 and false. That makes it the wrong choice
-// whenever zero is a legal value. To require that a value was supplied while still accepting zero
-// ones, make the field a pointer and ask about the reference instead:
+// A nil pointer, slice, map or interface is absent. Every check except required, notnil
+// and notzero passes an absent value, so an optional field needs no guard:
+// `validate:"len(1,64)"` on a *string accepts nil. Use or(zero,X) where an empty value is
+// meaningful, such as an update that clears a field.
 //
-//	Count *int `validate:"notnil"`   // 0 accepted, omitted rejected
-//	Count int  `validate:"required"` // 0 rejected
+// When an or's other branches are only nil or zero, it marks its remaining branch
+// optional rather than offering alternatives, and a failure reports that branch's own
+// failures.
 //
-// A non-pointer field cannot express this distinction at all: an int field holding 0 is
-// indistinguishable from one that was never set, so no constraint can tell them apart.
+// # Field References
 //
-// # Logical Operators
+// An operand of the form $.Field reads a sibling field of the struct being validated, as
+// in gte($.Min). A reference to an absent field skips the comparison.
 //
-// Constraints can be composed with and, or, and not:
+// # Registered Names
 //
-//	or(nil,len(1,100))       // nil OR length between 1 and 100
-//	not(zero)                // not zero
-//	and(required,len(1,10))  // required AND length 1-10 (same as "required,len(1,10)")
+// A service names reusable checks, which tags then use like built-ins:
 //
-// # Dynamic Parameters (Cross-Field References)
+//	constraint.Register("$identifier", constraint.Length(1, 1011))
 //
-// Parameters prefixed with "$." reference other fields in the same struct. The referenced
-// field's value is resolved at validation time:
+// Required, NotZero, Pattern, Length, MinLength, MaxLength, Gte, Gt, Lte, Lt, Between,
+// OneOf, And, Union and Fail build Nodes in code.
 //
-//	type Range struct {
-//	    Min int `validate:"int(gte,0)"`
-//	    Max int `validate:"int(gte,$.Min)"`  // Max must be >= Min
-//	}
-//
-// Any builder whose parameter type is a pointer (e.g. *int64, *any) supports dynamic
-// references. See the builders map in registry.go for which constraints support this.
-//
-// # The field() Constraint
-//
-// For cross-field comparisons that don't fit the pattern of testing the current field,
-// use field() to test another field's value directly:
-//
-//	// CreateMode is required when AccessMode is "read_write"
-//	CreateMode *string `validate:"or(field($.AccessMode,neq,read_write),required)"`
-//
-// # Struct-Level Constraints
-//
-// A directive on a blank field named "_" is handed the enclosing struct rather than a field
-// value. Use it for rules that span several fields, where no single field owns the rule:
-//
-//	type StringSetting struct {
-//	    _       struct{} `validate:"$oneConstraintRequired"`
-//	    Pattern *string
-//	    Enum    []string
-//	}
-//
-// The constraint's test function receives the struct value, so it asserts on the struct type
-// rather than a field type:
-//
-//	constraint.Register("$oneConstraintRequired",
-//	    constraint.New("oneConstraintRequired", nil, func(toTest any) gomerr.Gomerr {
-//	        ss, ok := toTest.(StringSetting)
-//	        if !ok {
-//	            return gomerr.Unprocessable("expected a StringSetting", toTest)
-//	        }
-//	        if ss.Pattern == nil && ss.Enum == nil {
-//	            return constraint.NotSatisfied(toTest)
-//	        }
-//	        return nil
-//	    }))
-//
-// Go forbids reading a blank field, but reflect still reports its name and tag, and that is all
-// the directive needs. Declare it first, because Go pads a struct whose last field is zero-sized.
-//
-// The rule must live on the struct it describes. "struct" and "union" apply the validation tool
-// to the nested value itself, so a directive sitting on the field that holds the struct is never
-// evaluated and fails silently:
-//
-//	type Definition struct {
-//	    String *StringSetting `validate:"$oneConstraintRequired,struct"` // never runs
-//	}
-//
-// # Custom Constraints
-//
-// Register custom constraints or builders with Register(). Custom names must start with '$':
-//
-//	constraint.Register("$mycheck", func(value *int64) constraint.Constraint {
-//	    return constraint.New("mycheck", value, func(toTest any) gomerr.Gomerr {
-//	        // validation logic
-//	    })
-//	})
+// RegisterCustom registers a check written in Go, for logic the built-in kinds can't
+// express. A custom check can read its enclosing struct through CustomContext.Enclosing
+// and report several failures through CustomContext.Report.
 package constraint

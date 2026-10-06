@@ -1,58 +1,43 @@
 package constraint
 
 import (
-	"reflect"
 	"testing"
 )
 
-func Test_constraintFor(t *testing.T) {
-	type test struct {
-		name       string
-		constraint string
-		expected   string
+func TestRegisterResolves(t *testing.T) {
+	if ge := Register("$word", Node{kind: kindPattern, params: []operand{{Value: "^[a-z]+$"}}}); ge != nil {
+		t.Fatal(ge)
 	}
-	tests := []test{
-		{"len", "len(1,2)", "and(minLength(1), maxLength(2))"},
-		{"required", "required", "required"},
-		{"or", "or(required,len(1,2))", "or(required, and(minLength(1), maxLength(2)))"},
-		{"map_1", "map(notZero,intBetween(1,100000))", "map(notZero, and(gte(1), lte(100000)))"},
-		{"map_2", "map(len(3),struct)", "map(and(minLength(3), maxLength(3)), struct)"},
-		{"eq", "eq(1)", "equals(1)"},
-		{"map_validKey_struct_entries", "map(notNil,struct),entries(notNil)", "and(map(notNil, struct), entries(notNil))"},
-		{"map_validKey_struct_entries_strictVariants", "map(notNil,struct),entries(notNil)", "and(map(notNil, struct), entries(notNil))"},
-		{"regexp", "regexp(^[^\\\\n]{0,64}$)", "regexp(^[^\\\\n]{0,64}$)"},
-		{"maxLen_map_validKey_struct", "maxLen(25),map(notNil,struct)", "and(maxLength(25), map(notNil, struct))"},
-		{"maxLen_1024", "maxLen(1024)", "maxLength(1024)"},
-		{"maxLen_entries_satisfies", "maxLen(25),entries(notNil)", "and(maxLength(25), entries(notNil))"},
-		{"or_not_entries_requires", "or(not(notNil),entries(notNil))", "or(not(notNil), entries(notNil))"},
-		{"elements_struct_validVariants", "elements(struct),notNil", "and(elements(struct), notNil)"},
-		{"struct_constraintsMatchType_patternEnumMutuallyExclusive", "struct,notNil,notNil", "and(struct, notNil, notNil)"},
-		{"or_nil_oneof", "or(nil,oneof(planned))", "or(nil, oneOf(planned))"},
-		{"or_nil_isDate", "or(nil,notNil)", "or(nil, notNil)"},
-		{"oneof_types", "oneof(string,number,boolean,array)", "oneOf(string, number, boolean, array)"},
-		{"float_gte", "float(gte,1.23)", "gte(1.23)"},
-		{"or_nil_isRegexp", "or(nil,isRegexp)", "or(nil, isRegexp)"},
-		{"or_nil_len", "or(nil,len(1,100))", "or(nil, and(minLength(1), maxLength(100)))"},
-		{"struct_constraintsMatchType", "struct,notNil", "and(struct, notNil)"},
-		{"oneof_string_number", "oneof(string,number)", "oneOf(string, number)"},
-		{"regexp_variant_name", "regexp(^[^\\\\n]{1,64}$)", "regexp(^[^\\\\n]{1,64}$)"},
-		{"maxLen_entries_satisfies_variant", "maxLen(25),entries(notNil)", "and(maxLength(25), entries(notNil))"},
-		{"maxLen_16384", "maxLen(16384)", "maxLength(16384)"},
-		{"or_isZero_entries_requires", "or(notNil,entries(notNil))", "or(notNil, entries(notNil))"},
-		{"elements_nested_param", "elements(len(1,16))", "elements(and(minLength(1), maxLength(16)))"},
-		{"len_elements_nested", "len(0,10),elements(len(1,16))", "and(and(minLength(0), maxLength(10)), elements(and(minLength(1), maxLength(16))))"},
-		{"or_nil_regexp_with_braces", `or(nil,regexp(^\\$\\{[a-zA-Z][a-zA-Z0-9]{0,15}\\}$))`, `or(nil, regexp(^\\$\\{[a-zA-Z][a-zA-Z0-9]{0,15}\\}$))`},
+	node := mustParse(t, "$word")
+	vr := mustValidator(t, node, stringType)
+	assertPass(t, vr, "abc")
+	assertNotSatisfied(t, vr, "ABC")
+}
+
+func TestRegisterCustom(t *testing.T) {
+	custom := evenCheck()
+	if ge := RegisterCustom(custom); ge != nil {
+		t.Fatal(ge)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sf, _ := reflect.TypeFor[test]().FieldByName("name")
-			c, err := constraintFor(tt.constraint, none, sf)
-			if err != nil {
-				t.Fatalf("constraintFor() error: %v", err)
-			}
-			if got := c.String(); got != tt.expected {
-				t.Errorf("constraintFor().String() = %v, want %v", got, tt.expected)
-			}
-		})
+	node := mustParse(t, "$even")
+	if node.kind != kindCustom {
+		t.Fatalf("want a custom node, got %s", node.kind)
+	}
+	vr := mustValidator(t, node, intType)
+	assertPass(t, vr, 2)
+	assertNotSatisfied(t, vr, 1)
+}
+
+func TestRegisterNameValidation(t *testing.T) {
+	for _, name := range []string{"noDollar", "$", ""} {
+		if ge := Register(name, Node{kind: kindFail}); ge == nil {
+			t.Errorf("Register(%q): want a validation error", name)
+		}
+	}
+}
+
+func TestUnregisteredNameError(t *testing.T) {
+	if _, ge := parseDirective("$neverregistered"); ge == nil {
+		t.Error("want an error resolving an unregistered name")
 	}
 }

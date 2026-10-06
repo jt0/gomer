@@ -1,178 +1,98 @@
 package constraint
 
 import (
-	"fmt"
 	"reflect"
-	"slices"
-	"strings"
-	"time"
 
 	"github.com/jt0/gomer/gomerr"
 )
 
-type Constraint interface {
-	Type() string
-	Parameters() any
-	Validate(target string, toTest any) gomerr.Gomerr
-	Test(toTest any) gomerr.Gomerr
-	String() string
+// Required checks that a value is present: not a nil pointer, slice, map or interface.
+func Required() Node { return Node{kind: kindPresent, name: "required"} }
+
+// NotZero checks that a value is not its type's zero value.
+func NotZero() Node { return Node{kind: kindNotZero, name: "notzero"} }
+
+// Pattern checks that a string matches the regular expression re.
+func Pattern(re string) Node {
+	return Node{kind: kindPattern, name: "regexp", params: []operand{{Value: re}}}
 }
 
-func New(constraintType string, constraintParameters any, testFn func(toTest any) gomerr.Gomerr) Constraint {
-	return &constraint{constraintType, constraintParameters, testFn}
+// Length checks that a value's length is between min and max, inclusive.
+func Length(min, max uint64) Node {
+	return Node{kind: kindLength, name: "len", params: []operand{{Value: min}, {Value: max}}}
 }
 
-type constraint struct {
-	type_  string
-	params any
-	testFn func(toTest any) gomerr.Gomerr
+// MinLength checks that a value's length is at least min.
+func MinLength(min uint64) Node {
+	return Node{kind: kindLength, name: "len", params: []operand{{Value: min}}}
 }
 
-func (c *constraint) Type() string {
-	return c.type_
+// MaxLength checks that a value's length is at most max.
+func MaxLength(max uint64) Node {
+	return Node{kind: kindLength, name: "len", params: []operand{{}, {Value: max}}}
 }
 
-func (c *constraint) Parameters() any {
-	return c.params
+// Gte, Gt, Lte and Lt compare a value against bound.
+func Gte(bound any) Node { return compareNode("gte", bound) }
+func Gt(bound any) Node  { return compareNode("gt", bound) }
+func Lte(bound any) Node { return compareNode("lte", bound) }
+func Lt(bound any) Node  { return compareNode("lt", bound) }
+
+func compareNode(op string, bound any) Node {
+	return Node{kind: kindCompare, name: op, params: []operand{{Value: bound}}}
 }
 
-func (c *constraint) Validate(target string, toTest any) gomerr.Gomerr {
-	ge := c.Test(toTest)
-	if ge == nil {
-		return nil
-	}
-
-	if be := gomerr.ErrorAs[*gomerr.BatchError](ge); be != nil {
-		return c.batchUpdateTarget(target, be)
-	}
-
-	return c.updateTarget(target, ge)
+// Between checks that a value is between lower and upper, inclusive.
+func Between(lower, upper any) Node {
+	params := []operand{{Value: lower}, {Value: upper}}
+	return Node{kind: kindBetween, name: "between", params: params}
 }
 
-func (c *constraint) batchUpdateTarget(target string, be *gomerr.BatchError) *gomerr.BatchError {
-	errors := be.Errors()
-	for i, ge := range errors {
-		if ibe := gomerr.ErrorAs[*gomerr.BatchError](ge); ibe != nil {
-			errors[i] = c.batchUpdateTarget(target, ibe)
-		} else {
-			errors[i] = c.updateTarget(target, ge)
-		}
+// OneOf checks that a value equals one of values.
+func OneOf(values ...any) Node {
+	params := make([]operand, len(values))
+	for i, v := range values {
+		params[i] = operand{Value: v}
 	}
-	return be
+	return Node{kind: kindOneOf, name: "oneof", params: params}
 }
 
-func (c *constraint) updateTarget(validationTarget string, ge gomerr.Gomerr) gomerr.Gomerr {
-	var target string
-	nse := gomerr.ErrorAs[*NotSatisfiedError](ge)
-	if nse != nil {
-		target = nse.Target
-	} else if ta, ok := ge.AttributeLookup("target"); ok {
-		target = ta.(string)
-	} // else target == ""
+// And checks every node, reporting each that fails.
+func And(nodes ...Node) Node { return Node{kind: kindAnd, name: "and", children: nodes} }
 
-	if validationTarget == "" {
-		validationTarget = "\"\"" // Used to indicate an empty value. Unlikely to happen much in practice.
-	}
+// Union checks that exactly one of a struct's fields is set.
+func Union() Node { return Node{kind: kindUnion, name: "union"} }
 
-	if target == "" {
-		target = validationTarget
-	} else if target[0] == '[' {
-		target = validationTarget + target
-	} else {
-		target = validationTarget + "." + target
-	}
+// Fail always fails under name. It labels a failure found outside a Validator, such as a
+// uniqueness conflict a data store reports, so a renderer can tell it apart by
+// Node.Name().
+func Fail(name string) Node { return Node{kind: kindFail, name: name} }
 
-	if nse == nil {
-		return ge.ReplaceAttribute("target", target)
-	}
+// Custom is a constraint type for logic the built-in kinds can't express.
+type Custom interface {
+	Name() string
 
-	nse.Target = target
+	// Accepts rejects an incompatible field type when the node is compiled.
+	Accepts(reflect.Type) gomerr.Gomerr
 
-	return nse
+	// Check runs the test. A Check that panics is reported as a fault.
+	Check(v any, cc CustomContext) bool
+
+	// Describe supplies the Expected text a failure reports.
+	Describe() string
 }
 
-func (c *constraint) Test(toTest any) gomerr.Gomerr {
-	ge := c.testFn(toTest)
-	if nse := gomerr.ErrorAs[*NotSatisfiedError](ge); nse != nil && nse.Constraint == nil {
-		nse.Constraint = c // set only if nil to keep the most specific constraint error
-	}
-	return ge
-}
+// CustomContext is handed to a Custom at evaluation. If Custom.Check only identifies
+// one problem, it returns false and the field gets one failure. If the Custom constraint
+// ranges over a collection, for example, it can report each item-specific problem
+// through Report.
+type CustomContext interface {
+	// Enclosing returns the struct that contains the field under test, and reports false
+	// when validating a single value.
+	Enclosing() (any, bool)
 
-func (c *constraint) String() string {
-	if c.params == nil {
-		return c.Type()
-	}
-	return fmt.Sprintf("%s(%s)", c.type_, parametersToString(c.params))
-}
-
-var timeType = reflect.TypeFor[time.Time]()
-
-func parametersToString(params any) string {
-	var pv reflect.Value
-	if c, ok := params.(Constraint); ok {
-		return c.String()
-	} else if cs, ok := params.([]Constraint); ok {
-		var ss []string
-		for _, c = range cs {
-			ss = append(ss, c.String())
-		}
-		return strings.Join(ss, ", ")
-	} else if pv, ok = params.(reflect.Value); !ok {
-		pv = reflect.ValueOf(params)
-	}
-
-	switch pv.Kind() {
-	case reflect.Pointer:
-		if pv.IsNil() {
-			return "<nil>"
-		}
-		return parametersToString(pv.Elem())
-	case reflect.Array, reflect.Slice:
-		pvLen := pv.Len()
-		ss := make([]string, pvLen)
-		for i := range pvLen {
-			ss[i] = parametersToString(pv.Index(i))
-		}
-		return strings.Join(ss, ", ")
-	case reflect.Struct:
-		if pv.Type() == timeType {
-			return pv.Interface().(time.Time).Format(time.RFC3339)
-		}
-		fallthrough
-	default:
-		return fmt.Sprintf("%v", pv)
-	}
-}
-
-// static location -> $.SomeField --> sv.FieldByName().Interface()
-// dynamic location -> $.MyFunction() --> sv.MethodByName()....
-// Some other function(?) -> $$SomeFunction
-// at `apply` need to get the value of what the constraint is going to use to check
-type dynamicConstraint struct {
-	Constraint
-	dynamicValues map[string][]reflect.Value
-}
-
-func dynamicIfNeeded(newConstraint Constraint, constraints ...Constraint) Constraint {
-	collectedDynamicValues := make(map[string][]reflect.Value)
-	for _, c := range constraints {
-		if dc, ok := c.(*dynamicConstraint); ok {
-			for k, vs := range dc.dynamicValues {
-				existing := collectedDynamicValues[k]
-				for _, v := range vs {
-					if !slices.Contains(existing, v) {
-						existing = append(existing, v)
-					}
-				}
-				collectedDynamicValues[k] = existing
-			}
-		}
-	}
-
-	if len(collectedDynamicValues) > 0 {
-		return &dynamicConstraint{newConstraint, collectedDynamicValues}
-	}
-
-	return newConstraint
+	// Report records a failure at target, nested under the field's target. Once a check
+	// calls Report, its failures are the reported ones, whatever it returns. A report is
+	// dropped inside an or-branch or if it exceeds the failure budget.
+	Report(target, expected string)
 }

@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jt0/gomer/constraint"
 	"github.com/jt0/gomer/data"
 	"github.com/jt0/gomer/gomerr"
 	"github.com/jt0/gomer/structs"
@@ -48,26 +47,16 @@ func (ap constraintApplierProvider) Applier(_ reflect.Type, sf reflect.StructFie
 				fieldTuple = append(fieldTuple, additionalFields...)
 			}
 
-			t := ap.table
-			return uniquenessApplier{
-				constraint.New("unique", fieldTuple, func(a any) gomerr.Gomerr {
-					tt := a.(toTest)
-					return t.checkFieldTupleUnique(tt.ctx, tt.p, fieldTuple)
-				}),
-			}, nil
+			return uniquenessApplier{table: ap.table, fieldTuple: fieldTuple}, nil
 		}
 	}
 
 	return nil, nil
 }
 
-type toTest struct {
-	ctx context.Context
-	p   data.Persistable
-}
-
 type uniquenessApplier struct {
-	constraint constraint.Constraint
+	table      *table
+	fieldTuple []string
 }
 
 func (a uniquenessApplier) Apply(sv reflect.Value, _ reflect.Value, tc structs.ToolContext) gomerr.Gomerr {
@@ -84,5 +73,5 @@ func (a uniquenessApplier) Apply(sv reflect.Value, _ reflect.Value, tc structs.T
 		return gomerr.Configuration("struct does not implement data.Persistable").AddAttribute("type", sv.Type().String())
 	}
 
-	return a.constraint.Test(toTest{ctx, p})
+	return a.table.checkFieldTupleUnique(ctx, p, a.fieldTuple)
 }
