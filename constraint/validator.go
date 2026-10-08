@@ -175,9 +175,13 @@ func (vc *validationCtx) failValue(node *Node, expected string, cv reflect.Value
 }
 
 // push appends a field name or map key to the target path and returns the length to
-// truncate back to once the contained check returns.
+// truncate back to once the contained check returns. An empty name, such as a custom
+// check reporting on itself, leaves the path unchanged.
 func (vc *validationCtx) push(name string) int {
 	n := len(vc.path)
+	if name == "" {
+		return n
+	}
 	if n > 0 {
 		vc.path = append(vc.path, '.')
 	}

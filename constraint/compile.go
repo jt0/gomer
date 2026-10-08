@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/structs"
 )
 
 // check is the compiled form of a node. It returns true when v satisfies the node. On
@@ -1113,8 +1114,9 @@ var scopeRegexp = regexp.MustCompile(`(?:([^;:]*[^\\]):)?([^;]*)`)
 
 // scopeDirective selects the section of a tag that applies to scope. A tag's format is
 // [<scope>:]<directive>[;[<scope>:]<directive>]*, where a section without a scope applies
-// when no section names scope. The second return is false when no section applies, so
-// the field isn't validated in scope.
+// when no section names scope. A section's scope may be an alias registered with
+// structs.ScopeAlias, such as create for resource.CreateAction. The second return is false
+// when no section applies, so the field isn't validated in scope.
 func scopeDirective(tagText, scope string) (string, bool) {
 	if !strings.ContainsAny(tagText, ";:") {
 		return tagText, true
@@ -1129,6 +1131,8 @@ func scopeDirective(tagText, scope string) (string, bool) {
 		section := m[1]
 		if section == "" {
 			section = anyScope
+		} else {
+			section = structs.ResolveScope(section)
 		}
 		directive := strings.ReplaceAll(m[2], `\:`, ":")
 		if section == scope {

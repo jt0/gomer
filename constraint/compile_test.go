@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jt0/gomer/gomerr"
+	"github.com/jt0/gomer/structs"
 )
 
 // TestValidatorReportsEveryError checks that a Node with several configuration errors
@@ -418,6 +419,19 @@ func TestNewValidatorScopes(t *testing.T) {
 	assertPass(t, list, &scopedStruct{Id: "ab", Name: "toolong"})
 }
 
+type aliasedScopeStruct struct {
+	Id string `validate:"tcreate:len(3,8)"`
+}
+
+// TestNewValidatorResolvesScopeAliases checks that a section named by a structs.ScopeAlias
+// alias applies when validating in the scope the alias stands for.
+func TestNewValidatorResolvesScopeAliases(t *testing.T) {
+	structs.ScopeAlias("tcreate", "test.CreateAction")
+	vr := mustNewValidator(t, aliasedScopeStruct{}, "test.CreateAction")
+	assertPass(t, vr, &aliasedScopeStruct{Id: "abc"})
+	assertNotSatisfied(t, vr, &aliasedScopeStruct{Id: "ab"})
+}
+
 type innerStruct struct {
 	V string `validate:"len(1,3)"`
 }
@@ -778,6 +792,31 @@ func TestCustomReportTargetNestsUnderField(t *testing.T) {
 	}
 	if len(wantTargets) != 0 {
 		t.Errorf("missing targets %v", wantTargets)
+	}
+}
+
+type reportHereHolder struct {
+	Value int `validate:"$reporthere"`
+}
+
+// TestCustomReportEmptyTargetIsTheField checks that a report with an empty target lands on
+// the field itself, with no trailing separator.
+func TestCustomReportEmptyTargetIsTheField(t *testing.T) {
+	ge := RegisterCustom(customCheck{
+		name:    "$reporthere",
+		accepts: func(reflect.Type) gomerr.Gomerr { return nil },
+		check: func(_ any, cc CustomContext) bool {
+			cc.Report("", "a reported problem")
+			return false
+		},
+		describe: func() string { return "never used" },
+	})
+	if ge != nil {
+		t.Fatal(ge)
+	}
+	vr := mustNewValidator(t, reportHereHolder{}, "")
+	if nse := asNotSatisfied(t, vr, &reportHereHolder{}); nse.Target != "Value" {
+		t.Errorf("want target Value, got %q", nse.Target)
 	}
 }
 

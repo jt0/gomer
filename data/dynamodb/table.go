@@ -516,7 +516,7 @@ func copyFields(dst, src reflect.Value) {
 		df := dst.Field(i)
 		sf := src.FieldByName(f.Name)
 
-		if !f.IsExported() || sf.IsZero() || f.Tag.Get("structs") == "ignore" || f.Type.Implements(queryableType) {
+		if !(f.IsExported() || f.Anonymous) || sf.IsZero() || f.Tag.Get("structs") == "ignore" || f.Type.Implements(queryableType) {
 			continue
 		}
 

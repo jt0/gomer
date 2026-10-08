@@ -40,6 +40,15 @@ func ScopeAlias(alias, scope string) {
 	scopeAliases[alias] = scope
 }
 
+// ResolveScope returns the scope an alias stands for, or scope itself when it isn't an
+// alias.
+func ResolveScope(scope string) string {
+	if actual, ok := scopeAliases[scope]; ok {
+		return actual
+	}
+	return scope
+}
+
 func ScopeAliases(aliasToScope map[string]string) {
 	for alias, scope := range aliasToScope {
 		ScopeAlias(alias, scope)
@@ -71,9 +80,9 @@ func applyScopes(ap ApplierProvider, structType reflect.Type, structField reflec
 		scope := match[1]
 		if scope == "" {
 			scope = anyScope
-		} else if actualScope, ok := scopeAliases[scope]; ok {
-			scope = actualScope
-		} // else equals the matched value
+		} else {
+			scope = ResolveScope(scope)
+		}
 
 		if _, ok := appliers[scope]; ok {
 			return nil, gomerr.Configuration("multiple sections define for scope '" + scope + "'")
