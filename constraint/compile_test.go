@@ -356,6 +356,39 @@ func TestNewValidatorEmbeddedWithDirective(t *testing.T) {
 	assertNotSatisfied(t, vr, &embeddingOuter{EmbeddedInner{Items: []string{"a", "b", "c"}}}) // the promoted field's len
 }
 
+type unexportedInner struct {
+	Selector string `validate:"len(1,3)"`
+}
+
+type unexportedEmbedding struct {
+	unexportedInner
+}
+
+// The fields an unexported embedded struct promotes are validated, with the promoted
+// field's own name as the target.
+func TestNewValidatorUnexportedEmbedded(t *testing.T) {
+	vr := mustNewValidator(t, unexportedEmbedding{}, "")
+	assertPass(t, vr, &unexportedEmbedding{unexportedInner{Selector: "1.x"}})
+	if nse := asNotSatisfied(t, vr, &unexportedEmbedding{unexportedInner{Selector: "garbage"}}); nse.Target != "Selector" {
+		t.Errorf("want target Selector, got %q", nse.Target)
+	}
+}
+
+type ignoredInner struct {
+	V string `validate:"len(1,3)"`
+}
+
+type ignoringOuter struct {
+	ignoredInner `structs:"ignore"`
+	Name         string `validate:"len(1,3)" structs:"ignore"`
+}
+
+// A field marked structs:"ignore" is excluded from validation, as from every gomer tool.
+func TestNewValidatorStructsIgnore(t *testing.T) {
+	vr := mustNewValidator(t, ignoringOuter{}, "")
+	assertPass(t, vr, &ignoringOuter{ignoredInner{V: "toolong"}, "toolong"})
+}
+
 func TestNewValidatorNilRule(t *testing.T) {
 	// A nil struct pointer passes by the nil rule.
 	vr := mustNewValidator(t, simpleStruct{}, "")
@@ -690,7 +723,7 @@ func nonNegativeEach() Custom {
 			ok := true
 			for i, x := range v.([]int) {
 				if x < 0 {
-					cc.Report(strconv.Itoa(i), "a non-negative number")
+					cc.Report(strconv.Itoa(i), "a non-negative number", x)
 					ok = false
 				}
 			}
@@ -780,13 +813,16 @@ func TestCustomReportTargetNestsUnderField(t *testing.T) {
 	} else if len(be.Errors()) != 2 {
 		t.Fatalf("want 2 reported failures, got %v", be)
 	}
-	wantTargets := map[string]bool{"Values.0": true, "Values.2": true}
+	wantTargets := map[string]int{"Values.0": -1, "Values.2": -2}
 	for _, ge = range be.Errors() {
 		nse, nOk := errors.AsType[*NotSatisfiedError](ge)
 		if !nOk {
 			t.Fatalf("want NotSatisfiedError, got %T: %v", ge, ge)
-		} else if !wantTargets[nse.Target] {
+		}
+		if want, tOk := wantTargets[nse.Target]; !tOk {
 			t.Errorf("unexpected target %v", nse.Target)
+		} else if nse.ToTest != want {
+			t.Errorf("%s: want reported value %d, got %v", nse.Target, want, nse.ToTest)
 		}
 		delete(wantTargets, nse.Target)
 	}
@@ -806,7 +842,7 @@ func TestCustomReportEmptyTargetIsTheField(t *testing.T) {
 		name:    "$reporthere",
 		accepts: func(reflect.Type) gomerr.Gomerr { return nil },
 		check: func(_ any, cc CustomContext) bool {
-			cc.Report("", "a reported problem")
+			cc.Report("", "a reported problem", nil)
 			return false
 		},
 		describe: func() string { return "never used" },
@@ -1049,5 +1085,87 @@ func TestLeafZeroAlloc(t *testing.T) {
 			assertPass(t, c.p, c.v)
 			assertZeroAlloc(t, func() { _ = c.p.Validate(c.v) })
 		})
+	}
+}
+
+type duplicateScopes struct {
+	Id string `validate:"tcreate:len(3,8);test.CreateAction:len(1,2)"`
+}
+
+type repeatedScope struct {
+	Id string `validate:"list:len(1,2);list:len(3,4)"`
+}
+
+// TestNewValidatorRejectsDuplicateScopes checks that two sections for one scope, whether
+// repeated or an alias alongside the scope it stands for, are a configuration error rather
+// than one silently winning.
+func TestNewValidatorRejectsDuplicateScopes(t *testing.T) {
+	structs.ScopeAlias("tcreate", "test.CreateAction")
+	if _, ge := NewValidator(reflect.TypeFor[duplicateScopes](), "test.CreateAction"); ge == nil {
+		t.Error("want a configuration error for an alias and its scope on one tag")
+	}
+	if _, ge := NewValidator(reflect.TypeFor[repeatedScope](), "list"); ge == nil {
+		t.Error("want a configuration error for a repeated scope")
+	}
+}
+
+type lengthValueHolder struct {
+	Blob []byte `validate:"len(0,4)"`
+}
+
+// TestLengthFailureReportsLength checks that a length failure carries the measured length
+// rather than the value, which may be large.
+func TestLengthFailureReportsLength(t *testing.T) {
+	vr := mustNewValidator(t, lengthValueHolder{}, "")
+	if nse := asNotSatisfied(t, vr, &lengthValueHolder{Blob: []byte("too long")}); nse.ToTest != 8 {
+		t.Errorf("want reported value 8, got %#v", nse.ToTest)
+	}
+}
+
+// TestUnionFailureReportsSetMembers checks that a union failure carries the names of the
+// members that are set, not the members' values.
+func TestUnionFailureReportsSetMembers(t *testing.T) {
+	vr := mustNewValidator(t, unionHolder{}, "")
+	nse := asNotSatisfied(t, vr, &unionHolder{U: unionMembers{A: &innerStruct{V: "a"}, B: &innerStruct{V: "b"}}})
+	if got, ok := nse.ToTest.([]string); !ok || len(got) != 2 || got[0] != "A" || got[1] != "B" {
+		t.Errorf("want reported members [A B], got %#v", nse.ToTest)
+	}
+}
+
+type targetCore struct {
+	Id_  string `validate:"len(1,3)" validate.target:"{prefix}Identifier"`
+	Name string `validate:"len(1,3)"`
+}
+
+type targetOwner struct {
+	targetCore
+	Literal string `validate:"len(1,3)" validate.target:"draftRevision"`
+}
+
+type targetChild struct {
+	targetCore `validate.prefix:"droplet"`
+}
+
+// TestValidateTargetTag checks that validate.target names a field's failures, that
+// {prefix} takes the embedding field's validate.prefix or is dropped without one, and that
+// the same embedded type compiles separately under each prefix.
+func TestValidateTargetTag(t *testing.T) {
+	owner := mustNewValidator(t, targetOwner{}, "")
+	child := mustNewValidator(t, targetChild{}, "")
+	cases := []struct {
+		name string
+		vr   *Validator
+		v    any
+		want string
+	}{
+		{"no prefix", owner, &targetOwner{targetCore{Name: "a"}, "a"}, "identifier"},
+		{"literal", owner, &targetOwner{targetCore{Id_: "a", Name: "a"}, ""}, "draftRevision"},
+		{"untagged", owner, &targetOwner{targetCore{Id_: "a"}, "a"}, "Name"},
+		{"prefix", child, &targetChild{targetCore{Name: "a"}}, "dropletIdentifier"},
+	}
+	for _, c := range cases {
+		if nse := asNotSatisfied(t, c.vr, c.v); nse.Target != c.want {
+			t.Errorf("%s: target %q, want %q", c.name, nse.Target, c.want)
+		}
 	}
 }

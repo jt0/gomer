@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/jt0/gomer/gomerr"
@@ -49,6 +50,9 @@ type compileCtx struct {
 	// resolves to one check.
 	scope      string
 	inProgress map[structKey]*check
+	// prefix is the validate.prefix of the nearest embedding field, which fills the
+	// {prefix} placeholder in the validate.target of the embedded struct's fields.
+	prefix string
 }
 
 func (cc *compileCtx) fail(ge gomerr.Gomerr) {
@@ -363,15 +367,17 @@ func (cc *compileCtx) compileStructNode(node *Node, t reflect.Type) check {
 		if sv.Kind() != reflect.Struct {
 			return vc.failValue(node, expected, sv)
 		}
-		count := 0
-		for _, fv := range sv.Fields() {
+		// The failure reports the names of the members that are set, which says what is
+		// wrong without exposing the members' values.
+		var set []string
+		for sf, fv := range sv.Fields() {
 			if fv.IsValid() && fv.CanInterface() && !fv.IsZero() {
-				count++
+				set = append(set, fieldTarget(sv.Type(), sf, ""))
 			}
 		}
 		satisfied := true
-		if count != 1 {
-			satisfied = vc.failValue(node, expected, sv)
+		if len(set) != 1 {
+			satisfied = vc.fail(node, expected, set)
 		}
 		if !nested(sv, vc) {
 			satisfied = false
@@ -659,8 +665,15 @@ func makeLeafCheck(node *Node, art leafArtifact) check {
 			if !ok {
 				return true
 			}
-			if sat, kindOk := pred(cv); kindOk && sat {
+			sat, kindOk := pred(cv)
+			if kindOk && sat {
 				return true
+			}
+			// A length failure reports the measured length. The value may be large, such
+			// as an uploaded artifact, and the length is what the bound is about.
+			if kindOk && node.kind == kindLength {
+				n, _ := lengthOf(cv, node.unit)
+				return vc.fail(node, expected, n)
 			}
 			return vc.failValue(node, expected, cv)
 		}
@@ -969,8 +982,16 @@ var timeType = reflect.TypeFor[time.Time]()
 // It matches the structs package's wildcard scope.
 const anyScope = "*"
 
-// tagKey is the struct tag a field's directive is read from.
-const tagKey = "validate"
+const (
+	// tagKey is the struct tag a field's directive is read from.
+	tagKey = "validate"
+	// targetTagKey names the target a field's failures report, in place of the target
+	// namer's rendering.
+	targetTagKey = "validate.target"
+	// prefixTagKey, on an embedded field, sets the {prefix} in the validate.target of the
+	// embedded struct's fields.
+	prefixTagKey = "validate.prefix"
+)
 
 // fieldCheck is one field's entry in a struct check: the field index, the target a
 // failure reports, and the compiled check. An embedded entry has no target, so the
@@ -995,7 +1016,7 @@ func (cc *compileCtx) structCheck(t reflect.Type, scope string) check {
 		cc.inProgress = map[structKey]*check{}
 	}
 
-	key := structKey{bt, scope}
+	key := structKey{t: bt, scope: scope, prefix: cc.prefix}
 	if slot, ok := cc.inProgress[key]; ok {
 		return func(v reflect.Value, vc *validationCtx) bool { return (*slot)(v, vc) }
 	}
@@ -1018,9 +1039,13 @@ func (cc *compileCtx) buildStructCheck(bt reflect.Type, scope string) check {
 
 	for i := 0; i < bt.NumField(); i++ {
 		sf := bt.Field(i)
+		// structs:"ignore" excludes a field from every gomer tool, validation included.
+		if sf.Tag.Get("structs") == "ignore" {
+			continue
+		}
 		directive, hasDirective := "", false
 		if tagText, ok := sf.Tag.Lookup(tagKey); ok {
-			directive, hasDirective = scopeDirective(tagText, scope)
+			directive, hasDirective = cc.scopeDirective(bt, sf, tagText, scope)
 		}
 
 		if sf.Name == "_" {
@@ -1031,17 +1056,23 @@ func (cc *compileCtx) buildStructCheck(bt reflect.Type, scope string) check {
 			}
 			continue
 		}
-		if !sf.IsExported() {
+		if !sf.IsExported() && !sf.Anonymous {
 			continue
 		}
 
-		// An embedded struct's fields are promoted, so they are always validated as part
-		// of this struct. A directive on the embedded field applies to it as well.
+		// An embedded struct's fields are promoted, so they are validated as part of this
+		// struct, even when the embedded type is unexported. A directive on an exported
+		// embedded field applies to it as well.
 		if sf.Anonymous && derefStructType(sf.Type) != nil {
+			savedPrefix := cc.prefix
+			if prefix, ok := sf.Tag.Lookup(prefixTagKey); ok {
+				cc.prefix = prefix
+			}
 			embedded := fieldCheck{index: i, check: cc.structCheck(sf.Type, scope), embed: true}
+			cc.prefix = savedPrefix
 			fields = append(fields, embedded)
 		}
-		if !hasDirective || directive == "" {
+		if !sf.IsExported() || !hasDirective || directive == "" {
 			continue
 		}
 
@@ -1049,11 +1080,7 @@ func (cc *compileCtx) buildStructCheck(bt reflect.Type, scope string) check {
 		if chk == nil {
 			continue
 		}
-		target := sf.Name
-		if targetNamer != nil {
-			target = targetNamer(bt, sf)
-		}
-		fields = append(fields, fieldCheck{index: i, target: target, check: chk})
+		fields = append(fields, fieldCheck{index: i, target: fieldTarget(bt, sf, cc.prefix), check: chk})
 	}
 
 	return func(v reflect.Value, vc *validationCtx) bool {
@@ -1112,18 +1139,37 @@ func (cc *compileCtx) compileFieldNode(directive string, ft reflect.Type) check 
 // pattern the structs package uses, which structs doesn't export.
 var scopeRegexp = regexp.MustCompile(`(?:([^;:]*[^\\]):)?([^;]*)`)
 
+// fieldTarget is the name a failure at sf reports. A validate.target tag names it, with
+// {prefix} replaced by the validate.prefix of the field that embeds sf's struct, or removed
+// when there is none, and the first letter lowered: {prefix}Identifier is identifier, or
+// dropletIdentifier under prefix droplet. Otherwise the target namer renders the field, or
+// its Go name is used when no namer is set.
+func fieldTarget(bt reflect.Type, sf reflect.StructField, prefix string) string {
+	if target, ok := sf.Tag.Lookup(targetTagKey); ok && target != "" {
+		target = strings.ReplaceAll(target, "{prefix}", prefix)
+		r, size := utf8.DecodeRuneInString(target)
+		return string(unicode.ToLower(r)) + target[size:]
+	}
+	if targetNamer != nil {
+		return targetNamer(bt, sf)
+	}
+	return sf.Name
+}
+
 // scopeDirective selects the section of a tag that applies to scope. A tag's format is
 // [<scope>:]<directive>[;[<scope>:]<directive>]*, where a section without a scope applies
 // when no section names scope. A section's scope may be an alias registered with
 // structs.ScopeAlias, such as create for resource.CreateAction. The second return is false
-// when no section applies, so the field isn't validated in scope.
-func scopeDirective(tagText, scope string) (string, bool) {
+// when no section applies, so the field isn't validated in scope. Two sections for the same
+// scope, including an alias and the scope it stands for, are a configuration error.
+func (cc *compileCtx) scopeDirective(bt reflect.Type, sf reflect.StructField, tagText, scope string) (string, bool) {
 	if !strings.ContainsAny(tagText, ";:") {
 		return tagText, true
 	}
 
-	wildcard := ""
-	hasWildcard := false
+	directive, found := "", false
+	wildcard, hasWildcard := "", false
+	seen := make(map[string]bool)
 	for _, m := range scopeRegexp.FindAllStringSubmatch(tagText, -1) {
 		if m[0] == "" {
 			continue
@@ -1134,13 +1180,21 @@ func scopeDirective(tagText, scope string) (string, bool) {
 		} else {
 			section = structs.ResolveScope(section)
 		}
-		directive := strings.ReplaceAll(m[2], `\:`, ":")
-		if section == scope {
-			return directive, true
+		if seen[section] {
+			cc.failf("%s.%s has more than one validate section for scope %s", bt, sf.Name, section)
+			continue
 		}
-		if section == anyScope {
-			wildcard, hasWildcard = directive, true
+		seen[section] = true
+		sectionDirective := strings.ReplaceAll(m[2], `\:`, ":")
+		switch section {
+		case scope:
+			directive, found = sectionDirective, true
+		case anyScope:
+			wildcard, hasWildcard = sectionDirective, true
 		}
+	}
+	if found {
+		return directive, true
 	}
 	return wildcard, hasWildcard
 }

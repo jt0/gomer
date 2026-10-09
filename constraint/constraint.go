@@ -91,8 +91,9 @@ type CustomContext interface {
 	// when validating a single value.
 	Enclosing() (any, bool)
 
-	// Report records a failure at target, nested under the field's target. Once a check
-	// calls Report, its failures are the reported ones, whatever it returns. A report is
-	// dropped inside an or-branch or if it exceeds the failure budget.
-	Report(target, expected string)
+	// Report records a failure of value at target, nested under the field's target. value
+	// is nil for a problem no single value shows. Once a check calls Report, its failures
+	// are the reported ones, whatever it returns. A report is dropped inside an or-branch
+	// or if it exceeds the failure budget.
+	Report(target, expected string, value any)
 }

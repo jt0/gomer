@@ -25,7 +25,7 @@ func NewValidator(t reflect.Type, scope string) (*Validator, gomerr.Gomerr) {
 		scope = anyScope
 	}
 
-	key := structKey{t, scope}
+	key := structKey{t: t, scope: scope}
 	if vr, ok := validatorCache.Load(key); ok {
 		return vr.(*Validator), nil
 	}
@@ -47,9 +47,12 @@ func NewValidator(t reflect.Type, scope string) (*Validator, gomerr.Gomerr) {
 	return vr, nil
 }
 
+// structKey identifies a compiled struct check. prefix is the validate.prefix in force
+// where the struct is embedded, since it changes the targets of the struct's fields.
 type structKey struct {
-	t     reflect.Type
-	scope string
+	t      reflect.Type
+	scope  string
+	prefix string
 }
 
 // validatorCache holds struct Validators by type and scope. validatorMu serializes
@@ -211,17 +214,17 @@ func (cx *customCtx) Enclosing() (any, bool) {
 	return nil, false
 }
 
-// Report records a failure at target, nested under the field's target. Like any failure,
-// it is dropped inside an or branch or once the failure budget is spent, but it still
-// counts toward reported.
-func (cx *customCtx) Report(target, expected string) {
+// Report records a failure of value at target, nested under the field's target. Like any
+// failure, it is dropped inside an or branch or once the failure budget is spent, but it
+// still counts toward reported.
+func (cx *customCtx) Report(target, expected string, value any) {
 	cx.reported++
 	vc := cx.vc
 	if !vc.report || vc.done() {
 		return
 	}
 	n := vc.push(target)
-	vc.fail(cx.node, expected, nil)
+	vc.fail(cx.node, expected, value)
 	vc.truncate(n)
 }
 
