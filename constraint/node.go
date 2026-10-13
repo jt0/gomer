@@ -205,7 +205,7 @@ func (n Node) String() string {
 		return ""
 	}
 	var b strings.Builder
-	n.write(&b, true)
+	n.write(&b, true, nil)
 	return b.String()
 }
 
@@ -236,25 +236,26 @@ func (n Node) JsonSchema() map[string]any {
 }
 
 // write appends the node's tag text to b. A top-level and prints as comma-joined terms,
-// the usual tag form; a nested and prints as and(...) so its terms stay grouped.
-func (n Node) write(b *strings.Builder, top bool) {
+// the usual tag form; a nested and prints as and(...) so its terms stay grouped. text, when
+// set, renders each operand in place of its tag text, and is handed the node it belongs to.
+func (n Node) write(b *strings.Builder, top bool, text operandRenderer) {
 	switch n.kind {
 	case kindAnd:
 		if !top {
 			b.WriteString("and(")
 		}
-		writeChildren(b, n.children)
+		writeChildren(b, n.children, text)
 		if !top {
 			b.WriteByte(')')
 		}
 	case kindOr:
 		b.WriteString("or(")
-		writeChildren(b, n.children)
+		writeChildren(b, n.children, text)
 		b.WriteByte(')')
 	case kindNot:
 		b.WriteString("not(")
 		if len(n.children) > 0 {
-			n.children[0].write(b, false)
+			n.children[0].write(b, false, text)
 		}
 		b.WriteByte(')')
 	case kindWhen:
@@ -263,18 +264,18 @@ func (n Node) write(b *strings.Builder, top bool) {
 			if i > 0 {
 				b.WriteByte(',')
 			}
-			b.WriteString(operandString(n.params[i]))
+			b.WriteString(text.render(n, n.params[i]))
 		}
 		if len(n.children) > 0 {
 			b.WriteByte(',')
-			n.children[0].write(b, false)
+			n.children[0].write(b, false, text)
 		}
 		b.WriteByte(')')
 	case kindElements, kindMapKeys, kindMapValues:
 		b.WriteString(n.kind.token())
 		b.WriteByte('(')
 		if len(n.children) > 0 {
-			n.children[0].write(b, false)
+			n.children[0].write(b, false, text)
 		}
 		b.WriteByte(')')
 	case kindStruct, kindUnion:
@@ -291,18 +292,18 @@ func (n Node) write(b *strings.Builder, top bool) {
 			if i > 0 {
 				b.WriteByte(',')
 			}
-			b.WriteString(operandString(op))
+			b.WriteString(text.render(n, op))
 		}
 		b.WriteByte(')')
 	}
 }
 
-func writeChildren(b *strings.Builder, children []Node) {
+func writeChildren(b *strings.Builder, children []Node, text operandRenderer) {
 	for i := range children {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		children[i].write(b, false)
+		children[i].write(b, false, text)
 	}
 }
 
@@ -450,10 +451,16 @@ func (n Node) lengthSchema() map[string]any {
 		if i >= len(n.params) {
 			break
 		}
-		if v, ok := jsonNumberOf(n.params[i]); ok {
-			if bound, iOk := v.(int64); iOk && bound >= 0 {
+		// A bound parsed from a tag reads as an int64, and one from Length or its
+		// siblings is a uint64.
+		v, _ := jsonNumberOf(n.params[i])
+		switch bound := v.(type) {
+		case int64:
+			if bound >= 0 {
 				schema[key] = bound
 			}
+		case uint64:
+			schema[key] = int64(bound)
 		}
 	}
 	return schema
@@ -547,6 +554,16 @@ func jsonNumberOf(op operand) (any, bool) {
 		return v, true
 	}
 	return nil, false
+}
+
+// operandRenderer renders a node's operand. A nil renderer prints its tag text.
+type operandRenderer func(owner Node, op operand) string
+
+func (text operandRenderer) render(owner Node, op operand) string {
+	if text == nil {
+		return operandString(op)
+	}
+	return text(owner, op)
 }
 
 func operandString(op operand) string {

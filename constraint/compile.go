@@ -149,7 +149,7 @@ func (cc *compileCtx) compileLogic(node *Node, t reflect.Type) check {
 			cc.failf("or takes at least one operand")
 			return nil
 		}
-		expected := node.String()
+		expected := cc.describe(node)
 		// or(nil,X) and or(zero,X) mark X optional rather than offer alternatives. When
 		// every branch fails, X runs again with reporting on, so its own failures and
 		// nested targets are reported in place of a single failure for the or.
@@ -192,7 +192,7 @@ func (cc *compileCtx) compileLogic(node *Node, t reflect.Type) check {
 			return nil
 		}
 		child := children[0]
-		expected := node.String()
+		expected := cc.describe(node)
 		return func(v reflect.Value, vc *validationCtx) bool {
 			saved := vc.report
 			vc.report = false
@@ -279,7 +279,7 @@ func (cc *compileCtx) compileContainer(node *Node, t reflect.Type) check {
 	}
 
 	child := cc.compileNode(&node.children[0], elemT)
-	expected := node.String()
+	expected := cc.describe(node)
 
 	if node.kind == kindElements {
 		return func(v reflect.Value, vc *validationCtx) bool {
@@ -358,7 +358,7 @@ func (cc *compileCtx) compileStructNode(node *Node, t reflect.Type) check {
 		return nested
 	}
 
-	expected := "exactly one member"
+	expected := description{text: "exactly one member"}
 	return func(v reflect.Value, vc *validationCtx) bool {
 		sv, ok := deref(v)
 		if !ok {
@@ -408,7 +408,7 @@ func (cc *compileCtx) compileCustom(node *Node, t reflect.Type) check {
 		cc.fail(ge)
 		return nil
 	}
-	expected := custom.Describe()
+	expected := description{text: custom.Describe()}
 
 	return func(v reflect.Value, vc *validationCtx) (satisfied bool) {
 		cv, present := deref(v)
@@ -468,7 +468,7 @@ func (cc *compileCtx) compileLeaf(node *Node, t reflect.Type) check {
 // allocates: operands read into every scalar form they take, the compiled pattern, and
 // the length bounds.
 type leafArtifact struct {
-	expected string
+	expected description
 	params   []scalar
 	re       *regexp.Regexp
 	lenMin   int
@@ -481,7 +481,7 @@ type leafArtifact struct {
 // wrong number or form, so compileLeaf stops before building a check that would read
 // operands the node doesn't have.
 func (cc *compileCtx) leafArtifacts(node *Node) (leafArtifact, bool) {
-	art := leafArtifact{expected: node.String()}
+	art := leafArtifact{expected: cc.describe(node)}
 	art.params = make([]scalar, len(node.params))
 	for i := range node.params {
 		art.params[i] = toScalar(node.params[i].Value)
@@ -1089,10 +1089,10 @@ func (cc *compileCtx) buildStructCheck(bt reflect.Type, scope string) check {
 			return true
 		}
 		if sv.Kind() != reflect.Struct {
-			return vc.failValue(nil, "a struct", sv)
+			return vc.failValue(nil, description{text: "a struct"}, sv)
 		}
-		savedRoot := vc.root
-		vc.root = sv
+		savedRoot, savedRootPath := vc.root, vc.rootPath
+		vc.root, vc.rootPath = sv, len(vc.path)
 		satisfied := true
 		for i := range fields {
 			fc := &fields[i]
@@ -1120,7 +1120,7 @@ func (cc *compileCtx) buildStructCheck(bt reflect.Type, scope string) check {
 				break
 			}
 		}
-		vc.root = savedRoot
+		vc.root, vc.rootPath = savedRoot, savedRootPath
 		return satisfied
 	}
 }
@@ -1138,6 +1138,39 @@ func (cc *compileCtx) compileFieldNode(directive string, ft reflect.Type) check 
 // scopeRegexp matches one "[<scope>:]<directive>" section of a scoped tag. It repeats the
 // pattern the structs package uses, which structs doesn't export.
 var scopeRegexp = regexp.MustCompile(`(?:([^;:]*[^\\]):)?([^;]*)`)
+
+// describe is what a failure of node reports. A node that reads $.Field operands is
+// described when it fails, from the values the fields hold then; see refDescription.
+//
+// A reported node can't mix written values with $.Field operands, as between(0,$.Max)
+// would, since a failure's Sources then has no field to name for the written one. The
+// split form, gte(0),lte($.Max), reports each bound on its own.
+func (cc *compileCtx) describe(node *Node) description {
+	d := description{text: node.String()}
+	if cc.enclosing == nil {
+		return d
+	}
+	var sources map[string]refSource
+	var literal bool
+	node.write(new(strings.Builder), true, func(_ Node, op operand) string {
+		if !op.isRef() {
+			literal = true
+		} else if sf, ok := cc.enclosing.FieldByName(strings.TrimPrefix(op.Ref, "$.")); ok {
+			if sources == nil {
+				sources = make(map[string]refSource)
+			}
+			sources[op.Ref] = refSource{index: sf.Index, name: fieldTarget(cc.enclosing, sf, cc.prefix)}
+		}
+		return ""
+	})
+	if sources != nil && literal {
+		cc.failf("%s mixes written values with $.Field operands; split it into checks that "+
+			"each use one kind, such as gte(0),lte($.Max)", d.text)
+	} else if sources != nil {
+		d.refs = &refDescription{node: *node, sources: sources}
+	}
+	return d
+}
 
 // fieldTarget is the name a failure at sf reports. A validate.target tag names it, with
 // {prefix} replaced by the validate.prefix of the field that embeds sf's struct, or removed
@@ -1213,7 +1246,7 @@ type fieldRef struct {
 // gte($.Min). A bound whose field is absent skips the comparison, so a missing optional
 // field doesn't fail a cross-field rule.
 func (cc *compileCtx) compileLeafRef(node *Node) check {
-	expected := node.String()
+	expected := cc.describe(node)
 
 	switch node.kind {
 	case kindNil, kindNotNil, kindPresent, kindZero, kindNotZero:
@@ -1266,7 +1299,7 @@ func (cc *compileCtx) compileLeafRef(node *Node) check {
 // compileCompareRef compiles a comparison with a $.Field operand. With one operand, the
 // field under test is compared to a bound read from another field. With two, the first
 // operand names the field to compare and the second is the bound.
-func (cc *compileCtx) compileCompareRef(node *Node, expected string) check {
+func (cc *compileCtx) compileCompareRef(node *Node, expected description) check {
 	op := node.name
 	switch len(node.params) {
 	case 1:
@@ -1321,7 +1354,7 @@ func (cc *compileCtx) compileCompareRef(node *Node, expected string) check {
 	}
 }
 
-func (cc *compileCtx) compileBetweenRef(node *Node, expected string) check {
+func (cc *compileCtx) compileBetweenRef(node *Node, expected description) check {
 	if len(node.params) != 2 {
 		cc.failf("between takes a lower and an upper operand, found %d", len(node.params))
 		return nil
@@ -1350,7 +1383,7 @@ func (cc *compileCtx) compileBetweenRef(node *Node, expected string) check {
 	}
 }
 
-func (cc *compileCtx) compileEqualityRef(node *Node, expected string) check {
+func (cc *compileCtx) compileEqualityRef(node *Node, expected description) check {
 	operands := make([]dynamicOperand, len(node.params))
 	for i := range node.params {
 		op, ok := cc.dynamicOperand(node.params[i])

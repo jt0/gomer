@@ -1,7 +1,9 @@
 package constraint
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/jt0/gomer/bind"
@@ -84,6 +86,7 @@ func (vr *Validator) ValidateAt(target string, v any) gomerr.Gomerr {
 	vc.report = true
 	vc.reported = 0
 	vc.root = reflect.Value{}
+	vc.rootPath = 0
 
 	vr.root(rv, vc)
 	ge := vc.errors.GomerrOrNil()
@@ -143,6 +146,8 @@ type validationCtx struct {
 	// validation, or a nested struct while its own fields run. It is invalid when
 	// validating a single value.
 	root reflect.Value
+	// rootPath is the length of path at root, so path[:rootPath] is root's own target.
+	rootPath int
 	// customCtx is the CustomContext a custom check is handed. Keeping it here and
 	// passing a pointer means handing it to a check allocates nothing.
 	customCtx customCtx
@@ -155,22 +160,82 @@ func (vc *validationCtx) done() bool {
 
 // fail records a failure of node against value and returns false, so a check can return
 // its result. Inside an or branch it records nothing.
-func (vc *validationCtx) fail(node *Node, expected string, value any) bool {
+func (vc *validationCtx) fail(node *Node, expected description, value any) bool {
 	if !vc.report || vc.done() {
 		return false
 	}
 	nse := NotSatisfied(value)
 	nse.Target = string(vc.path)
 	nse.Node = *node
-	nse.Expected = expected
+	if expected.refs != nil {
+		nse.Expected, nse.Sources = expected.refs.describe(vc.root, string(vc.path[:vc.rootPath]))
+	} else {
+		nse.Expected = expected.text
+	}
 	vc.errors.Capture(nse)
 	vc.reported++
 	return false
 }
 
+// description is what a failure reports as Expected: fixed text, or refs for a node whose
+// $.Field operands are read when it fails.
+type description struct {
+	text string
+	refs *refDescription
+}
+
+// refDescription describes a failed node that reads $.Field operands. The node prints with
+// each such operand replaced by the value its field holds, so a bound reads like a literal,
+// as in gte(9). A presence check prints the field instead, since it tests the field rather
+// than comparing against its value.
+type refDescription struct {
+	node    Node
+	sources map[string]refSource
+}
+
+// refSource is the field a $.Field operand reads and the target it reports. A target in
+// braces, such as {account.maxDropletSize}, labels a value the caller doesn't set.
+type refSource struct {
+	index []int
+	name  string
+}
+
+// describe renders the failure's Expected text and its Sources: the field each operand was
+// read from, in the order the text prints them. Every operand is a $.Field reference,
+// since compileCtx.describe rejects a node that mixes in written values. parent is the
+// target of the struct holding the fields.
+func (r *refDescription) describe(root reflect.Value, parent string) (string, []string) {
+	var sources []string
+	var b strings.Builder
+	r.node.write(&b, true, func(owner Node, op operand) string {
+		src := r.sources[op.Ref]
+		from := src.target(parent)
+		sources = append(sources, from)
+		switch owner.kind {
+		case kindNil, kindNotNil, kindPresent, kindZero, kindNotZero:
+			return from
+		}
+		fv, err := root.FieldByIndexErr(src.index)
+		var ok bool
+		if fv, ok = deref(fv); err != nil || !ok {
+			return from
+		}
+		return fmt.Sprint(fv.Interface())
+	})
+	return b.String(), sources
+}
+
+func (src refSource) target(parent string) string {
+	switch {
+	case strings.HasPrefix(src.name, "{"), parent == "":
+		return src.name
+	}
+	return parent + "." + src.name
+}
+
 // failValue is fail for a reflect.Value. It boxes the value only when the failure is
 // recorded, so a failing check inside an or branch doesn't allocate.
-func (vc *validationCtx) failValue(node *Node, expected string, cv reflect.Value) bool {
+func (vc *validationCtx) failValue(node *Node, expected description, cv reflect.Value) bool {
 	if !vc.report || vc.done() {
 		return false
 	}
@@ -224,7 +289,7 @@ func (cx *customCtx) Report(target, expected string, value any) {
 		return
 	}
 	n := vc.push(target)
-	vc.fail(cx.node, expected, value)
+	vc.fail(cx.node, description{text: expected}, value)
 	vc.truncate(n)
 }
 

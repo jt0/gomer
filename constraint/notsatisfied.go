@@ -13,6 +13,7 @@ type NotSatisfiedError struct {
 	Target   string
 	Node     Node
 	Expected string
+	Sources  []string // The sources of concrete constraint values in Expected when populated dynamically
 }
 
 func NotSatisfied(toTest any) *NotSatisfiedError {

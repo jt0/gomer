@@ -209,6 +209,12 @@ func TestJsonSchema(t *testing.T) {
 			}},
 			map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string", "minLength": int64(1), "maxLength": int64(8)}},
 		},
+		{
+			// Length takes uint64 bounds, where a tag's bounds parse as int64.
+			"length from constructor",
+			Length(1, 1011),
+			map[string]any{"type": "string", "minLength": int64(1), "maxLength": int64(1011)},
+		},
 	}
 
 	for _, c := range cases {

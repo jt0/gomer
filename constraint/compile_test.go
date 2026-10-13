@@ -538,6 +538,74 @@ func TestNewValidatorTargetNamer(t *testing.T) {
 	}
 }
 
+// A failure's Expected shows a $.Field bound as the value the field holds, and Sources
+// names where each operand came from: the field's full target, or a label in braces for a
+// value the caller doesn't set. A presence check names the field it tests.
+func TestExpectedShowsFieldRefValues(t *testing.T) {
+	SetTargetNamer(CamelCaseTargetNamer)
+	defer SetTargetNamer(nil)
+	type bounds struct {
+		Floor     int `validate.target:"{account.minSize}"`
+		Ceiling   int `validate.target:"{account.maxSize}"`
+		MinLength *int
+		MaxLength *int   `validate:"gte($.MinLength)"`
+		Size      int    `validate:"between($.MinLength,$.Floor),lte($.Ceiling)"`
+		Directory string `validate:"or(notzero,notnil($.Paths))"`
+		Paths     []string
+	}
+	type outer struct {
+		Bounds bounds `validate:"struct"`
+	}
+	vr := mustNewValidator(t, outer{}, "refvalues")
+	ge := vr.Validate(&outer{bounds{Floor: 3, Ceiling: 4, MinLength: new(5), MaxLength: new(1), Size: 9}})
+
+	type failure struct {
+		expected string
+		sources  []string
+	}
+	got := map[string][]failure{}
+	for _, e := range ge.(*gomerr.BatchError).Errors() {
+		nse := e.(*NotSatisfiedError)
+		f := failure{expected: nse.Expected, sources: nse.Sources}
+		got[nse.Target] = append(got[nse.Target], f)
+	}
+	want := map[string][]failure{
+		"bounds.maxLength": {{"gte(5)", []string{"bounds.minLength"}}},
+		"bounds.size": {
+			{"between(5,3)", []string{"bounds.minLength", "{account.minSize}"}},
+			{"lte(4)", []string{"{account.maxSize}"}},
+		},
+		"bounds.directory": {{"or(notzero,notnil(bounds.paths))", []string{"bounds.paths"}}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("failures by target =\n  %v\nwant\n  %v", got, want)
+	}
+}
+
+// A reported check can't mix written values with $.Field operands, because its Sources
+// would have no field to name for the written one.
+func TestMixedLiteralAndFieldRefIsCompileError(t *testing.T) {
+	type mixed struct {
+		Max   int
+		Count int `validate:"between(0,$.Max)"`
+	}
+	if _, ge := NewValidator(reflect.TypeFor[mixed](), ""); ge == nil {
+		t.Error("want a configuration error for between(0,$.Max)")
+	}
+	type mixedOr struct {
+		Min   int
+		Count int `validate:"or(lte(10),gte($.Min))"`
+	}
+	if _, ge := NewValidator(reflect.TypeFor[mixedOr](), ""); ge == nil {
+		t.Error("want a configuration error for or(lte(10),gte($.Min))")
+	}
+	type split struct {
+		Max   int
+		Count int `validate:"gte(0),lte($.Max)"`
+	}
+	mustNewValidator(t, split{}, "")
+}
+
 func TestNewValidatorZeroAllocSuccess(t *testing.T) {
 	vr := mustNewValidator(t, simpleStruct{}, "zeroalloc")
 	v := &simpleStruct{N: 1, S: "ok"}
