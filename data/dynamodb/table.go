@@ -67,12 +67,12 @@ type Configuration struct {
 
 var tables = make(map[string]*table)
 
-type ConsistencyType int
+type ConsistencyType = data.ConsistencyType
 
 const (
-	Indifferent ConsistencyType = iota
-	Required
-	Preferred
+	Indifferent = data.ConsistencyIndifferent
+	Required    = data.ConsistencyRequired
+	Preferred   = data.ConsistencyPreferred
 
 	SymbolChars                    = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`"
 	ValueSeparatorCharDefault      = '#'

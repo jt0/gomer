@@ -5,7 +5,6 @@ import (
 
 	"github.com/jt0/gomer/auth"
 	"github.com/jt0/gomer/data"
-	"github.com/jt0/gomer/data/dynamodb"
 	"github.com/jt0/gomer/gomerr"
 )
 
@@ -30,8 +29,7 @@ type Collection[I Instance[I]] struct {
 	NextToken  *string `out:"+"`
 	MaxResults int
 
-	// TODO: move to `data` package
-	consistencyType dynamodb.ConsistencyType
+	consistencyType data.ConsistencyType
 }
 
 func (c *Collection[I]) registeredType() *registeredType {
@@ -130,11 +128,11 @@ func (c *Collection[I]) SetMaximumPageSize(pageSize int) {
 	c.MaxResults = pageSize
 }
 
-func (c *Collection[I]) ConsistencyType() dynamodb.ConsistencyType {
+func (c *Collection[I]) ConsistencyType() data.ConsistencyType {
 	return c.consistencyType
 }
 
-func (c *Collection[I]) SetConsistencyType(consistencyType dynamodb.ConsistencyType) {
+func (c *Collection[I]) SetConsistencyType(consistencyType data.ConsistencyType) {
 	c.consistencyType = consistencyType
 }
 
